@@ -78,3 +78,16 @@ describe('import plans', () => {
     expect(p.errors[0]).toMatch(/locked/);
   });
 });
+
+import { checkScriptUrl } from '../lib/sheetsSync';
+describe('Apps Script web app URL check', () => {
+  it('accepts deployed web app URLs', () => {
+    expect(checkScriptUrl('https://script.google.com/macros/s/AKfycbzZ5vJMwXn4M4_To26ImbB6bI-tgpMQyWLqCs/exec')).toBeNull();
+    expect(checkScriptUrl('https://script.google.com/a/macros/neas.ph/s/AKfycbzZ5vJMwXn4M4_To26ImbB6bI/exec')).toBeNull();
+  });
+  it('rejects the editor address and other URLs with a clear message', () => {
+    expect(checkScriptUrl('https://script.google.com/u/0/home/projects/1_PJbte6RT9xElvqp4QHct6CpkSKUh2BbN4tDUJ0EbDn5qLLGiKzTo04N/edit')).toMatch(/editor address/);
+    expect(checkScriptUrl('https://example.com/exec')).toMatch(/must look like/);
+    expect(checkScriptUrl('')).toMatch(/Paste/);
+  });
+});
