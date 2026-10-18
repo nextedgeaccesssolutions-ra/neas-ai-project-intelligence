@@ -1,57 +1,45 @@
-# NEAS AI Project Intelligence
+# NEAS AI Project Intelligence · Project Control
 
-This repository is the source-control home for the existing NEAS AI Project Intelligence Vercel deployment.
+Two modes from one codebase:
+- **Cloud mode** (Supabase configured): accounts with administrator approval, Super Admin control panel (`/admin`), project isolation enforced by Row Level Security, client passcode portal (`/client/<PROJECT-ID>`), offline-first sync with conflict handling, server-side Google Sheets mirror. See `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`, `docs/OPERATIONS_MANUAL.md`, `.env.example`.
+- **Device mode** (no Supabase env vars): everything below, stored on the device.
 
-## Existing application architecture
-- Static HTML, CSS, and JavaScript interface
-- Vercel serverless API routes
-- Supabase Auth and PostgreSQL with role-based authorization
-- OpenAI-powered draft BOQ/estimate extraction with human review
-- Legacy Google Sheets integration retained during transition
+Tests: `npm test` (unit), `npm run test:db` (database security on PostgreSQL 16).
 
-## Important source and deployment note
-The production deployment's files were retrieved from Vercel, but the Vercel file-content endpoint truncated several large files in the response. Therefore, this repository is currently a safe project README only, not yet a complete copy of the deployed application. Do not connect this repository to a Vercel project until the full source files are imported and validated.
+---
 
-## Intended source layout
+## Device mode (preview build)
+
+A standalone Next.js 14 + TypeScript app for NextEdge Access Solutions. It has eight linked modules that share one active project:
+
+| Module | Route | What works |
+| --- | --- | --- |
+| Overview | `/` | KPIs, S-curve, Gantt and activity table, with a status-date picker |
+| Estimating & BOQ | `/estimating` | BOQ lines plus separate overhead, contingency, insurance, bonds, warranty, markup and VAT; CSV export |
+| Quotation preview | `/quotation` | Client-facing prices, Draft → Submitted → Approved → Issued; print/PDF |
+| Project management | `/project-management` | Activities, dates and weights, with a check that weights total 100% |
+| Field reports | `/field-reports` | Cumulative % per activity, with notes |
+| Project register | `/projects` | Create, edit and delete projects; portfolio progress |
+| Site evidence | `/site-evidence` | Before/during/after photos, compressed and stored in IndexedDB |
+| Google Sheets setup | `/google-sheets` | Copy/CSV export per tab, JSON backup and restore |
+
+## Data and limits
+
+- Every record is stored **in the browser on this device**: state in localStorage, photos in IndexedDB. It works offline after the first visit, using a service worker.
+- There is **no sign-in, no cloud sync and no role enforcement** yet. Approvals are recorded on the device but not enforced. Don't put confidential pricing on a shared device.
+- Supabase Auth/RLS, the server-side sync queue and Sheets sync belong to later slices, as set out in the Phase 1 plan.
+
+## Calculations (`lib/calc.ts`, tested in `tests/calc.test.ts`)
+
+- **Planned %**: each activity's work is spread evenly over its calendar days (start and finish inclusive), then weighted by activity weight. For example, NEAS-Q-2026-001 is 12.5% planned on 16 Oct 2026.
+- **Actual %**: the latest field report per activity on or before the date.
+- **Price build-up**: direct → +OH% of direct → +contingency% of (direct+OH) → +insurance/bond/warranty % of (direct+OH+cont) → +markup% → ex-VAT → +VAT% (if exclusive). Quotation unit prices carry the markups and are rounded to the centavo, so the printed lines add up exactly to the printed total.
+
+## Run
+
+```bash
+npm install
+npm test        # unit tests
+npm run dev     # http://localhost:3000
+npm run build && npm start
 ```
-src/
-  index.html
-  package.json
-  manifest.json
-  sw.js
-  NEAS_Google_Sheets_Backend.gs
-  PRODUCTION_INTEGRATIONS_SETUP.md
-  api/
-    config.js
-    extract.js
-    me.js
-    sync.js
-    quotes/
-      save.js
-      approve.js
-    _lib/
-      auth.js
-  supabase/
-    migrations/
-      001_neas_production.sql
-```
-
-## Required server-side environment variables
-Configure these in Vercel only after the source is validated:
-- SUPABASE_URL
-- SUPABASE_ANON_KEY
-- SUPABASE_SERVICE_ROLE_KEY (server-side only)
-- OPENAI_API_KEY (server-side only)
-- OPENAI_MODEL (optional)
-
-Never commit secret values. Never expose the service-role key or OpenAI API key in browser code or `NEXT_PUBLIC_*` variables.
-
-## Database safety
-Inspect `src/supabase/migrations/001_neas_production.sql` before applying it. Apply schema changes only to the confirmed Supabase project after reviewing the current schema and backups.
-
-## Safe deployment sequence
-1. Recover/export the complete source files from the original source or deployment artifacts.
-2. Check the API routes, package manifest, SQL migration, and app entry point into this repo.
-3. Test locally and run security checks.
-4. Create a Vercel preview only after matching the repository to the deployed app.
-5. Do not promote to production or assign production domains without a separate review.
