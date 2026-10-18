@@ -31,6 +31,15 @@ const DEBOUNCE_MS = 3000;
 const STOP_CODES = new Set(['server_not_connected', 'needs_reauth', 'not_in_manifest', 'approval_required', 'not_granted', 'capability_disabled', 'capability_removed', 'blocked_by_policy', 'selection_required', 'consent_required', 'tool_error', 'bad_request']);
 
 // ---------- settings ----------
+/** A deployed Apps Script web app URL (consumer or Workspace), never the editor URL. */
+const WEBAPP_RE = /^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+|macros)\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
+export function checkScriptUrl(u: string): string | null {
+  const url = u.trim();
+  if (!url) return 'Paste the Web app URL from Apps Script (Deploy → Manage deployments).';
+  if (/\/home\/projects\/|\/edit(\?|$)/.test(url)) return 'That is the script editor address. Use the Web app URL instead: in Apps Script open Deploy → Manage deployments and copy the URL ending in /exec.';
+  if (!WEBAPP_RE.test(url)) return 'The Web app URL must look like https://script.google.com/macros/s/…/exec.';
+  return null;
+}
 export function loadSettings(): SyncSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -108,17 +117,25 @@ function connectorTransport(mcp: McpLike): Transport {
 }
 
 function appsScriptTransport(url: string, token: string): Transport {
+  const call = async (input: string, init?: RequestInit) => {
+    let res: Response;
+    try {
+      res = await fetch(input, init);
+    } catch {
+      throw { code: 'apps_script', retryable: true, message: 'Could not reach the Apps Script web app. Check you are online, the URL ends in /exec, and the deployment allows access to Anyone.' };
+    }
+    const j = await res.json().catch(() => null);
+    if (j?.error === 'unauthorized') throw { code: 'apps_script', message: 'Apps Script refused the token. Paste the same value as the script property NEAS_TOKEN (run createToken in the script to see it).' };
+    if (!res.ok || !j?.ok) throw { code: 'apps_script', message: j?.error ? `Apps Script: ${j.error}` : `Apps Script returned ${res.status}` };
+    return j;
+  };
   return {
     kind: 'apps-script',
     async write(tabs) {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'mirror', token, tabs }) });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || !j?.ok) throw { code: 'apps_script', message: j?.error ? `Apps Script: ${j.error}` : `Apps Script returned ${res.status}` };
+      await call(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'mirror', token, tabs }) });
     },
     async read() {
-      const res = await fetch(`${url}?action=read&token=${encodeURIComponent(token)}`);
-      const j = await res.json().catch(() => null);
-      if (!res.ok || !j?.ok) throw { code: 'apps_script', message: j?.error ? `Apps Script: ${j.error}` : `Apps Script returned ${res.status}` };
+      const j = await call(`${url}?action=read&token=${encodeURIComponent(token)}`);
       return j.tabs as Record<string, unknown[][]>;
     },
   };
@@ -129,7 +146,14 @@ async function transport(): Promise<Transport | null> {
   if (detected) return detected;
   const mcp = await getMcp();
   if (mcp) detected = connectorTransport(mcp);
-  else if (settings.scriptUrl) detected = appsScriptTransport(settings.scriptUrl, settings.token);
+  else if (settings.scriptUrl) {
+    const bad = checkScriptUrl(settings.scriptUrl);
+    if (bad) {
+      set({ transport: null, state: 'error', message: bad, code: 'apps_script_url' });
+      return null;
+    }
+    detected = appsScriptTransport(settings.scriptUrl, settings.token);
+  }
   set({ transport: detected?.kind ?? null });
   return detected;
 }
@@ -284,9 +308,10 @@ export function currentSettings() {
 export const APPS_SCRIPT_CODE = `/**
  * NEAS Project Control → Google Sheets bridge (for the Vercel / self-hosted version).
  * 1. In the NEAS sheet: Extensions → Apps Script, paste this file, Save.
- * 2. Project Settings → Script properties → add NEAS_TOKEN = a long random secret.
+ * 2. Run createToken once (it creates NEAS_TOKEN and shows it in the log), or add the
+ *    script property NEAS_TOKEN yourself with a long random secret.
  * 3. Deploy → New deployment → Web app → Execute as: Me, Who has access: Anyone.
- * 4. Copy the web app URL and the token into the app's Google Sheets setup page.
+ * 4. Copy the web app URL (ending in /exec) and the token into the app's Google Sheets setup page.
  */
 const SHEET_ID = '${SHEET_ID}';
 
@@ -327,5 +352,22 @@ function doGet(e) {
     tabs[name] = sh ? sh.getDataRange().getDisplayValues() : [];
   });
   return json_({ ok: true, tabs: tabs });
+}
+
+/** Run once: creates NEAS_TOKEN if missing and shows it in the execution log. Keep it private. */
+function createToken() {
+  const props = PropertiesService.getScriptProperties();
+  let t = props.getProperty('NEAS_TOKEN');
+  if (!t) {
+    t = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+    props.setProperty('NEAS_TOKEN', t);
+  }
+  Logger.log('NEAS_TOKEN (paste into the app, keep private): ' + t);
+}
+
+/** Run to confirm the script can open the NEAS sheet. */
+function checkSheetAccess() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  Logger.log('OK: ' + ss.getName() + ' - tabs: ' + ss.getSheets().map(function (s) { return s.getName(); }).join(', '));
 }
 `;
