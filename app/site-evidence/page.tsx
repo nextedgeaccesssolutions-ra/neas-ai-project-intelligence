@@ -10,27 +10,11 @@ import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
 import type { Evidence } from '@/lib/types';
+import PhotoThumb from '@/components/PhotoThumb';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
-function Thumb({ id, alt }: { id: string; alt: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [missing, setMissing] = useState(false);
-  useEffect(() => {
-    let u: string | null = null;
-    getPhoto(id)
-      .then((b) => {
-        if (!b) return setMissing(true);
-        u = URL.createObjectURL(b);
-        setUrl(u);
-      })
-      .catch(() => setMissing(true));
-    return () => { if (u) URL.revokeObjectURL(u); };
-  }, [id]);
-  if (missing) return <div className="empty" style={{ aspectRatio: '4/3', borderRadius: 0 }}>Photo not on this device</div>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return url ? <img src={url} alt={alt} /> : <div style={{ aspectRatio: '4/3', background: '#e6ebef' }} />;
-}
+const Thumb = ({ id, alt }: { id: string; alt: string }) => <PhotoThumb id={id} alt={alt} />;
 
 export default function SiteEvidence() {
   const { ready, project, addEvidence, deleteEvidence, state } = useStore();

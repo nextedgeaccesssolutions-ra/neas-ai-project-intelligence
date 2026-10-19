@@ -27,7 +27,19 @@ export default function LoginPage() {
     }
     const r = await fetch('/api/auth/after-login', { method: 'POST' }).then((x) => x.json()).catch(() => null);
     const p = r?.profile;
-    window.location.href = p?.status === 'active' && p?.email_verified_at ? (p.global_role === 'super_admin' ? '/admin' : '/') : '/account';
+    if (p?.status === 'active' && p?.email_verified_at) {
+      window.location.href = p.global_role === 'super_admin' ? '/admin' : '/';
+      return;
+    }
+    // Only accounts approved by the administrator may sign in to the workspace.
+    await sb.auth.signOut().catch(() => undefined);
+    setBusy(false);
+    setError(
+      p?.status === 'pending' ? 'Your account is waiting for approval by the NEAS administrator. You will receive an e-mail when it is approved.'
+        : p?.status === 'suspended' ? 'This account is suspended. Contact the NEAS administrator.'
+        : p?.status === 'rejected' ? 'This registration was not approved. Contact the NEAS administrator.'
+        : 'E-mail or password is incorrect, or the account is not active yet.',
+    );
   };
 
   const forgot = async () => {
@@ -47,6 +59,7 @@ export default function LoginPage() {
       </form>
       <div className="auth-links">
         <button className="linklike" onClick={forgot}>Forgot password?</button>
+        <Link className="linklike" href="/activate">Have a one-time code?</Link>
         <Link href="/register">Request an account</Link>
       </div>
     </AuthCard>

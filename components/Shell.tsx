@@ -6,10 +6,10 @@ import { useStore } from '@/lib/store';
 import DialogHost, { IS_ARTIFACT } from '@/components/Dialogs';
 import { useSyncStatus } from '@/lib/sheetsSync';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, cloudSignOut, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { canManage, canView, cloudSignOut, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
-const BARE = [/^\/login/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/account/];
+const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/account/];
 const MANAGER_ONLY = new Set(['/estimating', '/quotation']);
 
 function CloudPill() {
@@ -123,7 +123,9 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
     return <div className="auth-wrap"><div className="auth-card note">{cloud.auth === 'checking' ? 'Checking your access…' : 'Redirecting to sign in…'}</div></div>;
   }
   const isAdmin = CLOUD && cloud.profile?.global_role === 'super_admin';
-  const nav = NAV.filter((n) => !CLOUD || !MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId));
+  const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile)));
+  const blocked = CLOUD && !pathname.startsWith('/admin') && !canView(viewOfPath(pathname), cloud.profile);
+  const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
   return (
     <div className="shell">
@@ -143,7 +145,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
               {n.label}
             </Link>
           ))}
-          {CLOUD && (
+          {CLOUD && canView('offline_queue', cloud.profile) && (
             <Link href="/offline-queue" aria-current={pathname.startsWith('/offline-queue') ? 'page' : undefined}>
               <Icon name="list" />
               Offline queue
@@ -202,7 +204,15 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             {CLOUD ? <CloudPill /> : <SyncPill />}
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main className="content">
+          {blocked ? (
+            <section className="card">
+              <h2 style={{ marginTop: 0 }}>Not available for your account</h2>
+              <p className="note">Your administrator has not given you access to this module. Ask them in Control panel → User directory if you need it.</p>
+              <div className="form-actions">{allowedLinks.map(([k, label, href]) => <Link key={k} className="btn btn-sm" href={href}>{label}</Link>)}</div>
+            </section>
+          ) : children}
+        </main>
         <DialogHost />
       </div>
     </div>

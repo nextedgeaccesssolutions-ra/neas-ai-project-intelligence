@@ -24,6 +24,8 @@ export default function SetupPassword() {
     if (pw !== pw2) return setError('The two passwords do not match.');
     const { error: err } = await supabaseBrowser()!.auth.updateUser({ password: pw });
     if (err) return setError('Could not save the password. Request a new link and try again.');
+    // record "password set" for the administrator's directory (never the password itself)
+    await supabaseBrowser()!.rpc('mark_password_set').then(() => undefined, () => undefined);
     await fetch('/api/auth/after-login', { method: 'POST' }).catch(() => undefined);
     setDone(true);
   };

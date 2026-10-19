@@ -13,10 +13,11 @@ import { useQueryParam } from '@/lib/useQuery';
 import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
 import { askConfirm } from '@/components/Dialogs';
+import WalkthroughReport from '@/components/WalkthroughReport';
 
 export default function FieldReports() {
-  const { ready, project, addReport, deleteReport, state, replaceAll } = useStore();
-  const { pid, activities, reports } = useProjectData();
+  const { ready, project, addReport, deleteReport, addEvidence, state, replaceAll } = useStore();
+  const { pid, activities, reports, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
   const review = async (id: string, patch: Record<string, unknown>, label: string) => {
@@ -75,7 +76,21 @@ export default function FieldReports() {
       </div>
       <ProjectBar />
 
-      <section className="card">
+      <WalkthroughReport
+        pid={pid}
+        projectName={project.name}
+        activities={activities}
+        reports={reports}
+        evidence={evidence}
+        addEvidence={addEvidence}
+        onPick={(id) => {
+          setActivityId(id);
+          setFilter(id);
+          document.getElementById('new-report')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+      />
+
+      <section className="card" id="new-report">
         <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
         {activities.length === 0 ? (
           <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>

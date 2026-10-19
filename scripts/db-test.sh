@@ -20,6 +20,7 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 echo "re-applying migrations (must be idempotent)"
 for f in "$ROOT"/supabase/migrations/*.sql; do "${PSQL[@]}" -f "$f"; done
-psql -h "$DIR" -p "$PORT" -U postgres -d postgres -X -f "$ROOT/supabase/tests/10_acceptance.sql" | tee "$DIR/out.txt"
+psql -h "$DIR" -p "$PORT" -U postgres -d postgres -X -f "$ROOT/supabase/tests/10_acceptance.sql" 2>&1 | tee "$DIR/out.txt"
 grep -qE '^ +[0-9]+ \| +0$' "$DIR/out.txt" || { echo "DATABASE TESTS FAILED"; exit 1; }
+grep -q "ERROR:" "$DIR/out.txt" && { echo "DATABASE TESTS FAILED (a test statement errored)"; grep "ERROR:" "$DIR/out.txt"; exit 1; }
 echo "DATABASE TESTS PASSED"

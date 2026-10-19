@@ -11,7 +11,7 @@ import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
 export interface Membership { project_id: string; role: 'project_manager' | 'employee'; can_approve_reports: boolean }
-export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null }
+export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null }
 
 export interface CloudStatus {
   auth: AuthState;
@@ -39,6 +39,22 @@ export const cloudStatusNow = () => status;
 export const isSuperAdmin = () => status.profile?.global_role === 'super_admin';
 export const roleIn = (projectId: string) => (isSuperAdmin() ? 'super_admin' : status.memberships.find((m) => m.project_id === projectId)?.role ?? null);
 export const canManage = (projectId: string) => isSuperAdmin() || roleIn(projectId) === 'project_manager';
+
+/** Modules the administrator can switch on or off per user (enforced again in the database). */
+export const VIEWS = [
+  ['overview', 'Overview', '/'], ['estimating', 'Estimating & BOQ', '/estimating'], ['quotation', 'Quotation preview', '/quotation'],
+  ['project_management', 'Project management', '/project-management'], ['field_reports', 'Field reports', '/field-reports'],
+  ['projects', 'Project register', '/projects'], ['site_evidence', 'Site evidence', '/site-evidence'],
+  ['google_sheets', 'Google Sheets setup', '/google-sheets'], ['offline_queue', 'Offline queue', '/offline-queue'],
+] as const;
+export type ViewKey = (typeof VIEWS)[number][0];
+export const viewOfPath = (path: string): ViewKey | null => {
+  const hit = VIEWS.filter(([, , href]) => (href === '/' ? path === '/' : path.startsWith(href)));
+  return hit.length ? hit[hit.length - 1][0] : null;
+};
+/** null allowed_views = every module. Super Admins always see everything. */
+export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
+  !view || !profile || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
 // ---------------------------------------------------------------------------
 type Versions = Record<string, { id: string; version: number }>;
@@ -234,7 +250,7 @@ async function loadIdentity(): Promise<void> {
   const sb = supabaseBrowser()!;
   const { data: u } = await sb.auth.getUser();
   if (!u.user) return set({ auth: 'signed_out', profile: null, memberships: [] });
-  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at').eq('id', u.user.id).single();
+  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at, allowed_views').eq('id', u.user.id).single();
   const { data: memberships } = await sb.from('project_memberships').select('project_id, role, can_approve_reports').eq('user_id', u.user.id);
   const active = profile?.status === 'active' && !!profile.email_verified_at;
   await setMeta('identity', { profile, memberships, verified_at: Date.now() });

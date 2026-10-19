@@ -17,13 +17,13 @@ It can share the same Supabase project safely:
 Steps (take a backup first: Supabase → Database → Backups, or `pg_dump`):
 1. Push branch `feature/platform-upgrade`. Vercel builds a **preview** of it automatically; production
    (`main`) is untouched. `vercel.json` selects the Next.js build for this branch only.
-2. Supabase SQL editor: run migrations `20261018000001` … `20261018000005` in order, then
+2. Supabase SQL editor: run migrations `20261018000001` … `20261018000008` in order, then
    `select neas.import_legacy_public();` and check the counts it returns.
 3. Supabase → Settings → API → *Exposed schemas*: add `neas`.
 4. Supabase → Auth → URL configuration: add `<preview URL>/auth/callback` to redirect URLs.
 5. Vercel → Settings → Environment Variables, scope **Preview** (branch `feature/platform-upgrade`):
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the publishable key),
-   `SUPABASE_SERVICE_ROLE_KEY` (secret), `CLIENT_PORTAL_SECRET`, `CRON_SECRET`, and for Sheets
+   `SUPABASE_SERVICE_ROLE_KEY` (secret), `CLIENT_PORTAL_SECRET` (optional; derived from the service-role key when unset), `CRON_SECRET`, and for Sheets
    `SHEETS_WEBHOOK_URL` / `SHEETS_WEBHOOK_SECRET`. Redeploy the preview.
    Without the Supabase variables the preview runs in device mode (data on each device).
 6. Run the acceptance checklist (section 3) on the preview with two real accounts.
@@ -40,7 +40,7 @@ Cron note: Vercel Hobby allows one cron run per day, so `vercel.json` mirrors to
 2. Apply migrations in order from `supabase/migrations/` (Supabase SQL editor or `supabase db push`). They only create objects in the new `neas` schema and the `neas-project-files` bucket; they never drop or rewrite existing tables.
 3. Supabase → Settings → API → *Exposed schemas*: add `neas`.
 4. Supabase → Auth: enable e-mail confirmations; set Site URL to the preview URL; add `<URL>/auth/callback` to redirect URLs; turn on leaked-password protection; consider MFA for admins.
-5. Bootstrap the first Super Admin (after they register and verify their e-mail):
+5. First Super Admin: automatic. When info.nextedgeaccesssolutions@gmail.com registers and verifies the e-mail while no Super Admin exists, it becomes Super Admin (setting `bootstrap_admin_email` in `neas.app_settings`). Everyone after that needs that admin's approval. Manual fallback:
    ```sql
    update neas.profiles set global_role = 'super_admin', status = 'active', approved_at = now()
    where lower(email) = 'info.nextedgeaccesssolutions@gmail.com';
@@ -53,7 +53,7 @@ Cron note: Vercel Hobby allows one cron run per day, so `vercel.json` mirrors to
 ```bash
 npm ci
 npm test                 # unit tests (calculations, sync engine, validation, client view)
-npm run test:db          # 80 database security tests on a throwaway PostgreSQL 16
+npm run test:db          # 125 database security tests on a throwaway PostgreSQL 16
 npx tsc --noEmit
 npm run build
 grep -r "SUPABASE_SERVICE_ROLE_KEY\|$SUPABASE_SERVICE_ROLE_KEY" .next/static && echo "SECRET LEAK" || echo "bundle clean"

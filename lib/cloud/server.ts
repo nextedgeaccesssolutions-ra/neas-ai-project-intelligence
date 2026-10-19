@@ -7,14 +7,17 @@ import { DB_SCHEMA, SUPABASE_ANON_KEY, SUPABASE_URL } from './env';
 
 /** Server secrets. Never imported by client components ('server-only' enforces this at build time). */
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const CLIENT_PORTAL_SECRET = process.env.CLIENT_PORTAL_SECRET ?? '';
+/** Key for hashing client IPs. Uses CLIENT_PORTAL_SECRET when set; otherwise a key derived (HMAC,
+ *  domain-separated) from the server-only service-role key, so no extra secret has to be typed. */
+const CLIENT_PORTAL_SECRET =
+  process.env.CLIENT_PORTAL_SECRET ||
+  (SERVICE_ROLE_KEY ? createHmac('sha256', SERVICE_ROLE_KEY).update('neas:client-portal:v1').digest('hex') : '');
 
 export function requireEnv() {
   const missing = [
     ['NEXT_PUBLIC_SUPABASE_URL', SUPABASE_URL],
     ['NEXT_PUBLIC_SUPABASE_ANON_KEY', SUPABASE_ANON_KEY],
     ['SUPABASE_SERVICE_ROLE_KEY', SERVICE_ROLE_KEY],
-    ['CLIENT_PORTAL_SECRET', CLIENT_PORTAL_SECRET],
   ].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) throw new HttpError(503, `Server is not configured: ${missing.join(', ')}`);
 }

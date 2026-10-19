@@ -275,6 +275,9 @@ select test.check('audit: approvals, suspensions and client logins are logged',
 select test.check('audit: passcode hashes never reach the audit log', (select count(*) = 0 from neas.audit_logs where details::text like '%$2a$%' or details::text ilike '%passcode_hash%'));
 
 \ir 20_legacy_import.sql
+\ir 30_user_admin.sql
+\ir 40_access_control.sql
+\ir 50_one_time_codes.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

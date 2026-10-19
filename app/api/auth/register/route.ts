@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { appUrl, assertSameOrigin, handle, HttpError, readJson } from '@/lib/cloud/server';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '@/lib/cloud/env';
 import { checkEmail, checkName } from '@/lib/cloud/validate';
+import { notifyAdmin } from '@/lib/cloud/notify';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,5 +24,13 @@ export const POST = handle(async (req) => {
     options: { shouldCreateUser: true, data: { full_name: n.name }, emailRedirectTo: `${appUrl(req)}/auth/callback?next=/account` },
   });
   if (error && /rate|too many/i.test(error.message)) throw new HttpError(429, 'Too many requests. Try again in a few minutes.');
+  if (!error) {
+    // tell the administrator; deduplicated per address for an hour so the form cannot spam the inbox
+    await notifyAdmin(
+      'NEAS: new account request waiting for approval',
+      `${n.name} <${e.email}> asked for an account on NEAS Project Control.\n\nThey must verify their e-mail first. Then review the request in Control panel → Pending approvals:\n${appUrl(req)}/admin#approvals\n\nOnly approve people you know work with NEAS.`,
+      e.email,
+    );
+  }
   return Response.json({ ok: true, message: 'Check your inbox for a verification link. After you verify, an administrator will review your request.' });
 });

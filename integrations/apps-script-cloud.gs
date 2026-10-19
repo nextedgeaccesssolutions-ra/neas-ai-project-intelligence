@@ -9,6 +9,8 @@
  *    server's SHEETS_WEBHOOK_SECRET (32+ random characters).
  * 3. Deploy → New deployment → Web app → Execute as: Me · Who has access: Anyone.
  * 4. Put the web app URL in the server's SHEETS_WEBHOOK_URL.
+ * 5. Optional: script property ADMIN_EMAIL (default info.nextedgeaccesssolutions@gmail.com) receives
+ *    "new registration waiting for approval" notices. The first run asks you to allow sending mail.
  * The sheet is a reporting copy. Supabase is the system of record.
  */
 const SHEET_ID = '19e14iR4X8ZLDARO2auYe0Cm4jPoZGUlGvC9O2f9EIAQ';
@@ -43,6 +45,13 @@ function doPost(e) {
   if (body.key && cache.get('done:' + body.key)) return json_({ ok: true, duplicate: true });
 
   var data = JSON.parse(body.payload);
+  if (data.notify) {
+    // administrator notice: recipient is fixed here, never taken from the request
+    var to = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || 'info.nextedgeaccesssolutions@gmail.com';
+    MailApp.sendEmail(to, String(data.notify.subject || 'NEAS notice').slice(0, 150), String(data.notify.text || '').slice(0, 2000));
+    if (body.key) cache.put('done:' + body.key, '1', 3600);
+    return json_({ ok: true, notified: true });
+  }
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {

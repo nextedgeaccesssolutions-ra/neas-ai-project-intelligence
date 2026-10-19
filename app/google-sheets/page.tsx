@@ -5,12 +5,11 @@ import DataIO from '@/components/DataIO';
 import { useStore } from '@/lib/store';
 import { askConfirm, IS_ARTIFACT, notify } from '@/components/Dialogs';
 import { CLOUD } from '@/lib/cloud/env';
-import { APPS_SCRIPT_CODE, currentSettings, pullFromSheet, saveSettings, syncNow, useSyncStatus, type SyncSettings } from '@/lib/sheetsSync';
+import { APPS_SCRIPT_CODE, checkScriptUrl, currentSettings, pullFromSheet, saveSettings, syncNow, useSyncStatus, type SyncSettings } from '@/lib/sheetsSync';
 import { SHEET_URL, TAB_NAMES, TABS, gridToRows, rowsToState, stateToRows, type Column, type Row, type TabName } from '@/lib/sheetSchema';
 import { readWorkbook, saveFile, type ExportDoc } from '@/lib/fileio';
 import type { AppState } from '@/lib/types';
 
-const SCRIPT_URL = 'https://script.google.com/home/projects/1_PJbte6RT9xElvqp4QHct6CpkSKUh2BbN4tDUJ0EbDn5qLLGiKzTo04N/edit';
 
 const STATE_COPY: Record<string, { label: string; tone: string }> = {
   checking: { label: 'Checking connection…', tone: '' },
@@ -206,9 +205,9 @@ export default function SheetsSetup() {
         <section className="card">
           <div className="card-head"><h2>Apps Script connection</h2><span className="note">For the version hosted outside Claude</span></div>
           <ol className="note" style={{ marginTop: 0, paddingLeft: 18 }}>
-            <li>Open the sheet → Extensions → Apps Script (or <a href={SCRIPT_URL} target="_blank" rel="noreferrer">your NEAS script</a>) and paste the code below.</li>
-            <li>Project Settings → Script properties → add <code>NEAS_TOKEN</code> with a long random value.</li>
-            <li>Deploy → New deployment → Web app → Execute as <b>Me</b>, access <b>Anyone</b>. Paste the URL and token here.</li>
+            <li>Create an Apps Script project (<a href="https://script.google.com/create" target="_blank" rel="noreferrer">script.google.com</a>) and paste the code below.</li>
+            <li>Run <code>createToken</code> once; copy the token it shows in the execution log.</li>
+            <li>Deploy → New deployment → Web app → Execute as <b>Me</b>, access <b>Anyone</b>. Copy the <b>Web app URL ending in /exec</b> (not the editor address) and paste it and the token here.</li>
           </ol>
           <div className="form-grid">
             <label className="field" style={{ gridColumn: 'span 2' }}>Web app URL
@@ -219,7 +218,13 @@ export default function SheetsSetup() {
             </label>
           </div>
           <div className="form-actions">
-            <button className="btn btn-primary" onClick={() => { saveCfg(cfg); notify('Connection saved. Press Sync now to test it.'); }}>Save connection</button>
+            <button className="btn btn-primary" onClick={() => {
+              const bad = checkScriptUrl(cfg.scriptUrl);
+              if (bad) return notify(bad);
+              if (!cfg.token.trim()) return notify('Paste the token too (run createToken in the Apps Script to see it).');
+              saveCfg({ ...cfg, token: cfg.token.trim() });
+              notify('Connection saved. Press Sync now to test it.');
+            }}>Save connection</button>
             <button className="btn" onClick={copyScript}>Copy Apps Script code</button>
           </div>
           <details style={{ marginTop: 12 }}>

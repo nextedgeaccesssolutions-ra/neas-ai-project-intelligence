@@ -18,8 +18,15 @@ create table if not exists auth.users (
 create or replace function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
+-- auth.jwt(): claims from request.jwt.claims; tests that do not set an "iat" get a freshly issued token.
+create or replace function auth.jwt() returns jsonb language sql stable as $$
+  select jsonb_build_object('iat', floor(extract(epoch from clock_timestamp()))::bigint + 1)
+         || coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
+$$;
+create table if not exists auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid not null, created_at timestamptz not null default now());
 grant usage on schema auth to anon, authenticated, service_role;
 grant execute on function auth.uid() to anon, authenticated, service_role;
+grant execute on function auth.jwt() to anon, authenticated, service_role;
 
 create schema if not exists storage;
 create table if not exists storage.buckets (id text primary key, name text, public boolean default false);

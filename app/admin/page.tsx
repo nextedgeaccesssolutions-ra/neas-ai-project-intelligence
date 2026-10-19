@@ -9,17 +9,19 @@ import { askConfirm, notify } from '@/components/Dialogs';
 import { projectProgress, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPHP, fmtPct } from '@/lib/format';
 import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
+import DataIO from '@/components/DataIO';
+import { VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'audit' | 'security';
 const TABS: [Tab, string][] = [
-  ['overview', 'Overview'], ['projects', 'Projects'], ['users', 'Active users'], ['approvals', 'Pending approvals'], ['invitations', 'Invitations'],
+  ['overview', 'Overview'], ['projects', 'Projects'], ['users', 'User directory'], ['approvals', 'Pending approvals'], ['invitations', 'Invitations'],
   ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; password_reset_requested_at: string | null; last_login_at: string | null; created_at: string; status_reason: string | null }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
-interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null }
+interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
 interface SyncOp { op_id: string; user_id: string; entity: string; status: string; result: { error?: string }; received_at: string; project_id: string }
 interface IntLog { id: number; at: string; status: string; rows_written: number; error: string | null }
@@ -32,6 +34,15 @@ const api = async (url: string, body: unknown) => {
   if (!r.ok) throw new Error(j.error ?? 'Request failed');
   return j as { message?: string };
 };
+const EVENT: Record<string, string> = {
+  'auth:login': 'Signed in', 'auth:login_blocked': 'Sign-in refused (not approved)', 'account:views_changed': 'Module access changed', 'account:setup_code_issued': 'One-time code issued', 'account:setup_code_used': 'Activated with one-time code', 'account:setup_code_failed': 'Wrong or expired one-time code', 'account:owner_bootstrapped': 'Owner account made Super Admin', 'account:password_set': 'Password set', 'account:password_reset_sent': 'Password reset link sent',
+  'account:sessions_revoked': 'Signed out everywhere', 'account:registration_requested': 'Registered (waiting for approval)',
+  'account:invited_user_created': 'Joined from invitation', 'insert:project_memberships': 'Project access granted',
+  'update:project_memberships': 'Project role changed', 'delete:project_memberships': 'Project access removed',
+  'update:profiles': 'Account updated (status, role or approval)', 'insert:profiles': 'Account created',
+  'client:login': 'Client portal sign-in', 'client:login_failed': 'Client portal: wrong passcode', 'client:login_throttled': 'Client portal locked after failed tries', 'system:legacy_import': 'Imported from the old app',
+};
+const eventLabel = (a: string) => EVENT[a] ?? a.replace(':', ' · ').replace(/_/g, ' ');
 const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—');
 const Pill = ({ s }: { s: string }) => {
   const tone = ['active', 'approved', 'ok', 'applied'].includes(s) ? 'pill-ok' : ['pending', 'draft', 'conflict', 'skipped'].includes(s) ? 'pill-warn' : ['suspended', 'rejected', 'error', 'archived'].includes(s) ? 'pill-bad' : '';
@@ -59,7 +70,7 @@ export default function AdminPage() {
         sb().from('profiles').select('*').order('created_at', { ascending: false }),
         sb().from('projects').select('*').order('code'),
         sb().from('project_memberships').select('project_id, user_id, role, can_approve_reports'),
-        sb().from('client_access_credentials').select('id, project_id, label, created_at, expires_at, revoked_at, last_used_at').order('created_at', { ascending: false }),
+        sb().from('client_access_credentials').select('id, project_id, label, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
         sb().from('audit_logs').select('*').order('at', { ascending: false }).limit(300),
         sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id').neq('status', 'applied').order('received_at', { ascending: false }).limit(200),
         sb().from('integration_sync_log').select('*').order('at', { ascending: false }).limit(50),
@@ -111,7 +122,7 @@ export default function AdminPage() {
         <>
           {tab === 'overview' && <Overview d={data} go={go} />}
           {tab === 'projects' && <Projects d={data} reload={load} />}
-          {tab === 'users' && <Users d={data} reload={load} selfId={cloud.profile!.id} />}
+          {tab === 'users' && <Users d={data} reload={load} selfId={cloud.profile!.id} go={go} />}
           {tab === 'approvals' && <Approvals d={data} reload={load} />}
           {tab === 'invitations' && <Invitations d={data} reload={load} />}
           {tab === 'client' && <ClientAccess d={data} reload={load} />}
@@ -355,57 +366,277 @@ function AddMember({ p, d, onAdd }: { p: Project; d: D; onAdd: (p: Project, user
   );
 }
 
-function Users({ d, reload, selfId }: { d: D; reload: () => Promise<void>; selfId: string }) {
+// ---------- User directory ----------
+const approvalOf = (u: Profile) => (u.status === 'pending' ? 'Waiting for approval' : u.status === 'rejected' ? 'Rejected' : u.approved_at ? `Approved ${fmtDate(u.approved_at.slice(0, 10))}` : 'Approved');
+const passwordOf = (u: Profile) => (u.password_set_at ? `Set ${fmtDate(u.password_set_at.slice(0, 10))}` : u.last_login_at ? 'Set (before tracking)' : 'Not set yet');
+const resetOf = (u: Profile) => {
+  if (!u.password_reset_requested_at) return '—';
+  if (u.password_set_at && u.password_set_at > u.password_reset_requested_at) return `Completed ${fmtDate(u.password_set_at.slice(0, 10))}`;
+  return `Link sent ${when(u.password_reset_requested_at)} · not used yet`;
+};
+const roleLabel = (r: string) => (r === 'project_manager' ? 'Project manager' : 'Employee');
+
+function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; selfId: string; go: (t: Tab) => void }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const projectsOf = (id: string) => d.members.filter((m) => m.user_id === id).map((m) => d.projects.find((p) => p.id === m.project_id)?.code).filter(Boolean).join(', ');
-  const act = async (u: Profile, action: string, confirmText: string, danger = true) => {
+  const [role, setRole] = useState('');
+  const [project, setProject] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const code = (id: string) => d.projects.find((p) => p.id === id)?.code ?? '?';
+  const membersOf = (id: string) => d.members.filter((m) => m.user_id === id);
+  const projectsText = (id: string) => membersOf(id).map((m) => `${code(m.project_id)} (${m.role === 'project_manager' ? 'PM' : 'Employee'})`).join(', ');
+
+  const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
     try {
-      await api(`/api/admin/users/${u.id}`, { action });
-      notify('Done.');
+      await api(`/api/admin/users/${u.id}`, { action, reason });
+      notify('Done. Recorded in the audit log.');
       await reload();
     } catch (e) {
       notify((e as Error).message);
     }
   };
-  const rows = d.profiles.filter((u) => u.status !== 'pending' && (!status || u.status === status) && (!q || `${u.full_name} ${u.email}`.toLowerCase().includes(q.toLowerCase())));
+  const review = async (u: Profile, approve: boolean) => {
+    if (!(await askConfirm(approve ? `Approve ${u.email}? They get a one-time link to set their own password.` : `Reject ${u.email}?`, { danger: !approve }))) return;
+    try {
+      await api(`/api/admin/registrations/${u.id}`, { action: approve ? 'approve' : 'reject', reason: approve ? null : 'Not authorized by NEAS' });
+      notify(approve ? 'Approved. Password setup link sent.' : 'Rejected.');
+      await reload();
+    } catch (e) {
+      notify((e as Error).message);
+    }
+  };
+
+  const ql = q.trim().toLowerCase();
+  const rows = d.profiles.filter((u) =>
+    (!status || u.status === status) &&
+    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
+    (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
+    (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
+  );
+
+  const exportDoc = () => ({
+    filename: `neas-user-directory-${new Date().toISOString().slice(0, 10)}`,
+    title: 'NEAS user directory',
+    meta: [['Users', String(rows.length)], ['Exported', new Date().toLocaleString()]] as [string, string][],
+    tables: [{
+      title: 'Users',
+      columns: ['Full name', 'E-mail', 'E-mail verified', 'Account status', 'Approval', 'Global role', 'Projects (role)', 'Last sign-in', 'Created', 'Password', 'Password reset', 'Modules'].map((label) => ({ key: label, label })),
+      rows: rows.map((u) => ({
+        'Full name': u.full_name, 'E-mail': u.email, 'E-mail verified': u.email_verified_at ? 'Yes' : 'No', 'Account status': u.status, Approval: approvalOf(u),
+        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
+        Created: fmtDate(u.created_at.slice(0, 10)), Password: passwordOf(u), 'Password reset': resetOf(u), Modules: u.global_role === 'super_admin' || !u.allowed_views ? 'All' : u.allowed_views.join(', '),
+      })),
+    }],
+  });
+
   return (
     <section className="card">
       <div className="card-head">
-        <h2>Users ({rows.length})</h2>
+        <h2>User directory ({rows.length} of {d.profiles.length})</h2>
         <div className="form-actions" style={{ marginTop: 0 }}>
-          <select className="input" style={{ maxWidth: 160 }} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status filter"><option value="">All statuses</option><option>active</option><option>suspended</option><option>rejected</option></select>
-          <input className="input" style={{ maxWidth: 240 }} placeholder="Search name or e-mail" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" />
+          <DataIO doc={exportDoc} label="users" />
+          <button className="btn btn-sm btn-primary" onClick={() => go('invitations')}>+ Create invitation</button>
         </div>
+      </div>
+      <div className="form-grid" style={{ marginBottom: 12 }}>
+        <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
+        <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></label>
+        <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
+        <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
       </div>
       <div className="table-wrap">
         <table className="tbl">
-          <thead><tr><th>Name / e-mail</th><th>Status</th><th>Role</th><th>Projects</th><th>Last sign-in</th><th>Created</th><th>Password</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name / e-mail</th><th>Status</th><th>Approval</th><th>Role</th><th>Projects</th><th>Last sign-in</th><th>Created</th><th>Password</th><th>Reset</th><th /></tr></thead>
           <tbody>
             {rows.map((u) => (
-              <tr key={u.id}>
-                <td><b>{u.full_name || '—'}</b><div className="note">{u.email}{u.email_verified_at ? ' · verified' : ' · not verified'}</div></td>
-                <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
-                <td>{u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</td>
-                <td className="note">{projectsOf(u.id) || '—'}</td>
-                <td className="note">{when(u.last_login_at)}</td>
-                <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
-                <td className="note">{u.password_reset_requested_at ? `Link sent ${when(u.password_reset_requested_at)}` : u.last_login_at ? 'Set' : 'Not set'}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  {u.id !== selfId && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They lose access to all projects immediately.`)}>Suspend</button>}{' '}
-                  {u.status === 'suspended' && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}?`, false)}>Reactivate</button>}{' '}
-                  {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a password reset link? You will not see their password.`, false)}>Reset password</button>}{' '}
-                  {u.id !== selfId && u.status === 'active' && (u.global_role === 'super_admin'
-                    ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin rights from ${u.email}?`)}>Remove admin</button>
-                    : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Give ${u.email} full Super Admin rights?`)}>Make admin</button>)}
-                </td>
-              </tr>
+              <Fragment key={u.id}>
+                <tr>
+                  <td><b>{u.full_name || '—'}</b><div className="note">{u.email} · {u.email_verified_at ? 'verified' : 'not verified'}</div></td>
+                  <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
+                  <td className="note">{approvalOf(u)}</td>
+                  <td>{u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</td>
+                  <td className="note">{projectsText(u.id) || '—'}</td>
+                  <td className="note">{when(u.last_login_at)}</td>
+                  <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
+                  <td className="note">{passwordOf(u)}</td>
+                  <td className="note">{resetOf(u)}</td>
+                  <td><button className="btn btn-sm" onClick={() => setOpen(open === u.id ? null : u.id)} aria-expanded={open === u.id}>{open === u.id ? 'Close' : 'Manage'}</button></td>
+                </tr>
+                {open === u.id && (
+                  <tr><td colSpan={10}>
+                    <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
+                  </td></tr>
+                )}
+              </Fragment>
             ))}
+            {!rows.length && <tr><td colSpan={10} className="empty">No users match.</td></tr>}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+const LIFETIMES: [number, string][] = [[24, '1 day'], [72, '3 days'], [168, '7 days'], [720, '30 days']];
+
+function CodeReveal({ code, expiresAt, who, onClose }: { code: string; expiresAt: string; who: string; onClose: () => void }) {
+  return (
+    <div className="banner" role="status" style={{ display: 'grid', gap: 6 }}>
+      <div><b>One-time code for {who}: </b><code style={{ fontSize: 20, letterSpacing: '.1em' }}>{code}</code>{' '}
+        <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(code).then(() => notify('Copied.'), () => undefined)}>Copy</button>{' '}
+        <button className="btn btn-sm" onClick={onClose}>Done</button></div>
+      <div className="note">Shown only now (stored as a hash). Give it to the person directly — in person, by phone or a separate message. It works once, until {new Date(expiresAt).toLocaleString()}. They open <b>{typeof location !== 'undefined' ? location.origin : ''}/activate</b>, enter their e-mail and this code, and choose their own password. After that first online sign-in they can also work offline.</div>
+    </div>
+  );
+}
+
+function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> }) {
+  const all = u.allowed_views === null;
+  const [sel, setSel] = useState<string[]>(u.allowed_views ?? VIEWS.map(([k]) => k));
+  const [saving, setSaving] = useState(false);
+  const save = async (next: string[] | null) => {
+    setSaving(true);
+    const { error } = await sb().rpc('admin_set_views', { p_user: u.id, p_views: next });
+    setSaving(false);
+    if (error) return notify(error.message);
+    notify(next === null ? 'All modules allowed.' : 'Module access saved. It applies on their next page load.');
+    await reload();
+  };
+  if (u.global_role === 'super_admin') return <p className="note" style={{ margin: 0 }}>Super Admins can use every module.</p>;
+  return (
+    <div>
+      <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
+      <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+        {VIEWS.map(([k, label]) => (
+          <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="checkbox" checked={sel.includes(k)} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className="form-actions">
+        <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save(VIEWS.map(([k]) => k).filter((k) => sel.includes(k)))}>Save module access</button>
+        {!all && <button className="btn btn-sm" disabled={saving} onClick={() => save(null)}>Allow all modules</button>}
+      </div>
+    </div>
+  );
+}
+
+function UserPanel({ u, d, self, act, review, reload }: {
+  u: Profile; d: D; self: boolean; reload: () => Promise<void>;
+  act: (u: Profile, action: string, confirmText: string, danger?: boolean, reason?: string) => Promise<void>;
+  review: (u: Profile, approve: boolean) => Promise<void>;
+}) {
+  const [addProject, setAddProject] = useState('');
+  const [codeHours, setCodeHours] = useState(72);
+  const [issued, setIssued] = useState<{ code: string; expiresAt: string } | null>(null);
+  const issue = async (approveFirst: boolean) => {
+    const msg = approveFirst
+      ? `Approve ${u.email} and create a one-time sign-in code?`
+      : `Create a new one-time sign-in code for ${u.email}? Any earlier unused code stops working.`;
+    if (!(await askConfirm(msg, { danger: false }))) return;
+    try {
+      if (approveFirst) await api(`/api/admin/registrations/${u.id}`, { action: 'approve', reason: null, silent: true });
+      const r = (await api(`/api/admin/users/${u.id}`, { action: 'issue_code', hours: codeHours })) as unknown as { code: string; expiresAt: string };
+      setIssued({ code: r.code, expiresAt: r.expiresAt });
+      await reload();
+    } catch (e) {
+      notify((e as Error).message);
+    }
+  };
+  const [addRole, setAddRole] = useState('employee');
+  const mine = d.members.filter((m) => m.user_id === u.id);
+  const free = d.projects.filter((p) => !mine.some((m) => m.project_id === p.id) && p.status !== 'archived');
+  const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
+  const log = d.audit.filter((a) => a.target_id === u.id || a.actor_id === u.id).slice(0, 40);
+
+  const setMember = async (projectId: string, role: string, canApprove: boolean) => {
+    const { error } = await sb().from('project_memberships').upsert({ project_id: projectId, user_id: u.id, role, can_approve_reports: role === 'project_manager' || canApprove });
+    if (error) return notify(error.message);
+    await reload();
+  };
+  const remove = async (projectId: string) => {
+    if (!(await askConfirm(`Remove ${u.email} from ${d.projects.find((p) => p.id === projectId)?.code}? Their access ends immediately, including queued offline changes for that project.`))) return;
+    const { error } = await sb().from('project_memberships').delete().eq('project_id', projectId).eq('user_id', u.id);
+    if (error) return notify(error.message);
+    await reload();
+  };
+
+  return (
+    <div className="user-panel" style={{ display: 'grid', gap: 16 }}>
+      {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={u.full_name || u.email} onClose={() => setIssued(null)} />}
+      {(u.status === 'active' || u.status === 'pending') && (
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Code valid for
+            <select className="input" style={{ maxWidth: 120 }} value={codeHours} onChange={(e) => setCodeHours(Number(e.target.value))}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select>
+          </label>
+          <button className="btn btn-sm btn-primary" onClick={() => issue(u.status === 'pending')}>{u.status === 'pending' ? 'Approve and give one-time code' : 'Give one-time sign-in code'}</button>
+        </div>
+      )}
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail link)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
+        {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They are signed out everywhere and lose access to all projects immediately. Their queued offline changes will be refused.`)}>Suspend</button>}
+        {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}? They can sign in again with their existing password.`, false)}>Activate</button>}
+        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a secure password reset link? You will never see their password.`, false)}>Send password reset</button>}
+        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out on every device? ${self ? 'This includes you.' : 'They can sign in again unless suspended.'}`, true, 'Revoked by administrator')}>Sign out everywhere</button>}
+        {!self && u.status === 'active' && (u.global_role === 'super_admin'
+          ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin rights from ${u.email}?`)}>Remove Super Admin</button>
+          : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Give ${u.email} full Super Admin rights over every project and account?`)}>Make Super Admin</button>)}
+      </div>
+      {u.sessions_revoked_at && <p className="note" style={{ margin: 0 }}>Sessions last revoked {when(u.sessions_revoked_at)}.</p>}
+
+      <ViewsEditor u={u} reload={reload} />
+
+      <div>
+        <h3 style={{ margin: '0 0 6px' }}>Project access</h3>
+        {u.global_role === 'super_admin' && <p className="note" style={{ marginTop: 0 }}>Super Admins can open every project; memberships below set their project role.</p>}
+        <table className="tbl">
+          <thead><tr><th>Project</th><th>Role</th><th>Can approve reports</th><th /></tr></thead>
+          <tbody>
+            {mine.map((m) => {
+              const p = d.projects.find((x) => x.id === m.project_id);
+              return (
+                <tr key={m.project_id}>
+                  <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
+                  <td><select className="input" value={m.role} onChange={(e) => setMember(m.project_id, e.target.value, m.can_approve_reports)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option></select></td>
+                  <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
+                  <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
+                </tr>
+              );
+            })}
+            {!mine.length && <tr><td colSpan={4} className="note">No project access yet.</td></tr>}
+          </tbody>
+        </table>
+        {u.status === 'active' && free.length > 0 && (
+          <div className="form-actions">
+            <select className="input" style={{ maxWidth: 240 }} value={addProject} onChange={(e) => setAddProject(e.target.value)} aria-label="Project to add"><option value="">Add to project…</option>{free.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select>
+            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option></select>
+            <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => { await setMember(addProject, addRole, false); setAddProject(''); }}>Give access</button>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 style={{ margin: '0 0 6px' }}>Sign-in and administration history</h3>
+        {!log.length ? <p className="note" style={{ marginTop: 0 }}>No recorded events in the latest audit entries.</p> : (
+          <table className="tbl">
+            <thead><tr><th>When</th><th>Event</th><th>By</th><th>Project</th></tr></thead>
+            <tbody>
+              {log.map((a) => (
+                <tr key={a.id}>
+                  <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
+                  <td title={a.action}>{eventLabel(a.action)}</td>
+                  <td className="note">{a.actor_kind === 'system' ? 'System' : a.actor_id === u.id ? 'User' : names.get(a.actor_id ?? '') ?? '—'}</td>
+                  <td className="note">{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -464,6 +695,22 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
       notify((x as Error).message);
     }
   };
+  const [g, setG] = useState({ fullName: '', email: '', projectId: '', role: 'employee', hours: 72 });
+  const [issued, setIssued] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
+  const addWithCode = async () => {
+    const n = checkName(g.fullName);
+    if (!n.ok) return notify(n.error);
+    const e = checkEmail(g.email);
+    if (!e.ok) return notify(e.error);
+    try {
+      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: e.email, projectId: g.projectId || undefined })) as unknown as { code: string; expiresAt: string };
+      setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
+      setG({ ...g, fullName: '', email: '' });
+      await reload();
+    } catch (x) {
+      notify((x as Error).message);
+    }
+  };
   const revoke = async (id: string) => {
     const { error } = await sb().from('project_invitations').update({ status: 'revoked' }).eq('id', id);
     if (error) return notify(error.message);
@@ -472,7 +719,19 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>Invite a person</h2><span className="note">Pre-approved: they set their own password from a single-use link</span></div>
+        <div className="card-head"><h2>Add a person with a one-time code</h2><span className="note">No e-mail needed: you hand them the code</span></div>
+        {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={issued.who} onClose={() => setIssued(null)} />}
+        <div className="form-grid">
+          <label className="field">Full name<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
+          <label className="field">E-mail (their sign-in name)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>
+          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option></select></label>
+          <label className="field">Code valid for<select className="input" value={g.hours} onChange={(e) => setG({ ...g, hours: Number(e.target.value) })}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>
+        </div>
+        <div className="form-actions"><button className="btn btn-primary" onClick={addWithCode}>Create account and code</button></div>
+      </section>
+      <section className="card">
+        <div className="card-head"><h2>Invite a person by e-mail</h2><span className="note">Pre-approved: they set their own password from a single-use link</span></div>
         <div className="form-grid">
           <label className="field">Full name<input className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></label>
           <label className="field">E-mail<input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
@@ -512,6 +771,7 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
   const [pid, setPid] = useState(d.projects[0]?.id ?? '');
   const [label, setLabel] = useState('Client representative');
   const [days, setDays] = useState('30');
+  const [oneTime, setOneTime] = useState(true);
   const [shown, setShown] = useState<string | null>(null);
   const p = d.projects.find((x) => x.id === pid);
   const content = d.content.find((c) => c.project_id === pid);
@@ -528,7 +788,7 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
     if (!p) return;
     if (rotate && !(await askConfirm('Rotate the passcode? All current client passcodes and sessions for this project stop working.'))) return;
     const expires = days ? new Date(Date.now() + Number(days) * 864e5).toISOString() : null;
-    const { data, error } = await sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate });
+    const { data, error } = await sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate, p_one_time: oneTime });
     if (error) return notify(error.message);
     setShown(String(data));
     await reload();
@@ -559,7 +819,7 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
 
       {shown && (
         <div className="banner" role="status">
-          <b>New passcode: </b><code style={{ fontSize: 18, letterSpacing: '.08em' }}>{shown}</code>{' '}
+          <b>New passcode for /client/{p?.code}: </b><code style={{ fontSize: 18, letterSpacing: '.08em' }}>{shown}</code>{' '}
           <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(shown).then(() => notify('Copied.'), () => undefined)}>Copy</button>
           <div className="note">Shown once. Share it with the client by phone or a separate message from the link. It is stored only as a hash.</div>
         </div>
@@ -571,22 +831,24 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <div className="form-grid">
             <label className="field">Label<input className="input" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
             <label className="field">Expires after (days)<input className="input" type="number" min="1" value={days} onChange={(e) => setDays(e.target.value)} placeholder="blank = no expiry" /></label>
+            <label className="field">Type<select className="input" value={oneTime ? 'once' : 'multi'} onChange={(e) => setOneTime(e.target.value === 'once')}><option value="once">One-time (first sign-in only)</option><option value="multi">Reusable until it expires</option></select></label>
           </div>
+          <p className="note" style={{ marginTop: 0 }}>With a one-time passcode the client signs in once; the portal then stays open on that device for the session length below and keeps an offline copy.</p>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={() => create(false)}>Generate passcode</button>
             <button className="btn" onClick={() => create(true)}>Rotate (revoke all and issue new)</button>
           </div>
           <table className="tbl" style={{ marginTop: 12 }}>
-            <thead><tr><th>Label</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Label</th><th>Type</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th /></tr></thead>
             <tbody>
               {creds.map((c) => {
-                const st = c.revoked_at ? 'revoked' : c.expires_at && c.expires_at < new Date().toISOString() ? 'expired' : 'active';
+                const st = c.revoked_at ? 'revoked' : c.expires_at && c.expires_at < new Date().toISOString() ? 'expired' : c.max_uses && c.use_count >= c.max_uses ? 'used' : 'active';
                 return (
-                  <tr key={c.id}><td>{c.label}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
+                  <tr key={c.id}><td>{c.label}</td><td className="note">{c.max_uses === 1 ? 'One-time' : 'Reusable'}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
                     <td>{st === 'active' && <button className="btn btn-sm btn-danger" onClick={() => revoke(c)}>Revoke</button>}</td></tr>
                 );
               })}
-              {!creds.length && <tr><td colSpan={6} className="note">No passcodes yet.</td></tr>}
+              {!creds.length && <tr><td colSpan={7} className="note">No passcodes yet.</td></tr>}
             </tbody>
           </table>
           <p className="note">A passcode works like a key: anyone it is forwarded to can view. For named accountability, invite clients as individual accounts instead.</p>
@@ -599,8 +861,11 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
               {VIS.map(([k, l]) => (
                 <label key={k} className="check-row"><input type="checkbox" checked={!!content[k]} onChange={(e) => setVis(k, e.target.checked)} /> {l}</label>
               ))}
-              <label className="field" style={{ marginTop: 10 }}>Session length (hours)
-                <input className="input" type="number" min="1" max="72" defaultValue={Number(content.session_hours ?? 8)} onBlur={(e) => setVis('session_hours', Math.min(72, Math.max(1, Number(e.target.value) || 8)))} />
+              <label className="field" style={{ marginTop: 10 }}>Stay signed in for (online and offline)
+                <select className="input" value={String(content.session_hours ?? 8)} onChange={(e) => setVis('session_hours', Number(e.target.value))}>
+                  {[[8, '8 hours'], [24, '1 day'], [72, '3 days'], [168, '7 days'], [336, '14 days'], [720, '30 days']].map(([h, l]) => <option key={h} value={String(h)}>{l}</option>)}
+                  {![8, 24, 72, 168, 336, 720].includes(Number(content.session_hours ?? 8)) && <option value={String(content.session_hours)}>{String(content.session_hours)} hours</option>}
+                </select>
               </label>
               <p className="note">Never shown to clients: BOQ and unit costs, margins, quotations, staff names and contacts, drafts, unapproved reports and photos, internal files.</p>
             </>
@@ -662,11 +927,13 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
 
 function AuditLog({ d }: { d: D }) {
   const [q, setQ] = useState('');
+  const [kind, setKind] = useState('');
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
-  const rows = d.audit.filter((a) => !q || `${a.action} ${a.target_type} ${JSON.stringify(a.details)}`.toLowerCase().includes(q.toLowerCase()));
+  const isAuth = (a: Audit) => a.action.startsWith('auth:') || a.action.startsWith('account:') || a.action.startsWith('client:');
+  const rows = d.audit.filter((a) => (!kind || (kind === 'auth' ? isAuth(a) : !isAuth(a))) && (!q || `${a.action} ${a.target_type} ${names.get(a.actor_id ?? '') ?? ''} ${JSON.stringify(a.details)}`.toLowerCase().includes(q.toLowerCase())));
   return (
     <section className="card">
-      <div className="card-head"><h2>Audit log (latest {d.audit.length})</h2><input className="input" style={{ maxWidth: 260 }} placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter audit log" /></div>
+      <div className="card-head"><h2>Audit log (latest {d.audit.length})</h2><div className="form-actions" style={{ marginTop: 0 }}><select className="input" style={{ maxWidth: 200 }} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Event type"><option value="">All events</option><option value="auth">Sign-in and account</option><option value="admin">Data and administration</option></select><input className="input" style={{ maxWidth: 260 }} placeholder="Filter by person, action…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter audit log" /></div></div>
       <div className="table-wrap"><table className="tbl">
         <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Project</th><th>Details</th></tr></thead>
         <tbody>
@@ -674,7 +941,7 @@ function AuditLog({ d }: { d: D }) {
             <tr key={a.id}>
               <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
               <td>{a.actor_kind === 'client' ? 'Client (passcode)' : a.actor_kind === 'system' ? 'System' : names.get(a.actor_id ?? '') ?? '—'}</td>
-              <td>{a.action}</td>
+              <td title={a.action}>{eventLabel(a.action)}</td>
               <td>{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
               <td className="note audit-details">{Object.keys(a.details ?? {}).length ? JSON.stringify(a.details).slice(0, 220) : ''}</td>
             </tr>
