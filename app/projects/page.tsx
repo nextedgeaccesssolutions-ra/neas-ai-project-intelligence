@@ -35,6 +35,10 @@ export default function ProjectRegister() {
 
   if (!ready) return <Loading />;
 
+  // In the cloud version project details are edited in the control panel (Super Admins only).
+  const cloudEdit = CLOUD && editParam ? state.projects.find((x) => x.id === editParam || x.code === editParam) ?? null : null;
+  const adminEditHref = (id: string) => `/admin?edit=${encodeURIComponent(id)}#projects`;
+
   const today = todayLocal();
   const save = () => {
     if (!draft) return;
@@ -67,6 +71,22 @@ export default function ProjectRegister() {
           {CLOUD ? (isSuperAdmin() && <Link className="btn btn-primary" href="/admin#projects">Manage projects</Link>) : <button className="btn btn-primary" onClick={() => { setDraft(blank()); setError(null); }}>+ New project</button>}
         </div>
       </div>
+
+      {CLOUD && editParam && (
+        <section className="card" role="status">
+          <div className="card-head"><h2>{cloudEdit ? `Edit ${cloudEdit.code ?? cloudEdit.id}` : 'Project not found'}</h2></div>
+          {!cloudEdit ? (
+            <p className="note">This project is not in your list. It may have been archived, or you are not assigned to it.</p>
+          ) : isSuperAdmin() ? (
+            <>
+              <p className="note">Name, client, site, dates and contract value are edited in the control panel, where every change is recorded in the audit log.</p>
+              <div className="form-actions"><Link className="btn btn-primary" href={adminEditHref(cloudEdit.id)}>Edit project details</Link></div>
+            </>
+          ) : (
+            <p className="note">Only a Super Admin can change project details such as the contract value. Ask your administrator to update {cloudEdit.code ?? cloudEdit.id}.</p>
+          )}
+        </section>
+      )}
 
       {!CLOUD && draft && (
         <section className="card">
@@ -118,6 +138,7 @@ export default function ProjectRegister() {
                       <td className="num">{acts.length ? fmtPct(prog.actual) : '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm btn-primary" href="/" onClick={() => setActiveProject(p.id)}>Open</Link>{' '}
+                        {CLOUD && isSuperAdmin() && <Link className="btn btn-sm" href={adminEditHref(p.id)}>Edit</Link>}
                         {!CLOUD && <><button className="btn btn-sm" onClick={() => { setDraft({ ...p, contractValue: p.contractValue == null ? '' : String(p.contractValue), isNew: false }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>{' '}
                         <button className="btn btn-sm btn-danger" onClick={() => askConfirm(`Delete ${p.id} and all its activities, reports, BOQ and photos? This cannot be undone.`).then((ok) => ok && deleteProject(p.id))}>Delete</button></>}
                       </td>

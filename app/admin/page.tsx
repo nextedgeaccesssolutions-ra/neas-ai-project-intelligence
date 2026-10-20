@@ -19,7 +19,7 @@ const TABS: [Tab, string][] = [
 ];
 
 interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null }
-interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
+interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; version: number; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
@@ -54,10 +54,17 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [data, setData] = useState<{ profiles: Profile[]; projects: Project[]; members: Member[]; creds: Cred[]; audit: Audit[]; ops: SyncOp[]; intlog: IntLog[]; content: Content[]; invites: Record<string, unknown>[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
 
   useEffect(() => {
     const h = location.hash.slice(1) as Tab;
     if (TABS.some(([t]) => t === h)) setTab(h);
+    // /admin?edit=<project id> (from the dashboard or the project register) opens that project's details.
+    const edit = new URLSearchParams(location.search).get('edit');
+    if (edit) {
+      setEditId(edit);
+      setTab('projects');
+    }
   }, []);
   const go = (t: Tab) => {
     setTab(t);
@@ -121,7 +128,7 @@ export default function AdminPage() {
       {!data ? <div className="card note">Loading…</div> : (
         <>
           {tab === 'overview' && <Overview d={data} go={go} />}
-          {tab === 'projects' && <Projects d={data} reload={load} />}
+          {tab === 'projects' && <Projects d={data} reload={load} editId={editId} onEditOpened={() => { setEditId(null); history.replaceState(null, '', '#projects'); }} />}
           {tab === 'users' && <Users d={data} reload={load} selfId={cloud.profile!.id} go={go} />}
           {tab === 'approvals' && <Approvals d={data} reload={load} />}
           {tab === 'invitations' && <Invitations d={data} reload={load} />}
@@ -227,12 +234,21 @@ function nextCode(projects: Project[]): string {
   return `PRJ-${y}-${String((n.length ? Math.max(...n) : 0) + 1).padStart(3, '0')}`;
 }
 
-function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
+function Projects({ d, reload, editId, onEditOpened }: { d: D; reload: () => Promise<void>; editId: string | null; onEditOpened: () => void }) {
   const empty = { code: nextCode(d.projects), name: '', reference_no: '', client_name: '', site: '', start_date: '', end_date: '', contract_value: '', status: 'active' };
   const [f, setF] = useState(empty);
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const names = useMemo(() => new Map(d.profiles.map((p) => [p.id, p.full_name || p.email])), [d.profiles]);
+
+  useEffect(() => {
+    if (!editId) return;
+    const p = d.projects.find((x) => x.id === editId || x.code === editId);
+    onEditOpened();
+    if (!p) return notify('That project was not found. It may have been archived or you may not have access.');
+    setOpen(p.id);
+    requestAnimationFrame(() => document.getElementById(`details-${p.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     const code = f.code.trim().toUpperCase();
@@ -313,6 +329,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                     {open === p.id && (
                       <tr>
                         <td colSpan={7} style={{ background: '#fbfcfd' }}>
+                          <ProjectDetails key={`${p.id}-${p.version}`} p={p} reload={reload} />
                           <div className="grid two">
                             <div>
                               <h3 className="h3">Team</h3>
@@ -344,6 +361,60 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
         </div>
       </section>
     </>
+  );
+}
+
+/** Edits a project's details after creation. The project ID stays fixed: team and client links use it. */
+function ProjectDetails({ p, reload }: { p: Project; reload: () => Promise<void> }) {
+  const initial = {
+    name: p.name, reference_no: p.reference_no, client_name: p.client_name, site: p.site,
+    start_date: p.start_date ?? '', end_date: p.end_date ?? '', contract_value: p.contract_value == null ? '' : String(p.contract_value),
+  };
+  const [f, setF] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const changed = (Object.keys(initial) as (keyof typeof initial)[]).some((k) => f[k].trim() !== initial[k].trim());
+
+  const save = async () => {
+    if (!f.name.trim()) return setError('Project name is required.');
+    const cv = f.contract_value.trim() === '' ? null : Number(f.contract_value);
+    if (cv != null && (!Number.isFinite(cv) || cv < 0 || cv >= 1e12)) return setError('Contract value must be between ₱0 and ₱999,999,999,999.99, or left blank.');
+    if (f.start_date && f.end_date && f.end_date < f.start_date) return setError('Completion date cannot be before the start date.');
+    setSaving(true);
+    // Only save if nobody else changed the project since this page loaded (version check).
+    const { data, error: e } = await sb().from('projects').update({
+      name: f.name.trim(), reference_no: f.reference_no.trim(), client_name: f.client_name.trim(), site: f.site.trim(),
+      start_date: f.start_date || null, end_date: f.end_date || null, contract_value: cv,
+    }).eq('id', p.id).eq('version', p.version).select('id');
+    setSaving(false);
+    if (e) return setError(e.message);
+    if (!data?.length) {
+      setError('Someone else changed this project after you opened it. Press Refresh, then make your change again.');
+      return;
+    }
+    setError(null);
+    notify(`Saved ${p.code}.`);
+    await reload();
+  };
+
+  return (
+    <div id={`details-${p.id}`} style={{ marginBottom: 16 }}>
+      <h3 className="h3">Project details · {p.code}</h3>
+      <div className="form-grid">
+        <label className="field" style={{ gridColumn: 'span 2' }}>Project name<input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="field">Reference no.<input className="input" value={f.reference_no} onChange={(e) => setF({ ...f, reference_no: e.target.value })} placeholder="e.g. NEAS-Q-2026-001" /></label>
+        <label className="field">Client<input className="input" value={f.client_name} onChange={(e) => setF({ ...f, client_name: e.target.value })} /></label>
+        <label className="field">Site<input className="input" value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} /></label>
+        <label className="field">Start<input className="input" type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} /></label>
+        <label className="field">Completion<input className="input" type="date" value={f.end_date} onChange={(e) => setF({ ...f, end_date: e.target.value })} /></label>
+        <label className="field">Contract value (₱)<input className="input" type="number" min="0" step="0.01" value={f.contract_value} onChange={(e) => setF({ ...f, contract_value: e.target.value })} placeholder="Blank if not yet agreed" /></label>
+      </div>
+      {error && <p className="bad" role="alert">{error}</p>}
+      <div className="form-actions">
+        <button className="btn btn-primary btn-sm" onClick={save} disabled={!changed || saving}>{saving ? 'Saving…' : 'Save details'}</button>
+        {changed && <button className="btn btn-sm" onClick={() => { setF(initial); setError(null); }}>Discard changes</button>}
+      </div>
+    </div>
   );
 }
 
