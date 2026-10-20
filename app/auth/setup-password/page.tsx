@@ -12,8 +12,10 @@ export default function SetupPassword() {
   const [pw2, setPw2] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [first, setFirst] = useState(false);
 
   useEffect(() => {
+    setFirst(new URLSearchParams(window.location.search).has('first'));
     supabaseBrowser()?.auth.getSession().then(({ data }) => setReady(!!data.session));
   }, []);
 
@@ -33,7 +35,7 @@ export default function SetupPassword() {
   if (ready === false) return <AuthCard title="Link expired" subtitle="This password link has expired or was already used. Use “Forgot password?” on the sign-in page to get a new one." />;
   if (done) return <AuthCard title="Password saved" subtitle="You can now sign in with your e-mail and new password."><a className="btn btn-primary" href="/">Continue</a></AuthCard>;
   return (
-    <AuthCard title="Set your password" subtitle="Choose a password only you know. At least 12 characters, mixing letters, numbers or symbols.">
+    <AuthCard title={first ? 'Create your password' : 'Set your password'} subtitle="Choose a password only you know. At least 12 characters, using three of: lowercase, uppercase, numbers, symbols.">
       <form onSubmit={submit} className="auth-form">
         <label className="field">New password<input id="pw1" className="input" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></label>
         <label className="field">Repeat password<input id="pw2" className="input" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></label>

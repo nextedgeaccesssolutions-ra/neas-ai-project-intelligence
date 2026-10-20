@@ -21,6 +21,13 @@ export default function AuthCallback() {
         const { data } = await sb.auth.getSession();
         if (!data.session) return setMsg('This link has expired or was already used. Ask for a new one.');
       }
+      // An approved account that has never chosen a password (owner bootstrap, e-mail-link sign-up)
+      // is sent to password setup first, so the e-mail + password sign-in works next time.
+      const { data: u } = await sb.auth.getUser();
+      if (u.user && !safeNext.startsWith('/auth/setup-password')) {
+        const { data: p } = await sb.from('profiles').select('status, password_set_at').eq('id', u.user.id).maybeSingle();
+        if (p?.status === 'active' && !p.password_set_at) return window.location.replace('/auth/setup-password?first=1');
+      }
       window.location.replace(safeNext);
     })();
   }, []);

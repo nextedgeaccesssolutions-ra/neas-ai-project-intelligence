@@ -11,7 +11,7 @@ import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
 export interface Membership { project_id: string; role: 'project_manager' | 'employee'; can_approve_reports: boolean }
-export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null }
+export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null; password_set_at?: string | null }
 
 export interface CloudStatus {
   auth: AuthState;
@@ -250,7 +250,7 @@ async function loadIdentity(): Promise<void> {
   const sb = supabaseBrowser()!;
   const { data: u } = await sb.auth.getUser();
   if (!u.user) return set({ auth: 'signed_out', profile: null, memberships: [] });
-  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at, allowed_views').eq('id', u.user.id).single();
+  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at, allowed_views, password_set_at').eq('id', u.user.id).single();
   const { data: memberships } = await sb.from('project_memberships').select('project_id, role, can_approve_reports').eq('user_id', u.user.id);
   const active = profile?.status === 'active' && !!profile.email_verified_at;
   await setMeta('identity', { profile, memberships, verified_at: Date.now() });

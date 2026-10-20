@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
 
   if (!CLOUD) return <AuthCard title="Sign-in not set up" subtitle="This copy runs in device mode. Connect Supabase to enable accounts."><Link className="btn" href="/">Open the app</Link></AuthCard>;
 
@@ -23,10 +24,17 @@ export default function LoginPage() {
     if (err) {
       setBusy(false);
       // one message for every failure so the form never reveals whether an address is registered
-      return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet.');
+      return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet. No password yet? Use “E-mail me a sign-in link” below.');
     }
-    const r = await fetch('/api/auth/after-login', { method: 'POST' }).then((x) => x.json()).catch(() => null);
-    const p = r?.profile;
+    const res = await fetch('/api/auth/after-login', { method: 'POST' }).catch(() => null);
+    const r = res ? await res.json().catch(() => null) : null;
+    if (!res || !res.ok || !r?.profile) {
+      // the password was accepted; the account check did not finish (network or server problem)
+      await sb.auth.signOut().catch(() => undefined);
+      setBusy(false);
+      return setError('Your password was accepted, but the account check did not finish. Check your connection and try again.');
+    }
+    const p = r.profile;
     if (p?.status === 'active' && p?.email_verified_at) {
       window.location.href = p.global_role === 'super_admin' ? '/admin' : '/';
       return;
@@ -42,6 +50,18 @@ export default function LoginPage() {
     );
   };
 
+  // Passwordless sign-in for existing accounts (also the way in for an account that has no password yet).
+  const sendLink = async () => {
+    if (!email.trim()) return setError('Enter your e-mail first.');
+    setError(null);
+    const { error: err } = await supabaseBrowser()!.auth.signInWithOtp({
+      email: email.trim().toLowerCase(),
+      options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
+    });
+    if (err && /rate|too many|security purposes/i.test(err.message)) return setError('Too many e-mails requested. Wait a minute and try again.');
+    setLinkSent(true); // same reply whether or not the address has an account
+  };
+
   const forgot = async () => {
     if (!email.trim()) return setError('Enter your e-mail first.');
     await supabaseBrowser()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password` });
@@ -55,7 +75,9 @@ export default function LoginPage() {
         <label className="field">Password<input id="login-password" className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {error && <p className="bad" role="alert">{error}</p>}
         {resetSent && <p className="ok" role="status">If that address has an account, a reset link is on its way.</p>}
+        {linkSent && <p className="ok" role="status">If that address has an account, a sign-in link is on its way. Open it on this device.</p>}
         <button className="btn btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <button type="button" className="btn" onClick={sendLink}>E-mail me a sign-in link</button>
       </form>
       <div className="auth-links">
         <button className="linklike" onClick={forgot}>Forgot password?</button>

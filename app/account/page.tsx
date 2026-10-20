@@ -20,10 +20,11 @@ export default function AccountPage() {
         <span className="note">Role</span><span>{p?.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</span>
         <span className="note">Projects</span><span>{c.memberships.length}</span>
       </div>
+      {!pending && p && !p.password_set_at && <p className="banner">You have not set a password yet. Set one now so you can sign in with your e-mail and password.</p>}
       {pending && <p className="banner">Your request is waiting for administrator approval. You will receive an e-mail with a link to set your password once it is approved.</p>}
       <div className="form-actions">
         {!pending && <Link className="btn btn-primary" href="/">Open my projects</Link>}
-        <Link className="btn" href="/auth/setup-password">Change password</Link>
+        <Link className={p && !p.password_set_at && !pending ? 'btn btn-primary' : 'btn'} href="/auth/setup-password">{p && !p.password_set_at ? 'Set your password' : 'Change password'}</Link>
         <button className="btn btn-danger" onClick={signOut}>Sign out and clear this device</button>
       </div>
     </AuthCard>
