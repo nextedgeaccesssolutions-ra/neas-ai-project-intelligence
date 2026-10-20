@@ -81,3 +81,12 @@ update neas.profiles set last_login_at = now() where id = '00000000-0000-0000-00
 insert into neas.audit_logs (actor_id, action, target_type, target_id) values ('00000000-0000-0000-0000-0000000000a1', 'auth:login', 'profiles', '00000000-0000-0000-0000-0000000000a1');
 select test.check('server: service role can update profiles and write the audit log', (select count(*) >= 1 from neas.audit_logs where action = 'auth:login'));
 reset role;
+
+-- Control panel reads passcode metadata (including use limits) but never the hash
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select test.check('client creds: Super Admin can list passcodes with use limits',
+  (select count(*) >= 2 from (select id, project_id, label, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count from neas.client_access_credentials) x));
+select test.expect_error('client creds: the passcode hash stays unreadable',
+  $$select passcode_hash from neas.client_access_credentials$$);
+reset role;
