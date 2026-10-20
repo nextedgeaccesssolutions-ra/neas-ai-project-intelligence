@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import AuthCard from '@/components/AuthCard';
-import { supabaseBrowser } from '@/lib/cloud/browser';
+import { supabaseBrowser, supabaseLinkClient } from '@/lib/cloud/browser';
 import { CLOUD } from '@/lib/cloud/env';
 
 export default function LoginPage() {
@@ -19,6 +19,8 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setLinkSent(false);
+    setResetSent(false);
     const sb = supabaseBrowser()!;
     const { error: err } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (err) {
@@ -54,17 +56,23 @@ export default function LoginPage() {
   const sendLink = async () => {
     if (!email.trim()) return setError('Enter your e-mail first.');
     setError(null);
-    const { error: err } = await supabaseBrowser()!.auth.signInWithOtp({
+    setLinkSent(false);
+    setResetSent(false);
+    const { error: err } = await supabaseLinkClient()!.auth.signInWithOtp({
       email: email.trim().toLowerCase(),
       options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
     });
-    if (err && /rate|too many|security purposes/i.test(err.message)) return setError('Too many e-mails requested. Wait a minute and try again.');
+    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
     setLinkSent(true); // same reply whether or not the address has an account
   };
 
   const forgot = async () => {
     if (!email.trim()) return setError('Enter your e-mail first.');
-    await supabaseBrowser()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password` });
+    setError(null);
+    setLinkSent(false);
+    setResetSent(false);
+    const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password` });
+    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
     setResetSent(true);
   };
 
@@ -75,7 +83,7 @@ export default function LoginPage() {
         <label className="field">Password<input id="login-password" className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {error && <p className="bad" role="alert">{error}</p>}
         {resetSent && <p className="ok" role="status">If that address has an account, a reset link is on its way.</p>}
-        {linkSent && <p className="ok" role="status">If that address has an account, a sign-in link is on its way. Open it on this device.</p>}
+        {linkSent && <p className="ok" role="status">If that address has an account, a sign-in link is on its way. Open it from your e-mail on any device.</p>}
         <button className="btn btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         <button type="button" className="btn" onClick={sendLink}>E-mail me a sign-in link</button>
       </form>
