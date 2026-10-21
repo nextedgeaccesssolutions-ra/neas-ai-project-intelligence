@@ -21,8 +21,12 @@ export default function FieldReports() {
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
   const review = async (id: string, patch: Record<string, unknown>, label: string) => {
-    const { error: err } = await supabaseBrowser()!.from('project_reports').update(patch).eq('id', id);
+    const sb = supabaseBrowser()!;
+    const { error: err } = await sb.from('project_reports').update(patch).eq('id', id);
     if (err) return setError(`${label} failed: ${err.message}. Reviews need an internet connection.`);
+    if ('client_visible' in patch) {
+      await sb.from('report_attachments').update({ client_visible: patch.client_visible }).eq('report_id', id);
+    }
     await pullAll().catch(() => undefined);
     setMsg(`${label}.`);
   };

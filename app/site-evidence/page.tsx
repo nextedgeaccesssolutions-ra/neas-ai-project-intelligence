@@ -9,6 +9,9 @@ import DataIO from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
+import { CLOUD } from '@/lib/cloud/env';
+import { useCanManage } from '@/components/RoleGate';
+import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence } from '@/lib/types';
 import PhotoThumb from '@/components/PhotoThumb';
 
@@ -20,12 +23,28 @@ export default function SiteEvidence() {
   const { ready, project, addEvidence, deleteEvidence, state } = useStore();
   const { pid, activities, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
+  const reviewer = useCanManage();
   const [activityId, setActivityId] = useState('');
   const [kind, setKind] = useState<Evidence['kind']>('Before');
   const [caption, setCaption] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!CLOUD || !pid) return;
+    supabaseBrowser()?.from('report_attachments').select('id, client_visible').eq('project_id', pid).then(({ data }) => {
+      if (data) setClientVisible(Object.fromEntries(data.map((r) => [r.id, r.client_visible])));
+    });
+  }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleClientVisible = async (id: string, val: boolean) => {
+    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
+    if (err) return setError(`Could not update: ${err.message}`);
+    setClientVisible((prev) => ({ ...prev, [id]: val }));
+    notify(val ? 'Shared with client.' : 'Hidden from client.');
+  };
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -141,6 +160,11 @@ export default function SiteEvidence() {
                   <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
                   <span>{e.caption || <span className="note">No caption</span>}</span>
                   <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB</span>
+                  {CLOUD && reviewer && (
+                    <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
+                      <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
+                    </label>
+                  )}
                   <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>
                 </figcaption>
               </figure>
