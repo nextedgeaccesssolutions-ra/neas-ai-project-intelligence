@@ -99,10 +99,12 @@ export default function FieldReports() {
           <h1>Field reports</h1>
           <p className="lead">Record cumulative % complete per activity. Each saved report updates the Overview straight away.</p>
         </div>
-        <div className="form-actions" style={{ marginTop: 0 }}>
-          <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
-          <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
-        </div>
+        {(!CLOUD || reviewer) && (
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
+            <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
+          </div>
+        )}
       </div>
       <ProjectBar />
 
@@ -120,49 +122,51 @@ export default function FieldReports() {
         }}
       />
 
-      <section className="card" id="new-report">
-        <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
-        {activities.length === 0 ? (
-          <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>
-        ) : (
-          <>
-            <div className="form-grid">
-              <label className="field">
-                Activity
-                <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
-                  {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </label>
-              <label className="field">
-                Report date
-                <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              </label>
-              <label className="field">
-                Actual completion (%) <span className="note">Previous: {fmtPct(prev)}</span>
-                <input className="input" type="number" inputMode="decimal" min="0" max="100" step="0.1" value={pct} onChange={(e) => setPct(e.target.value)} />
-              </label>
-              <label className="field">
-                Report notes
-                <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Site work completed / issues" />
-              </label>
-            </div>
-            {error && <p className="bad" role="alert">{error}</p>}
-            {msg && !error && <p className="ok" role="status">{msg} <Link href="/">See it on the Overview</Link></p>}
-            <div className="form-actions">
-              <button className="btn btn-primary" onClick={save}>Save field report</button>
-              {activityId && (
-                <>
-                  <select className="input" style={{ width: 'auto' }} value={photoKind} onChange={(e) => setPhotoKind(e.target.value as Evidence['kind'])}>
-                    <option>Before</option><option>During</option><option>After</option>
+      {(!CLOUD || reviewer) && (
+        <section className="card" id="new-report">
+          <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
+          {activities.length === 0 ? (
+            <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label className="field">
+                  Activity
+                  <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+                    {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
-                  <input ref={fileRef} type="file" accept="image/*" multiple className="input" style={{ width: 'auto' }} />
-                  <button className="btn" onClick={attachPhoto} disabled={photoBusy}>{photoBusy ? 'Saving…' : 'Add photo'}</button>
-                </>
-              )}
-            </div>
-          </>
-        )}
-      </section>
+                </label>
+                <label className="field">
+                  Report date
+                  <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                </label>
+                <label className="field">
+                  Actual completion (%) <span className="note">Previous: {fmtPct(prev)}</span>
+                  <input className="input" type="number" inputMode="decimal" min="0" max="100" step="0.1" value={pct} onChange={(e) => setPct(e.target.value)} />
+                </label>
+                <label className="field">
+                  Report notes
+                  <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Site work completed / issues" />
+                </label>
+              </div>
+              {error && <p className="bad" role="alert">{error}</p>}
+              {msg && !error && <p className="ok" role="status">{msg} <Link href="/">See it on the Overview</Link></p>}
+              <div className="form-actions">
+                <button className="btn btn-primary" onClick={save}>Save field report</button>
+                {activityId && (
+                  <>
+                    <select className="input" style={{ width: 'auto' }} value={photoKind} onChange={(e) => setPhotoKind(e.target.value as Evidence['kind'])}>
+                      <option>Before</option><option>During</option><option>After</option>
+                    </select>
+                    <input ref={fileRef} type="file" accept="image/*" multiple className="input" style={{ width: 'auto' }} />
+                    <button className="btn" onClick={attachPhoto} disabled={photoBusy}>{photoBusy ? 'Saving…' : 'Add photo'}</button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="card" id="reports-card">
         <div className="card-head">
@@ -200,7 +204,7 @@ export default function FieldReports() {
                         )}
                       </td>
                     )}
-                    <td>{(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
+                    <td>{(!CLOUD || (reviewer && r.status !== 'approved')) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
                   </tr>
                 ))}
               </tbody>

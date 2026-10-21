@@ -10,7 +10,7 @@ import { canManage, canView, cloudSignOut, useCloudStatus, VIEWS, viewOfPath } f
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
 const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/account/];
-const MANAGER_ONLY = new Set(['/estimating', '/quotation']);
+const MANAGER_ONLY = new Set(['/estimating', '/quotation', '/field-reports', '/site-evidence']);
 
 function CloudPill() {
   const c = useCloudStatus();

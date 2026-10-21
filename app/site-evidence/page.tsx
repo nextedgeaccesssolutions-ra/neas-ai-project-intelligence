@@ -113,35 +113,37 @@ export default function SiteEvidence() {
       </div>
       <ProjectBar />
 
-      <section className="card">
-        <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
-        {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
-          <>
-            <div className="form-grid">
-              <label className="field">Activity
-                <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
-                  {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </label>
-              <label className="field">Photo type
-                <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Evidence['kind'])}>
-                  <option>Before</option><option>During</option><option>After</option>
-                </select>
-              </label>
-              <label className="field">Capture photo
-                <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" multiple />
-              </label>
-              <label className="field">Caption
-                <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Location and observation" />
-              </label>
-            </div>
-            {error && <p className="bad" role="alert">{error}</p>}
-            <div className="form-actions">
-              <button className="btn btn-primary" onClick={attach} disabled={busy}>{busy ? 'Saving…' : 'Attach photo'}</button>
-            </div>
-          </>
-        )}
-      </section>
+      {(!CLOUD || reviewer) && (
+        <section className="card">
+          <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
+          {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
+            <>
+              <div className="form-grid">
+                <label className="field">Activity
+                  <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+                    {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </label>
+                <label className="field">Photo type
+                  <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Evidence['kind'])}>
+                    <option>Before</option><option>During</option><option>After</option>
+                  </select>
+                </label>
+                <label className="field">Capture photo
+                  <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" multiple />
+                </label>
+                <label className="field">Caption
+                  <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Location and observation" />
+                </label>
+              </div>
+              {error && <p className="bad" role="alert">{error}</p>}
+              <div className="form-actions">
+                <button className="btn btn-primary" onClick={attach} disabled={busy}>{busy ? 'Saving…' : 'Attach photo'}</button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="card" id="evidence-card">
         <div className="card-head">
@@ -165,7 +167,7 @@ export default function SiteEvidence() {
                       <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
                     </label>
                   )}
-                  <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>
+                  {(!CLOUD || reviewer) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
                 </figcaption>
               </figure>
             ))}
