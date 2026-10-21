@@ -376,15 +376,54 @@ const resetOf = (u: Profile) => {
 };
 const roleLabel = (r: string) => (r === 'project_manager' ? 'Project manager' : 'Employee');
 
+function UserAvatar({ name, role }: { name: string; role: string }) {
+  const initials = (name || '?').split(/\s+/).map((w) => w[0]?.toUpperCase() ?? '').slice(0, 2).join('');
+  return <div className={`user-avatar ${role === 'super_admin' ? 'user-avatar-admin' : 'user-avatar-staff'}`}>{initials}</div>;
+}
+
+function UserActionMenu({ u, selfId, onAction, onReview }: { u: Profile; selfId: string; onAction: (u: Profile, action: string, confirmText: string, danger?: boolean, reason?: string) => Promise<void>; onReview: (u: Profile, approve: boolean) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const self = u.id === selfId;
+  const close = () => setOpen(false);
+  const act = (action: string, text: string, danger = true, reason?: string) => { close(); onAction(u, action, text, danger, reason); };
+  return (
+    <div className="user-actions-menu">
+      <button className="user-actions-btn" onClick={() => setOpen(!open)} aria-label="User actions" aria-expanded={open}>⋮</button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={close} />
+          <div className="user-actions-drop">
+            {u.status === 'pending' && <><button onClick={() => { close(); onReview(u, true); }}>✓ Approve</button><button className="danger" onClick={() => { close(); onReview(u, false); }}>✕ Reject</button></>}
+            {u.status === 'active' && <button onClick={() => act('reset_password', `Send ${u.email} a secure password reset link?`, false)}>🔑 Send password reset</button>}
+            {u.status === 'active' && <button onClick={() => act('revoke_sessions', `Sign ${u.email} out on every device?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>⏏ Sign out everywhere</button>}
+            {!self && u.status === 'active' && <button className="danger" onClick={() => act('suspend', `Suspend ${u.email}? They lose access to all projects immediately.`)}>⛔ Suspend</button>}
+            {(u.status === 'suspended' || u.status === 'rejected') && <button onClick={() => act('reactivate', `Reactivate ${u.email}?`, false)}>▶ Activate</button>}
+            {!self && u.status === 'active' && (u.global_role === 'super_admin'
+              ? <button onClick={() => act('make_staff', `Remove Super Admin rights from ${u.email}?`)}>👤 Remove Super Admin</button>
+              : <button onClick={() => act('make_admin', `Give ${u.email} full Super Admin rights?`)}>🛡 Make Super Admin</button>)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; selfId: string; go: (t: Tab) => void }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [role, setRole] = useState('');
   const [project, setProject] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [sort, setSort] = useState<'name' | 'status' | 'role' | 'last_login' | 'created'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const code = (id: string) => d.projects.find((p) => p.id === id)?.code ?? '?';
   const membersOf = (id: string) => d.members.filter((m) => m.user_id === id);
   const projectsText = (id: string) => membersOf(id).map((m) => `${code(m.project_id)} (${m.role === 'project_manager' ? 'PM' : 'Employee'})`).join(', ');
+
+  const toggleSort = (col: typeof sort) => {
+    if (sort === col) setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    else { setSort(col); setSortDir('asc'); }
+  };
 
   const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
@@ -408,12 +447,26 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   };
 
   const ql = q.trim().toLowerCase();
-  const rows = d.profiles.filter((u) =>
+  const filtered = d.profiles.filter((u) =>
     (!status || u.status === status) &&
     (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
   );
+  const rows = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sort === 'name') cmp = (a.full_name || a.email).localeCompare(b.full_name || b.email);
+    else if (sort === 'status') cmp = a.status.localeCompare(b.status);
+    else if (sort === 'role') cmp = a.global_role.localeCompare(b.global_role);
+    else if (sort === 'last_login') cmp = (a.last_login_at ?? '').localeCompare(b.last_login_at ?? '');
+    else if (sort === 'created') cmp = a.created_at.localeCompare(b.created_at);
+    return sortDir === 'desc' ? -cmp : cmp;
+  });
+
+  const totalActive = d.profiles.filter((p) => p.status === 'active').length;
+  const totalPending = d.profiles.filter((p) => p.status === 'pending').length;
+  const totalAdmins = d.profiles.filter((p) => p.global_role === 'super_admin').length;
+  const arrow = (col: typeof sort) => sort === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
   const exportDoc = () => ({
     filename: `neas-user-directory-${new Date().toISOString().slice(0, 10)}`,
@@ -431,50 +484,83 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   });
 
   return (
-    <section className="card">
-      <div className="card-head">
-        <h2>User directory ({rows.length} of {d.profiles.length})</h2>
-        <div className="form-actions" style={{ marginTop: 0 }}>
-          <DataIO doc={exportDoc} label="users" />
-          <button className="btn btn-sm btn-primary" onClick={() => go('invitations')}>+ Create invitation</button>
+    <>
+      <div className="user-stats">
+        <div className="user-stat"><div className="user-stat-val">{d.profiles.length}</div><div className="user-stat-label">Total users</div></div>
+        <div className="user-stat active-stat"><div className="user-stat-val">{totalActive}</div><div className="user-stat-label">Active</div></div>
+        <div className="user-stat pending-stat"><div className="user-stat-val">{totalPending}</div><div className="user-stat-label">Pending approval</div></div>
+        <div className="user-stat admin-stat"><div className="user-stat-val">{totalAdmins}</div><div className="user-stat-label">Super Admins</div></div>
+      </div>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>User management</h2>
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <DataIO doc={exportDoc} label="users" />
+            <button className="btn btn-sm btn-primary" onClick={() => go('invitations')}>+ Invite user</button>
+          </div>
         </div>
-      </div>
-      <div className="form-grid" style={{ marginBottom: 12 }}>
-        <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
-        <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></label>
-        <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
-        <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
-      </div>
-      <div className="table-wrap">
-        <table className="tbl">
-          <thead><tr><th>Name / e-mail</th><th>Status</th><th>Approval</th><th>Role</th><th>Projects</th><th>Last sign-in</th><th>Created</th><th>Password</th><th>Reset</th><th /></tr></thead>
-          <tbody>
-            {rows.map((u) => (
-              <Fragment key={u.id}>
-                <tr>
-                  <td><b>{u.full_name || '—'}</b><div className="note">{u.email} · {u.email_verified_at ? 'verified' : 'not verified'}</div></td>
-                  <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
-                  <td className="note">{approvalOf(u)}</td>
-                  <td>{u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</td>
-                  <td className="note">{projectsText(u.id) || '—'}</td>
-                  <td className="note">{when(u.last_login_at)}</td>
-                  <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
-                  <td className="note">{passwordOf(u)}</td>
-                  <td className="note">{resetOf(u)}</td>
-                  <td><button className="btn btn-sm" onClick={() => setOpen(open === u.id ? null : u.id)} aria-expanded={open === u.id}>{open === u.id ? 'Close' : 'Manage'}</button></td>
-                </tr>
-                {open === u.id && (
-                  <tr><td colSpan={10}>
-                    <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
-                  </td></tr>
-                )}
-              </Fragment>
-            ))}
-            {!rows.length && <tr><td colSpan={10} className="empty">No users match.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </section>
+
+        <div className="form-grid" style={{ marginBottom: 14 }}>
+          <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
+          <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></label>
+          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
+          <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
+        </div>
+
+        {(status || role || project || ql) && (
+          <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="note">{rows.length} of {d.profiles.length} users</span>
+            <button className="btn btn-sm" onClick={() => { setQ(''); setStatus(''); setRole(''); setProject(''); }}>Clear filters</button>
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table className="tbl user-tbl">
+            <thead><tr>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('name')}>User{arrow('name')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('status')}>Status{arrow('status')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('role')}>Role{arrow('role')}</th>
+              <th>Projects</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('last_login')}>Last active{arrow('last_login')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('created')}>Joined{arrow('created')}</th>
+              <th />
+            </tr></thead>
+            <tbody>
+              {rows.map((u) => (
+                <Fragment key={u.id}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setOpen(open === u.id ? null : u.id)}>
+                    <td>
+                      <div className="user-name-cell">
+                        <UserAvatar name={u.full_name || u.email} role={u.global_role} />
+                        <div className="name-wrap">
+                          <b>{u.full_name || '—'}</b>
+                          <div className="note">{u.email}{u.email_verified_at ? '' : ' · unverified'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
+                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
+                    <td className="note">{projectsText(u.id) || '—'}</td>
+                    <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
+                    <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
+                    </td>
+                  </tr>
+                  {open === u.id && (
+                    <tr><td colSpan={7}>
+                      <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+              {!rows.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -565,35 +651,55 @@ function UserPanel({ u, d, self, act, review, reload }: {
   };
 
   return (
-    <div className="user-panel" style={{ display: 'grid', gap: 16 }}>
-      {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={u.full_name || u.email} onClose={() => setIssued(null)} />}
-      {(u.status === 'active' || u.status === 'pending') && (
-        <div className="form-actions" style={{ marginTop: 0 }}>
-          <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Code valid for
-            <select className="input" style={{ maxWidth: 120 }} value={codeHours} onChange={(e) => setCodeHours(Number(e.target.value))}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select>
-          </label>
-          <button className="btn btn-sm btn-primary" onClick={() => issue(u.status === 'pending')}>{u.status === 'pending' ? 'Approve and give one-time code' : 'Give one-time sign-in code'}</button>
+    <div className="user-detail-panel">
+      <div className="user-detail-header">
+        <UserAvatar name={u.full_name || u.email} role={u.global_role} />
+        <div className="user-detail-info">
+          <h3>{u.full_name || u.email}</h3>
+          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'} · <Pill s={u.status} /></div>
         </div>
-      )}
-      <div className="form-actions" style={{ marginTop: 0 }}>
-        {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail link)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
-        {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They are signed out everywhere and lose access to all projects immediately. Their queued offline changes will be refused.`)}>Suspend</button>}
-        {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}? They can sign in again with their existing password.`, false)}>Activate</button>}
-        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a secure password reset link? You will never see their password.`, false)}>Send password reset</button>}
-        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out on every device? ${self ? 'This includes you.' : 'They can sign in again unless suspended.'}`, true, 'Revoked by administrator')}>Sign out everywhere</button>}
-        {!self && u.status === 'active' && (u.global_role === 'super_admin'
-          ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin rights from ${u.email}?`)}>Remove Super Admin</button>
-          : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Give ${u.email} full Super Admin rights over every project and account?`)}>Make Super Admin</button>)}
       </div>
-      {u.sessions_revoked_at && <p className="note" style={{ margin: 0 }}>Sessions last revoked {when(u.sessions_revoked_at)}.</p>}
 
-      <ViewsEditor u={u} reload={reload} />
+      {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={u.full_name || u.email} onClose={() => setIssued(null)} />}
 
-      <div>
-        <h3 style={{ margin: '0 0 6px' }}>Project access</h3>
+      <div className="user-section">
+        <h4>Account actions</h4>
+        <div className="kv" style={{ maxWidth: 400, marginBottom: 12 }}>
+          <span className="note">Password</span><span className="note">{passwordOf(u)}</span>
+          <span className="note">Reset</span><span className="note">{resetOf(u)}</span>
+          <span className="note">Approval</span><span className="note">{approvalOf(u)}</span>
+          {u.sessions_revoked_at && <><span className="note">Sessions revoked</span><span className="note">{when(u.sessions_revoked_at)}</span></>}
+        </div>
+        {(u.status === 'active' || u.status === 'pending') && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Code valid for
+              <select className="input" style={{ maxWidth: 120 }} value={codeHours} onChange={(e) => setCodeHours(Number(e.target.value))}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select>
+            </label>
+            <button className="btn btn-sm btn-primary" onClick={() => issue(u.status === 'pending')}>{u.status === 'pending' ? 'Approve + one-time code' : 'One-time sign-in code'}</button>
+          </div>
+        )}
+        <div className="user-detail-actions">
+          {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
+          {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They lose access immediately.`)}>Suspend</button>}
+          {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}?`, false)}>Activate</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a password reset link?`, false)}>Password reset</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out everywhere?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>Sign out all</button>}
+          {!self && u.status === 'active' && (u.global_role === 'super_admin'
+            ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin from ${u.email}?`)}>Remove Admin</button>
+            : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Make ${u.email} Super Admin?`)}>Make Admin</button>)}
+        </div>
+      </div>
+
+      <div className="user-section">
+        <h4>Module access</h4>
+        <ViewsEditor u={u} reload={reload} />
+      </div>
+
+      <div className="user-section">
+        <h4>Project access</h4>
         {u.global_role === 'super_admin' && <p className="note" style={{ marginTop: 0 }}>Super Admins can open every project; memberships below set their project role.</p>}
         <table className="tbl">
-          <thead><tr><th>Project</th><th>Role</th><th>Can approve reports</th><th /></tr></thead>
+          <thead><tr><th>Project</th><th>Role</th><th>Can approve</th><th /></tr></thead>
           <tbody>
             {mine.map((m) => {
               const p = d.projects.find((x) => x.id === m.project_id);
@@ -618,22 +724,24 @@ function UserPanel({ u, d, self, act, review, reload }: {
         )}
       </div>
 
-      <div>
-        <h3 style={{ margin: '0 0 6px' }}>Sign-in and administration history</h3>
-        {!log.length ? <p className="note" style={{ marginTop: 0 }}>No recorded events in the latest audit entries.</p> : (
-          <table className="tbl">
-            <thead><tr><th>When</th><th>Event</th><th>By</th><th>Project</th></tr></thead>
-            <tbody>
-              {log.map((a) => (
-                <tr key={a.id}>
-                  <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
-                  <td title={a.action}>{eventLabel(a.action)}</td>
-                  <td className="note">{a.actor_kind === 'system' ? 'System' : a.actor_id === u.id ? 'User' : names.get(a.actor_id ?? '') ?? '—'}</td>
-                  <td className="note">{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="user-section">
+        <h4>Activity log</h4>
+        {!log.length ? <p className="note" style={{ margin: 0 }}>No recorded events.</p> : (
+          <div className="table-wrap">
+            <table className="tbl">
+              <thead><tr><th>When</th><th>Event</th><th>By</th><th>Project</th></tr></thead>
+              <tbody>
+                {log.map((a) => (
+                  <tr key={a.id}>
+                    <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
+                    <td title={a.action}>{eventLabel(a.action)}</td>
+                    <td className="note">{a.actor_kind === 'system' ? 'System' : a.actor_id === u.id ? 'User' : names.get(a.actor_id ?? '') ?? '—'}</td>
+                    <td className="note">{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

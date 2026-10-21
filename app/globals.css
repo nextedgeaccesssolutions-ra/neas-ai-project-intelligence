@@ -261,3 +261,44 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
 }
 @media (max-width: 480px) { .wt { padding: 14px; } .wt-item { grid-template-columns: 64px 1fr 16px; } .wt-mini { width: 64px; height: 48px; } }
 @media print { .wt-phone, .wt-arrows, .wt-features, .wt-addsmall { display: none; } .wt-split { display: block; } }
+
+/* ---------- Admin Users redesign ---------- */
+.user-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; margin-bottom: 4px; }
+.user-stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.user-stat-val { font-size: 28px; font-weight: 900; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.user-stat-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.user-stat.active-stat .user-stat-val { color: var(--ok); }
+.user-stat.pending-stat .user-stat-val { color: var(--warn); }
+.user-stat.admin-stat .user-stat-val { color: var(--navy); }
+
+.user-avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; letter-spacing: .02em; flex: none; }
+.user-avatar-staff { background: #e0eaf1; color: var(--navy); }
+.user-avatar-admin { background: var(--sand); color: var(--navy); }
+
+.user-name-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.user-name-cell .name-wrap { min-width: 0; }
+.user-name-cell b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+
+.user-actions-menu { position: relative; display: inline-block; }
+.user-actions-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: #f5f7f9; cursor: pointer; font-size: 16px; color: var(--muted); }
+.user-actions-btn:hover { background: #eaeef1; color: var(--ink); }
+.user-actions-drop { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 30px rgba(7,29,41,.16); padding: 4px; min-width: 200px; display: flex; flex-direction: column; }
+.user-actions-drop button { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 8px 10px; border-radius: 7px; text-align: left; cursor: pointer; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.user-actions-drop button:hover { background: #f3f6f8; }
+.user-actions-drop .danger { color: var(--bad); }
+
+.user-detail-panel { background: #fbfcfd; border-radius: 10px; padding: 20px; display: grid; gap: 20px; }
+.user-detail-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.user-detail-header .user-avatar { width: 52px; height: 52px; font-size: 18px; }
+.user-detail-info { flex: 1; min-width: 0; }
+.user-detail-info h3 { margin: 0 0 2px; font-size: 16px; }
+.user-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.user-section { border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: #fff; }
+.user-section h4 { margin: 0 0 10px; font-size: 13px; font-weight: 800; color: var(--navy); text-transform: uppercase; letter-spacing: .08em; }
+
+@media (max-width: 900px) {
+  .tbl.user-tbl thead { display: none; }
+  .tbl.user-tbl tr { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .tbl.user-tbl td { padding: 0; border: 0; }
+}
