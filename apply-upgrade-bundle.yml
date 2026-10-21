@@ -1,0 +1,23 @@
+# One-time helper: publishes the NEAS platform upgrade (neas-platform-upgrade.bundle) as branch
+# feature/platform-upgrade. Runs only on the temporary branch upgrade-staging; it never
+# touches main. Delete the upgrade-staging branch afterwards.
+name: Apply NEAS upgrade bundle
+on:
+  push:
+    branches: [upgrade-staging]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify and publish branch
+        run: |
+          git bundle verify .github/workflows/neas-platform-upgrade.bundle
+          git fetch .github/workflows/neas-platform-upgrade.bundle "refs/heads/feature/platform-upgrade:refs/remotes/bundle/upgrade"
+          git log --oneline -3 bundle/upgrade
+          git merge-base --is-ancestor origin/main bundle/upgrade || echo "note: main has moved since the upgrade was prepared"
+          git push origin "refs/remotes/bundle/upgrade:refs/heads/feature/platform-upgrade"

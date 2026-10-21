@@ -1,0 +1,9 @@
+{
+  "name": "NEAS Intelligence · Project Control",
+  "short_name": "NEAS PC",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071D29",
+  "theme_color": "#071D29",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
