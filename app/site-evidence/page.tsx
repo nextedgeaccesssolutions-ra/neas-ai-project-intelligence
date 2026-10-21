@@ -117,9 +117,8 @@ export default function SiteEvidence() {
       </div>
       <ProjectBar />
 
-      {(!CLOUD || reviewer) && (
-        <section className="card">
-          <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
+      <section className="card">
+        <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
           {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
             <>
               <div className="form-grid">
@@ -146,8 +145,7 @@ export default function SiteEvidence() {
               </div>
             </>
           )}
-        </section>
-      )}
+      </section>
 
       <section className="card" id="evidence-card">
         <div className="card-head">
@@ -197,7 +195,7 @@ export default function SiteEvidence() {
                         <div style={{ display: 'flex', gap: 6 }}>
                           {canEdit && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); }}>Edit</button>}
                           {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
-                          {(!CLOUD || reviewer) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
+                          {canEdit && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
                         </div>
                       </>
                     )}
