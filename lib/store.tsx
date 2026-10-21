@@ -50,6 +50,7 @@ interface StoreApi {
   quotationFor: (projectId: string) => Quotation;
   setQuotation: (q: Quotation) => void;
   addEvidence: (e: Evidence) => void;
+  updateEvidence: (id: string, patch: Partial<Evidence>) => void;
   deleteEvidence: (id: string) => void;
   replaceAll: (s: AppState) => void;
   resetDemo: () => void;
@@ -193,6 +194,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       quotationFor,
       setQuotation: (q) => update((s) => ({ ...s, quotations: { ...s.quotations, [q.projectId]: q } })),
       addEvidence: (e) => update((s) => ({ ...s, evidence: [...s.evidence, e] })),
+      updateEvidence: (id, patch) => update((s) => ({ ...s, evidence: s.evidence.map((e) => e.id === id ? { ...e, ...patch } : e) })),
       deleteEvidence: (id) => {
         deletePhoto(id).catch(() => undefined);
         update((s) => ({ ...s, evidence: s.evidence.filter((e) => e.id !== id) }));

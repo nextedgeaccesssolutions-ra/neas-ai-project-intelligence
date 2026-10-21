@@ -9,6 +9,9 @@ import DataIO from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
+import { CLOUD } from '@/lib/cloud/env';
+import { useCanManage } from '@/components/RoleGate';
+import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence } from '@/lib/types';
 import PhotoThumb from '@/components/PhotoThumb';
 
@@ -17,15 +20,35 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const Thumb = ({ id, alt }: { id: string; alt: string }) => <PhotoThumb id={id} alt={alt} />;
 
 export default function SiteEvidence() {
-  const { ready, project, addEvidence, deleteEvidence, state } = useStore();
+  const { ready, project, addEvidence, updateEvidence, deleteEvidence, state } = useStore();
   const { pid, activities, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
+  const reviewer = useCanManage();
   const [activityId, setActivityId] = useState('');
   const [kind, setKind] = useState<Evidence['kind']>('Before');
   const [caption, setCaption] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editKind, setEditKind] = useState<Evidence['kind']>('Before');
+  const [editCaption, setEditCaption] = useState('');
+  const [editActivity, setEditActivity] = useState('');
+
+  useEffect(() => {
+    if (!CLOUD || !pid) return;
+    supabaseBrowser()?.from('report_attachments').select('id, client_visible').eq('project_id', pid).then(({ data }) => {
+      if (data) setClientVisible(Object.fromEntries(data.map((r) => [r.id, r.client_visible])));
+    });
+  }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleClientVisible = async (id: string, val: boolean) => {
+    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
+    if (err) return setError(`Could not update: ${err.message}`);
+    setClientVisible((prev) => ({ ...prev, [id]: val }));
+    notify(val ? 'Shared with client.' : 'Hidden from client.');
+  };
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -96,32 +119,32 @@ export default function SiteEvidence() {
 
       <section className="card">
         <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
-        {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
-          <>
-            <div className="form-grid">
-              <label className="field">Activity
-                <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
-                  {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </label>
-              <label className="field">Photo type
-                <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Evidence['kind'])}>
-                  <option>Before</option><option>During</option><option>After</option>
-                </select>
-              </label>
-              <label className="field">Capture photo
-                <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" multiple />
-              </label>
-              <label className="field">Caption
-                <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Location and observation" />
-              </label>
-            </div>
-            {error && <p className="bad" role="alert">{error}</p>}
-            <div className="form-actions">
-              <button className="btn btn-primary" onClick={attach} disabled={busy}>{busy ? 'Saving…' : 'Attach photo'}</button>
-            </div>
-          </>
-        )}
+          {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
+            <>
+              <div className="form-grid">
+                <label className="field">Activity
+                  <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+                    {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </label>
+                <label className="field">Photo type
+                  <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Evidence['kind'])}>
+                    <option>Before</option><option>During</option><option>After</option>
+                  </select>
+                </label>
+                <label className="field">Capture photo
+                  <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" multiple />
+                </label>
+                <label className="field">Caption
+                  <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Location and observation" />
+                </label>
+              </div>
+              {error && <p className="bad" role="alert">{error}</p>}
+              <div className="form-actions">
+                <button className="btn btn-primary" onClick={attach} disabled={busy}>{busy ? 'Saving…' : 'Attach photo'}</button>
+              </div>
+            </>
+          )}
       </section>
 
       <section className="card" id="evidence-card">
@@ -134,17 +157,52 @@ export default function SiteEvidence() {
         </div>
         {shown.length === 0 ? <div className="empty">No field evidence captured yet.</div> : (
           <div className="photo-grid">
-            {shown.map((e) => (
-              <figure key={e.id} className="photo" style={{ margin: 0 }}>
-                <Thumb id={e.id} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
-                <figcaption className="meta">
-                  <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
-                  <span>{e.caption || <span className="note">No caption</span>}</span>
-                  <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB</span>
-                  <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>
-                </figcaption>
-              </figure>
-            ))}
+            {shown.map((e) => {
+              const isEditing = editing === e.id;
+              const edits = e.editCount ?? 0;
+              const canEdit = !CLOUD || reviewer || edits < 1;
+              const needsApproval = CLOUD && !reviewer && edits >= 1;
+              return (
+                <figure key={e.id} className="photo" style={{ margin: 0 }}>
+                  <Thumb id={e.id} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
+                  <figcaption className="meta">
+                    {isEditing ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as Evidence['kind'])}>
+                            <option>Before</option><option>During</option><option>After</option>
+                          </select>
+                          <select className="input" style={{ width: 'auto', flex: 1 }} value={editActivity} onChange={(ev) => setEditActivity(ev.target.value)}>
+                            {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        </div>
+                        <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Caption" />
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-sm btn-primary" onClick={() => { updateEvidence(e.id, { kind: editKind, activityId: editActivity, caption: editCaption, editCount: edits + 1 }); setEditing(null); notify('Photo updated.'); }}>Save</button>
+                          <button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
+                        <span>{e.caption || <span className="note">No caption</span>}</span>
+                        <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+                        {CLOUD && reviewer && (
+                          <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
+                            <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
+                          </label>
+                        )}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {canEdit && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); }}>Edit</button>}
+                          {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
+                          {canEdit && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
+                        </div>
+                      </>
+                    )}
+                  </figcaption>
+                </figure>
+              );
+            })}
           </div>
         )}
       </section>
