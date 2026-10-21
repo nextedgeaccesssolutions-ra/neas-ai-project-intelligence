@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
@@ -12,7 +12,9 @@ import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
-import { askConfirm } from '@/components/Dialogs';
+import { askConfirm, notify } from '@/components/Dialogs';
+import { compressImage, putPhoto } from '@/lib/photos';
+import type { Evidence } from '@/lib/types';
 import WalkthroughReport from '@/components/WalkthroughReport';
 
 export default function FieldReports() {
@@ -37,6 +39,9 @@ export default function FieldReports() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [photoKind, setPhotoKind] = useState<Evidence['kind']>('Before');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -61,6 +66,27 @@ export default function FieldReports() {
     setError(null);
     setPct('');
     setNotes('');
+  };
+
+  const attachPhoto = async () => {
+    const files = Array.from(fileRef.current?.files ?? []);
+    if (!activityId) return setError('Choose an activity first.');
+    if (!files.length) return setError('Choose or capture a photo.');
+    setPhotoBusy(true);
+    let ok = 0;
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        const blob = await compressImage(file);
+        const id = uid('ev');
+        await putPhoto(id, blob);
+        addEvidence({ id, projectId: pid, activityId, kind: photoKind, caption: file.name.replace(/\.[^.]+$/, ''), takenAt: new Date(file.lastModified || Date.now()).toISOString(), bytes: blob.size });
+        ok++;
+      } catch { /* skip */ }
+    }
+    setPhotoBusy(false);
+    if (fileRef.current) fileRef.current.value = '';
+    if (ok) notify(`${ok} photo(s) added to ${name(activityId)}.`);
   };
 
   const shown = filter ? reports.filter((r) => r.activityId === filter) : reports;
@@ -124,7 +150,15 @@ export default function FieldReports() {
             {msg && !error && <p className="ok" role="status">{msg} <Link href="/">See it on the Overview</Link></p>}
             <div className="form-actions">
               <button className="btn btn-primary" onClick={save}>Save field report</button>
-              {activityId && <Link className="btn" href={`/site-evidence?activity=${activityId}`}>Add photo for this activity</Link>}
+              {activityId && (
+                <>
+                  <select className="input" style={{ width: 'auto' }} value={photoKind} onChange={(e) => setPhotoKind(e.target.value as Evidence['kind'])}>
+                    <option>Before</option><option>During</option><option>After</option>
+                  </select>
+                  <input ref={fileRef} type="file" accept="image/*" multiple className="input" style={{ width: 'auto' }} />
+                  <button className="btn" onClick={attachPhoto} disabled={photoBusy}>{photoBusy ? 'Saving…' : 'Add photo'}</button>
+                </>
+              )}
             </div>
           </>
         )}
