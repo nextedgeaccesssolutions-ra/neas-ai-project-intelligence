@@ -99,12 +99,10 @@ export default function FieldReports() {
           <h1>Field reports</h1>
           <p className="lead">Record cumulative % complete per activity. Each saved report updates the Overview straight away.</p>
         </div>
-        {(!CLOUD || reviewer) && (
-          <div className="form-actions" style={{ marginTop: 0 }}>
-            <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
-            <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
-          </div>
-        )}
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
+          <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
+        </div>
       </div>
       <ProjectBar />
 
@@ -122,9 +120,8 @@ export default function FieldReports() {
         }}
       />
 
-      {(!CLOUD || reviewer) && (
-        <section className="card" id="new-report">
-          <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
+      <section className="card" id="new-report">
+        <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
           {activities.length === 0 ? (
             <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>
           ) : (
@@ -165,8 +162,7 @@ export default function FieldReports() {
               </div>
             </>
           )}
-        </section>
-      )}
+      </section>
 
       <section className="card" id="reports-card">
         <div className="card-head">
@@ -204,7 +200,7 @@ export default function FieldReports() {
                         )}
                       </td>
                     )}
-                    <td>{(!CLOUD || (reviewer && r.status !== 'approved')) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
+                    <td>{(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
                   </tr>
                 ))}
               </tbody>
