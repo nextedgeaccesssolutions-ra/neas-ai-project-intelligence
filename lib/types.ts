@@ -86,6 +86,7 @@ export interface Evidence {
   bytes: number;
   /** cloud mode: object path in the private bucket */
   storagePath?: string;
+  editCount?: number;
 }
 
 export interface AppState {

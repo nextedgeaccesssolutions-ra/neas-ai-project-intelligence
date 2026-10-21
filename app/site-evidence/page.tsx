@@ -20,7 +20,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const Thumb = ({ id, alt }: { id: string; alt: string }) => <PhotoThumb id={id} alt={alt} />;
 
 export default function SiteEvidence() {
-  const { ready, project, addEvidence, deleteEvidence, state } = useStore();
+  const { ready, project, addEvidence, updateEvidence, deleteEvidence, state } = useStore();
   const { pid, activities, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
@@ -31,6 +31,10 @@ export default function SiteEvidence() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editKind, setEditKind] = useState<Evidence['kind']>('Before');
+  const [editCaption, setEditCaption] = useState('');
+  const [editActivity, setEditActivity] = useState('');
 
   useEffect(() => {
     if (!CLOUD || !pid) return;
@@ -155,22 +159,52 @@ export default function SiteEvidence() {
         </div>
         {shown.length === 0 ? <div className="empty">No field evidence captured yet.</div> : (
           <div className="photo-grid">
-            {shown.map((e) => (
-              <figure key={e.id} className="photo" style={{ margin: 0 }}>
-                <Thumb id={e.id} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
-                <figcaption className="meta">
-                  <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
-                  <span>{e.caption || <span className="note">No caption</span>}</span>
-                  <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB</span>
-                  {CLOUD && reviewer && (
-                    <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
-                      <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
-                    </label>
-                  )}
-                  {(!CLOUD || reviewer) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
-                </figcaption>
-              </figure>
-            ))}
+            {shown.map((e) => {
+              const isEditing = editing === e.id;
+              const edits = e.editCount ?? 0;
+              const canEdit = !CLOUD || reviewer || edits < 1;
+              const needsApproval = CLOUD && !reviewer && edits >= 1;
+              return (
+                <figure key={e.id} className="photo" style={{ margin: 0 }}>
+                  <Thumb id={e.id} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
+                  <figcaption className="meta">
+                    {isEditing ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as Evidence['kind'])}>
+                            <option>Before</option><option>During</option><option>After</option>
+                          </select>
+                          <select className="input" style={{ width: 'auto', flex: 1 }} value={editActivity} onChange={(ev) => setEditActivity(ev.target.value)}>
+                            {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        </div>
+                        <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Caption" />
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-sm btn-primary" onClick={() => { updateEvidence(e.id, { kind: editKind, activityId: editActivity, caption: editCaption, editCount: edits + 1 }); setEditing(null); notify('Photo updated.'); }}>Save</button>
+                          <button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
+                        <span>{e.caption || <span className="note">No caption</span>}</span>
+                        <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+                        {CLOUD && reviewer && (
+                          <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
+                            <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
+                          </label>
+                        )}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {canEdit && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); }}>Edit</button>}
+                          {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
+                          {(!CLOUD || reviewer) && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
+                        </div>
+                      </>
+                    )}
+                  </figcaption>
+                </figure>
+              );
+            })}
           </div>
         )}
       </section>
