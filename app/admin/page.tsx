@@ -871,7 +871,11 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
 }
 
 const VIS: [string, string][] = [
-  ['show_overview', 'Project overview'], ['show_milestones', 'Approved milestones'], ['show_progress', 'Overall progress %'], ['show_gantt', 'Gantt chart'],
+  ['show_overview', 'Overview'], ['show_estimating', 'Estimating & BOQ'], ['show_quotation', 'Quotation preview'],
+  ['show_project_management', 'Project management'], ['show_field_reports', 'Field reports'],
+  ['show_project_register', 'Project register'], ['show_site_evidence', 'Site evidence'],
+  ['show_google_sheets', 'Google Sheets setup'], ['show_offline_queue', 'Offline queue'],
+  ['show_milestones', 'Approved milestones'], ['show_progress', 'Overall progress %'], ['show_gantt', 'Gantt chart'],
   ['show_scurve', 'S-curve'], ['show_reports', 'Approved progress reports'], ['show_photos', 'Approved before/after photos'], ['show_documents', 'Approved documents'], ['show_completion', 'Completion status'],
 ];
 
