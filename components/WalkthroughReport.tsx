@@ -89,7 +89,7 @@ export default function WalkthroughReport({
               <figure className="wt-shot" key={a.id}>
                 <figcaption className="wt-tag"><span aria-hidden>📷</span> {a.name}</figcaption>
                 {photo ? (
-                  <PhotoThumb id={photo.id} alt={`${a.name}: ${photo.caption}`} className="wt-img" />
+                  <PhotoThumb id={photo.id} storagePath={photo.storagePath} alt={`${a.name}: ${photo.caption}`} className="wt-img" />
                 ) : (
                   <button type="button" className="wt-img wt-empty" onClick={() => takePhoto(a.id)}>No photo yet · tap to add</button>
                 )}
@@ -119,7 +119,7 @@ export default function WalkthroughReport({
             {withStatus.map(({ a, s, photo }) => (
               <li key={a.id}>
                 <button type="button" className="wt-item" onClick={() => onPick(a.id)} title="Record progress for this activity">
-                  {photo ? <PhotoThumb id={photo.id} alt="" className="wt-mini" /> : <span className="wt-mini wt-mini-empty" aria-hidden>📷</span>}
+                  {photo ? <PhotoThumb id={photo.id} storagePath={photo.storagePath} alt="" className="wt-mini" /> : <span className="wt-mini wt-mini-empty" aria-hidden>📷</span>}
                   <span className="wt-item-body">
                     <strong>{a.name}</strong>
                     <span className={`chip chip-${s.tone}`}><span aria-hidden>{s.icon}</span> {s.label}</span>

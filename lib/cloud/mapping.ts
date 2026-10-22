@@ -7,7 +7,11 @@ export interface DbReport { id: string; project_id: string; activity_id: string 
 export interface DbBoq { id: string; project_id: string; item: string; description: string; category: string; unit: string; qty: number | string; unit_cost: number | string; version: number; deleted_at: string | null }
 export interface DbCost { id: string; project_id: string; overhead_pct: number | string; contingency_pct: number | string; insurance_pct: number | string; bond_pct: number | string; warranty_pct: number | string; markup_pct: number | string; vat_pct: number | string; vat_mode: string; version: number }
 export interface DbQuote { id: string; project_id: string; number: string; status: string; validity_days: number; terms: string; approved_by: string | null; approved_at: string | null; issued_at: string | null; approved_total: number | string | null; history: Quotation['history']; version: number }
-export interface DbAttachment { id: string; project_id: string; report_id: string | null; activity_id: string | null; kind: string; storage_path: string; caption: string; mime_type: string; bytes: number; client_visible: boolean; created_at: string; version: number; deleted_at: string | null }
+export interface DbAttachment {
+  id: string; project_id: string; report_id: string | null; activity_id: string | null; kind: string; storage_path: string; caption: string; mime_type: string; bytes: number; client_visible: boolean; created_at: string; version: number; deleted_at: string | null;
+  captured_at?: string | null; gps_lat?: number | string | null; gps_lng?: number | string | null; gps_accuracy_m?: number | string | null; gps_altitude_m?: number | string | null; gps_heading?: number | string | null; gps_captured_at?: string | null; gps_status?: string | null;
+  work_area?: string | null; location_detail?: string | null; pair_id?: string | null; photo_ref?: string | null;
+}
 
 const num = (v: unknown) => (v == null || v === '' ? 0 : Number(v));
 const STATUS_MAP: Record<string, ProjectStatus> = { draft: 'draft', active: 'active', suspended: 'on-hold', completed: 'completed', archived: 'completed' };
@@ -21,7 +25,18 @@ export const reportFromDb = (r: DbReport): FieldReport => ({ id: r.id, projectId
 export const boqFromDb = (b: DbBoq): BoqLine => ({ id: b.id, projectId: b.project_id, item: b.item, description: b.description, category: b.category as BoqLine['category'], unit: b.unit, qty: num(b.qty), unitCost: num(b.unit_cost) });
 export const costFromDb = (c: DbCost): CostSettings => ({ overheadPct: num(c.overhead_pct), contingencyPct: num(c.contingency_pct), insurancePct: num(c.insurance_pct), bondPct: num(c.bond_pct), warrantyPct: num(c.warranty_pct), markupPct: num(c.markup_pct), vatPct: num(c.vat_pct), vatMode: c.vat_mode === 'exempt' ? 'exempt' : 'exclusive' });
 export const quoteFromDb = (q: DbQuote): Quotation => ({ projectId: q.project_id, number: q.number, status: q.status as Quotation['status'], validityDays: q.validity_days, terms: q.terms, approvedBy: q.approved_by, approvedAt: q.approved_at, issuedAt: q.issued_at, approvedTotal: q.approved_total == null ? null : num(q.approved_total), history: q.history ?? [] });
-export const evidenceFromDb = (f: DbAttachment): Evidence => ({ id: f.id, projectId: f.project_id, activityId: f.activity_id ?? '', kind: (f.kind === 'before' ? 'Before' : f.kind === 'after' ? 'After' : 'During'), caption: f.caption, takenAt: f.created_at, bytes: f.bytes, storagePath: f.storage_path });
+const KIND_FROM_DB: Record<string, Evidence['kind']> = { before: 'Before', after: 'After', during: 'During', inspection: 'Inspection', safety: 'Safety', defect: 'Defect' };
+const optNum = (v: unknown) => (v == null || v === '' ? null : Number(v));
+export const evidenceFromDb = (f: DbAttachment): Evidence => {
+  const lat = optNum(f.gps_lat), lng = optNum(f.gps_lng);
+  return {
+    id: f.id, projectId: f.project_id, activityId: f.activity_id ?? '', kind: KIND_FROM_DB[f.kind] ?? 'During', caption: f.caption,
+    takenAt: f.captured_at ?? f.created_at, bytes: f.bytes, storagePath: f.storage_path,
+    gps: lat != null && lng != null ? { lat, lng, accuracy: optNum(f.gps_accuracy_m), altitude: optNum(f.gps_altitude_m), heading: optNum(f.gps_heading), at: f.gps_captured_at ?? f.captured_at ?? f.created_at } : null,
+    gpsStatus: (f.gps_status as Evidence['gpsStatus']) ?? 'not_requested',
+    workArea: f.work_area ?? '', locationDetail: f.location_detail ?? '', pairId: f.pair_id ?? null, ref: f.photo_ref ?? '',
+  };
+};
 
 // ---- app model → database payloads (only writable columns; server sets the rest) ----
 export const activityToDb = (a: Activity) => ({ name: a.name, start_date: a.start, end_date: a.end, weight: a.weight });
@@ -29,7 +44,18 @@ export const reportToDb = (r: FieldReport) => ({ activity_id: r.activityId || nu
 export const boqToDb = (b: BoqLine) => ({ item: b.item, description: b.description, category: b.category, unit: b.unit, qty: b.qty, unit_cost: b.unitCost });
 export const costToDb = (c: CostSettings) => ({ overhead_pct: c.overheadPct, contingency_pct: c.contingencyPct, insurance_pct: c.insurancePct, bond_pct: c.bondPct, warranty_pct: c.warrantyPct, markup_pct: c.markupPct, vat_pct: c.vatPct, vat_mode: c.vatMode });
 export const quoteToDb = (q: Quotation) => ({ number: q.number, status: q.status, validity_days: q.validityDays, terms: q.terms, approved_at: q.approvedAt, issued_at: q.issuedAt, approved_total: q.approvedTotal, history: q.history });
-export const evidenceToDb = (e: Evidence) => ({ activity_id: e.activityId || null, kind: e.kind.toLowerCase(), caption: e.caption, storage_path: e.storagePath ?? `${e.projectId}/${e.id}.jpg`, mime_type: 'image/jpeg', bytes: e.bytes });
+export const evidenceToDb = (e: Evidence) => {
+  const located = !!e.gps && (e.gpsStatus === 'captured' || e.gpsStatus === 'manual');
+  const status = located ? e.gpsStatus : e.gpsStatus === 'captured' || e.gpsStatus === 'manual' ? 'unavailable' : e.gpsStatus ?? 'not_requested';
+  return {
+    activity_id: e.activityId || null, kind: e.kind.toLowerCase(), caption: e.caption, storage_path: e.storagePath ?? `${e.projectId}/${e.id}.jpg`, mime_type: 'image/jpeg', bytes: e.bytes,
+    captured_at: e.takenAt, gps_status: status,
+    gps_lat: located ? e.gps!.lat : null, gps_lng: located ? e.gps!.lng : null,
+    gps_accuracy_m: located ? e.gps!.accuracy ?? null : null, gps_altitude_m: located ? e.gps!.altitude ?? null : null,
+    gps_heading: located ? e.gps!.heading ?? null : null, gps_captured_at: located ? e.gps!.at : null,
+    work_area: e.workArea ?? '', location_detail: e.locationDetail ?? '', pair_id: e.pairId ?? null, photo_ref: e.ref ?? '',
+  };
+};
 
 export interface DbBundle {
   projects: DbProject[];
