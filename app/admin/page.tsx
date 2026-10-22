@@ -10,15 +10,15 @@ import { projectProgress, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPHP, fmtPct } from '@/lib/format';
 import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
-import { VIEWS } from '@/lib/cloud/cloudSync';
+import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
 
-type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'audit' | 'security';
+type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
 const TABS: [Tab, string][] = [
   ['overview', 'Overview'], ['projects', 'Projects'], ['users', 'User directory'], ['approvals', 'Pending approvals'], ['invitations', 'Invitations'],
-  ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['audit', 'Audit log'], ['security', 'Security settings'],
+  ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['recovery', 'Data recovery'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
@@ -40,12 +40,14 @@ const EVENT: Record<string, string> = {
   'account:invited_user_created': 'Joined from invitation', 'insert:project_memberships': 'Project access granted',
   'update:project_memberships': 'Project role changed', 'delete:project_memberships': 'Project access removed',
   'update:profiles': 'Account updated (status, role or approval)', 'insert:profiles': 'Account created',
+  'account:deleted': 'Account deleted (reversible)',
+  'recovery:dry_run': 'Data recovery dry run', 'recovery:applied': 'Data recovery applied', 'recovery:rolled_back': 'Data recovery rolled back',
   'client:login': 'Client portal sign-in', 'client:login_failed': 'Client portal: wrong passcode', 'client:login_throttled': 'Client portal locked after failed tries', 'system:legacy_import': 'Imported from the old app',
 };
 const eventLabel = (a: string) => EVENT[a] ?? a.replace(':', ' · ').replace(/_/g, ' ');
 const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—');
 const Pill = ({ s }: { s: string }) => {
-  const tone = ['active', 'approved', 'ok', 'applied'].includes(s) ? 'pill-ok' : ['pending', 'draft', 'conflict', 'skipped'].includes(s) ? 'pill-warn' : ['suspended', 'rejected', 'error', 'archived'].includes(s) ? 'pill-bad' : '';
+  const tone = ['active', 'approved', 'ok', 'applied'].includes(s) ? 'pill-ok' : ['pending', 'draft', 'conflict', 'skipped'].includes(s) ? 'pill-warn' : ['suspended', 'rejected', 'error', 'archived', 'deleted'].includes(s) ? 'pill-bad' : '';
   return <span className={`pill ${tone}`}>{s}</span>;
 };
 
@@ -127,6 +129,7 @@ export default function AdminPage() {
           {tab === 'invitations' && <Invitations d={data} reload={load} />}
           {tab === 'client' && <ClientAccess d={data} reload={load} />}
           {tab === 'sync' && <SyncMonitor d={data} reload={load} />}
+          {tab === 'recovery' && <Recovery d={data} />}
           {tab === 'audit' && <AuditLog d={data} />}
           {tab === 'security' && <Security />}
         </>
@@ -376,15 +379,58 @@ const resetOf = (u: Profile) => {
 };
 const roleLabel = (r: string) => (r === 'project_manager' ? 'Project manager' : 'Employee');
 
+function UserAvatar({ name, role }: { name: string; role: string }) {
+  const initials = (name || '?').split(/\s+/).map((w) => w[0]?.toUpperCase() ?? '').slice(0, 2).join('');
+  return <div className={`user-avatar ${role === 'super_admin' ? 'user-avatar-admin' : 'user-avatar-staff'}`}>{initials}</div>;
+}
+
+function UserActionMenu({ u, selfId, onAction, onReview }: { u: Profile; selfId: string; onAction: (u: Profile, action: string, confirmText: string, danger?: boolean, reason?: string) => Promise<void>; onReview: (u: Profile, approve: boolean) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const self = u.id === selfId;
+  const close = () => setOpen(false);
+  const act = (action: string, text: string, danger = true, reason?: string) => { close(); onAction(u, action, text, danger, reason); };
+  return (
+    <div className="user-actions-menu">
+      <button className="user-actions-btn" onClick={() => setOpen(!open)} aria-label="User actions" aria-expanded={open}>⋮</button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={close} />
+          <div className="user-actions-drop">
+            {u.status === 'pending' && <><button onClick={() => { close(); onReview(u, true); }}>✓ Approve</button><button className="danger" onClick={() => { close(); onReview(u, false); }}>✕ Reject</button></>}
+            {u.status === 'active' && <button onClick={() => act('reset_password', `Send ${u.email} a secure password reset link?`, false)}>🔑 Send password reset</button>}
+            {u.status === 'active' && <button onClick={() => act('revoke_sessions', `Sign ${u.email} out on every device?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>⏏ Sign out everywhere</button>}
+            {!self && u.status === 'active' && <button className="danger" onClick={() => act('suspend', `Suspend ${u.email}? They lose access to all projects immediately.`)}>⛔ Suspend</button>}
+            {(u.status === 'suspended' || u.status === 'rejected') && <button onClick={() => act('reactivate', `Reactivate ${u.email}?`, false)}>▶ Activate</button>}
+            {!self && u.status === 'active' && (u.global_role === 'super_admin'
+              ? <button onClick={() => act('make_staff', `Remove Super Admin rights from ${u.email}?`)}>👤 Remove Super Admin</button>
+              : <button onClick={() => act('make_admin', `Give ${u.email} full Super Admin rights?`)}>🛡 Make Super Admin</button>)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; selfId: string; go: (t: Tab) => void }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [role, setRole] = useState('');
   const [project, setProject] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [sort, setSort] = useState<'name' | 'status' | 'role' | 'last_login' | 'created'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const code = (id: string) => d.projects.find((p) => p.id === id)?.code ?? '?';
   const membersOf = (id: string) => d.members.filter((m) => m.user_id === id);
   const projectsText = (id: string) => membersOf(id).map((m) => `${code(m.project_id)} (${m.role === 'project_manager' ? 'PM' : 'Employee'})`).join(', ');
+
+  const toggleSort = (col: typeof sort) => {
+    if (sort === col) setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    else { setSort(col); setSortDir('asc'); }
+  };
 
   const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
@@ -407,13 +453,47 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     }
   };
 
+  const startEdit = (u: Profile) => { setEditing(u.id); setEditName(u.full_name); setEditTitle(u.job_title ?? ''); setOpen(null); };
+  const saveEdit = async (u: Profile) => {
+    const n = checkName(editName);
+    if (!n.ok) return notify(n.error);
+    setSaving(true);
+    try {
+      await api(`/api/admin/users/${u.id}`, { action: 'update_profile', fullName: n.name, jobTitle: editTitle.trim() });
+      notify('Saved. Recorded in the audit log.');
+      setEditing(null);
+      await reload();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = (u: Profile) => act(u, 'delete',
+    `Delete ${u.full_name || u.email}? They are signed out everywhere, can no longer sign in and lose all project access. Their reports and photos are kept, and the account can be restored later with Activate.`,
+    true, 'Deleted by administrator');
+
   const ql = q.trim().toLowerCase();
-  const rows = d.profiles.filter((u) =>
-    (!status || u.status === status) &&
+  const filtered = d.profiles.filter((u) =>
+    (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
     (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
   );
+  const rows = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sort === 'name') cmp = (a.full_name || a.email).localeCompare(b.full_name || b.email);
+    else if (sort === 'status') cmp = a.status.localeCompare(b.status);
+    else if (sort === 'role') cmp = a.global_role.localeCompare(b.global_role);
+    else if (sort === 'last_login') cmp = (a.last_login_at ?? '').localeCompare(b.last_login_at ?? '');
+    else if (sort === 'created') cmp = a.created_at.localeCompare(b.created_at);
+    return sortDir === 'desc' ? -cmp : cmp;
+  });
+
+  const totalActive = d.profiles.filter((p) => p.status === 'active').length;
+  const totalPending = d.profiles.filter((p) => p.status === 'pending').length;
+  const totalAdmins = d.profiles.filter((p) => p.global_role === 'super_admin').length;
+  const arrow = (col: typeof sort) => sort === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
   const exportDoc = () => ({
     filename: `neas-user-directory-${new Date().toISOString().slice(0, 10)}`,
@@ -431,50 +511,103 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   });
 
   return (
-    <section className="card">
-      <div className="card-head">
-        <h2>User directory ({rows.length} of {d.profiles.length})</h2>
-        <div className="form-actions" style={{ marginTop: 0 }}>
-          <DataIO doc={exportDoc} label="users" />
-          <button className="btn btn-sm btn-primary" onClick={() => go('invitations')}>+ Create invitation</button>
+    <>
+      <div className="user-stats">
+        <div className="user-stat"><div className="user-stat-val">{d.profiles.length}</div><div className="user-stat-label">Total users</div></div>
+        <div className="user-stat active-stat"><div className="user-stat-val">{totalActive}</div><div className="user-stat-label">Active</div></div>
+        <div className="user-stat pending-stat"><div className="user-stat-val">{totalPending}</div><div className="user-stat-label">Pending approval</div></div>
+        <div className="user-stat admin-stat"><div className="user-stat-val">{totalAdmins}</div><div className="user-stat-label">Super Admins</div></div>
+      </div>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>User management</h2>
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <DataIO doc={exportDoc} label="users" />
+            <button className="btn btn-sm btn-primary" onClick={() => go('invitations')}>+ Invite user</button>
+          </div>
         </div>
-      </div>
-      <div className="form-grid" style={{ marginBottom: 12 }}>
-        <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
-        <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></label>
-        <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
-        <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
-      </div>
-      <div className="table-wrap">
-        <table className="tbl">
-          <thead><tr><th>Name / e-mail</th><th>Status</th><th>Approval</th><th>Role</th><th>Projects</th><th>Last sign-in</th><th>Created</th><th>Password</th><th>Reset</th><th /></tr></thead>
-          <tbody>
-            {rows.map((u) => (
-              <Fragment key={u.id}>
-                <tr>
-                  <td><b>{u.full_name || '—'}</b><div className="note">{u.email} · {u.email_verified_at ? 'verified' : 'not verified'}</div></td>
-                  <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
-                  <td className="note">{approvalOf(u)}</td>
-                  <td>{u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</td>
-                  <td className="note">{projectsText(u.id) || '—'}</td>
-                  <td className="note">{when(u.last_login_at)}</td>
-                  <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
-                  <td className="note">{passwordOf(u)}</td>
-                  <td className="note">{resetOf(u)}</td>
-                  <td><button className="btn btn-sm" onClick={() => setOpen(open === u.id ? null : u.id)} aria-expanded={open === u.id}>{open === u.id ? 'Close' : 'Manage'}</button></td>
-                </tr>
-                {open === u.id && (
-                  <tr><td colSpan={10}>
-                    <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
-                  </td></tr>
-                )}
-              </Fragment>
-            ))}
-            {!rows.length && <tr><td colSpan={10} className="empty">No users match.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </section>
+
+        <div className="form-grid" style={{ marginBottom: 14 }}>
+          <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
+          <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option><option value="deleted">Deleted</option></select></label>
+          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
+          <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
+        </div>
+
+        {(status || role || project || ql) && (
+          <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="note">{rows.length} of {d.profiles.length} users</span>
+            <button className="btn btn-sm" onClick={() => { setQ(''); setStatus(''); setRole(''); setProject(''); }}>Clear filters</button>
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table className="tbl user-tbl">
+            <thead><tr>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('name')}>User{arrow('name')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('status')}>Status{arrow('status')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('role')}>Role{arrow('role')}</th>
+              <th>Projects</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('last_login')}>Last active{arrow('last_login')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('created')}>Joined{arrow('created')}</th>
+              <th />
+            </tr></thead>
+            <tbody>
+              {rows.map((u) => (
+                <Fragment key={u.id}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setOpen(open === u.id ? null : u.id)}>
+                    <td>
+                      <div className="user-name-cell">
+                        <UserAvatar name={u.full_name || u.email} role={u.global_role} />
+                        <div className="name-wrap">
+                          <b>{u.full_name || '—'}</b>
+                          <div className="note">{u.email}{u.email_verified_at ? '' : ' · unverified'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
+                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
+                    <td className="note">{projectsText(u.id) || '—'}</td>
+                    <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
+                    <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+                        <button className="btn btn-sm" onClick={() => startEdit(u)}>Edit</button>
+                        {u.id !== selfId && !u.deleted_at && <button className="btn btn-sm btn-danger" onClick={() => remove(u)}>Delete</button>}
+                        <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
+                      </div>
+                    </td>
+                  </tr>
+                  {editing === u.id && (
+                    <tr><td colSpan={7}>
+                      <div className="user-section">
+                        <h4>Edit {u.email}</h4>
+                        <div className="form-grid">
+                          <label className="field">Full name<input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={120} autoFocus /></label>
+                          <label className="field">Job title<input className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={120} placeholder="e.g. Rope access technician" /></label>
+                        </div>
+                        <p className="note">E-mail cannot be changed here; the person signs in with it.</p>
+                        <div className="form-actions">
+                          <button className="btn btn-primary" onClick={() => saveEdit(u)} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                          <button className="btn" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
+                        </div>
+                      </div>
+                    </td></tr>
+                  )}
+                  {open === u.id && (
+                    <tr><td colSpan={7}>
+                      <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+              {!rows.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -509,12 +642,15 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-        {VIEWS.map(([k, label]) => (
-          <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={sel.includes(k)} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
-            {label}
-          </label>
-        ))}
+        {VIEWS.map(([k, label]) => {
+          const always = ALWAYS_VIEWS.includes(k);
+          return (
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={always ? 'Every user always has this module' : undefined}>
+              <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
+              {label}{always && <span className="note"> (always on)</span>}
+            </label>
+          );
+        })}
       </div>
       <div className="form-actions">
         <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save(VIEWS.map(([k]) => k).filter((k) => sel.includes(k)))}>Save module access</button>
@@ -565,35 +701,55 @@ function UserPanel({ u, d, self, act, review, reload }: {
   };
 
   return (
-    <div className="user-panel" style={{ display: 'grid', gap: 16 }}>
-      {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={u.full_name || u.email} onClose={() => setIssued(null)} />}
-      {(u.status === 'active' || u.status === 'pending') && (
-        <div className="form-actions" style={{ marginTop: 0 }}>
-          <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Code valid for
-            <select className="input" style={{ maxWidth: 120 }} value={codeHours} onChange={(e) => setCodeHours(Number(e.target.value))}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select>
-          </label>
-          <button className="btn btn-sm btn-primary" onClick={() => issue(u.status === 'pending')}>{u.status === 'pending' ? 'Approve and give one-time code' : 'Give one-time sign-in code'}</button>
+    <div className="user-detail-panel">
+      <div className="user-detail-header">
+        <UserAvatar name={u.full_name || u.email} role={u.global_role} />
+        <div className="user-detail-info">
+          <h3>{u.full_name || u.email}</h3>
+          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'} · <Pill s={u.status} /></div>
         </div>
-      )}
-      <div className="form-actions" style={{ marginTop: 0 }}>
-        {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail link)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
-        {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They are signed out everywhere and lose access to all projects immediately. Their queued offline changes will be refused.`)}>Suspend</button>}
-        {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}? They can sign in again with their existing password.`, false)}>Activate</button>}
-        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a secure password reset link? You will never see their password.`, false)}>Send password reset</button>}
-        {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out on every device? ${self ? 'This includes you.' : 'They can sign in again unless suspended.'}`, true, 'Revoked by administrator')}>Sign out everywhere</button>}
-        {!self && u.status === 'active' && (u.global_role === 'super_admin'
-          ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin rights from ${u.email}?`)}>Remove Super Admin</button>
-          : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Give ${u.email} full Super Admin rights over every project and account?`)}>Make Super Admin</button>)}
       </div>
-      {u.sessions_revoked_at && <p className="note" style={{ margin: 0 }}>Sessions last revoked {when(u.sessions_revoked_at)}.</p>}
 
-      <ViewsEditor u={u} reload={reload} />
+      {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={u.full_name || u.email} onClose={() => setIssued(null)} />}
 
-      <div>
-        <h3 style={{ margin: '0 0 6px' }}>Project access</h3>
+      <div className="user-section">
+        <h4>Account actions</h4>
+        <div className="kv" style={{ maxWidth: 400, marginBottom: 12 }}>
+          <span className="note">Password</span><span className="note">{passwordOf(u)}</span>
+          <span className="note">Reset</span><span className="note">{resetOf(u)}</span>
+          <span className="note">Approval</span><span className="note">{approvalOf(u)}</span>
+          {u.sessions_revoked_at && <><span className="note">Sessions revoked</span><span className="note">{when(u.sessions_revoked_at)}</span></>}
+        </div>
+        {(u.status === 'active' || u.status === 'pending') && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>Code valid for
+              <select className="input" style={{ maxWidth: 120 }} value={codeHours} onChange={(e) => setCodeHours(Number(e.target.value))}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select>
+            </label>
+            <button className="btn btn-sm btn-primary" onClick={() => issue(u.status === 'pending')}>{u.status === 'pending' ? 'Approve + one-time code' : 'One-time sign-in code'}</button>
+          </div>
+        )}
+        <div className="user-detail-actions">
+          {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
+          {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They lose access immediately.`)}>Suspend</button>}
+          {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}?`, false)}>Activate</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a password reset link?`, false)}>Password reset</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out everywhere?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>Sign out all</button>}
+          {!self && u.status === 'active' && (u.global_role === 'super_admin'
+            ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin from ${u.email}?`)}>Remove Admin</button>
+            : <button className="btn btn-sm" onClick={() => act(u, 'make_admin', `Make ${u.email} Super Admin?`)}>Make Admin</button>)}
+        </div>
+      </div>
+
+      <div className="user-section">
+        <h4>Module access</h4>
+        <ViewsEditor u={u} reload={reload} />
+      </div>
+
+      <div className="user-section">
+        <h4>Project access</h4>
         {u.global_role === 'super_admin' && <p className="note" style={{ marginTop: 0 }}>Super Admins can open every project; memberships below set their project role.</p>}
         <table className="tbl">
-          <thead><tr><th>Project</th><th>Role</th><th>Can approve reports</th><th /></tr></thead>
+          <thead><tr><th>Project</th><th>Role</th><th>Can approve</th><th /></tr></thead>
           <tbody>
             {mine.map((m) => {
               const p = d.projects.find((x) => x.id === m.project_id);
@@ -618,22 +774,24 @@ function UserPanel({ u, d, self, act, review, reload }: {
         )}
       </div>
 
-      <div>
-        <h3 style={{ margin: '0 0 6px' }}>Sign-in and administration history</h3>
-        {!log.length ? <p className="note" style={{ marginTop: 0 }}>No recorded events in the latest audit entries.</p> : (
-          <table className="tbl">
-            <thead><tr><th>When</th><th>Event</th><th>By</th><th>Project</th></tr></thead>
-            <tbody>
-              {log.map((a) => (
-                <tr key={a.id}>
-                  <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
-                  <td title={a.action}>{eventLabel(a.action)}</td>
-                  <td className="note">{a.actor_kind === 'system' ? 'System' : a.actor_id === u.id ? 'User' : names.get(a.actor_id ?? '') ?? '—'}</td>
-                  <td className="note">{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="user-section">
+        <h4>Activity log</h4>
+        {!log.length ? <p className="note" style={{ margin: 0 }}>No recorded events.</p> : (
+          <div className="table-wrap">
+            <table className="tbl">
+              <thead><tr><th>When</th><th>Event</th><th>By</th><th>Project</th></tr></thead>
+              <tbody>
+                {log.map((a) => (
+                  <tr key={a.id}>
+                    <td className="note" style={{ whiteSpace: 'nowrap' }}>{when(a.at)}</td>
+                    <td title={a.action}>{eventLabel(a.action)}</td>
+                    <td className="note">{a.actor_kind === 'system' ? 'System' : a.actor_id === u.id ? 'User' : names.get(a.actor_id ?? '') ?? '—'}</td>
+                    <td className="note">{d.projects.find((p) => p.id === a.project_id)?.code ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -763,7 +921,11 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
 }
 
 const VIS: [string, string][] = [
-  ['show_overview', 'Project overview'], ['show_milestones', 'Approved milestones'], ['show_progress', 'Overall progress %'], ['show_gantt', 'Gantt chart'],
+  ['show_overview', 'Overview'], ['show_estimating', 'Estimating & BOQ'], ['show_quotation', 'Quotation preview'],
+  ['show_project_management', 'Project management'], ['show_field_reports', 'Field reports'],
+  ['show_project_register', 'Project register'], ['show_site_evidence', 'Site evidence'],
+  ['show_google_sheets', 'Google Sheets setup'], ['show_offline_queue', 'Offline queue'],
+  ['show_milestones', 'Approved milestones'], ['show_progress', 'Overall progress %'], ['show_gantt', 'Gantt chart'],
   ['show_scurve', 'S-curve'], ['show_reports', 'Approved progress reports'], ['show_photos', 'Approved before/after photos'], ['show_documents', 'Approved documents'], ['show_completion', 'Completion status'],
 ];
 
@@ -920,6 +1082,194 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
             {!d.intlog.length && <tr><td colSpan={4} className="note">No runs yet.</td></tr>}
           </tbody>
         </table>
+      </section>
+    </>
+  );
+}
+
+interface RecItem { entity: string; record_id: string; project_id: string; label: string; action?: string; reason?: string; note?: string | null; fields?: string[]; storage_path?: string; resolution?: string }
+interface RecPlan {
+  run_id: string; target_at: string; source: string;
+  ledger: { operations_total: number; operations_before_target: number; first_received_at: string | null; last_received_before_target: string | null };
+  snapshot_counts: Record<string, number>; created_after: Record<string, number>;
+  restore: RecItem[]; conflicts: RecItem[]; skipped: RecItem[]; missing_files: RecItem[]; unchanged: number; changed_after: number;
+}
+interface RecValidation { checked_at: string; expected: Record<string, number>; present: Record<string, number>; not_present: RecItem[]; integrity: Record<string, number>; restored: { total: number; live: number }; integrity_ok: boolean }
+interface RecRun { id: string; created_at: string; created_by: string | null; target_at: string; project_id: string | null; status: string; applied_at: string | null; rolled_back_at: string | null; plan: RecPlan; validation: RecValidation | null }
+
+const ENTITY: Record<string, string> = { activities: 'Activity', project_reports: 'Field report', report_attachments: 'Photo / attachment' };
+const MANILA_DEFAULT = '2026-10-21T17:00';
+// The input is Asia/Manila wall-clock time (UTC+8, no daylight saving).
+const manilaToIso = (local: string): string | null => {
+  const d = new Date(`${local.slice(0, 16)}:00+08:00`);
+  return local.length >= 16 && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+};
+const manilaText = (iso: string) => new Date(iso).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }) + ' (Manila)';
+
+function Recovery({ d }: { d: D }) {
+  const [at, setAt] = useState(MANILA_DEFAULT);
+  const [project, setProject] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [plan, setPlan] = useState<RecPlan | null>(null);
+  const [confirm, setConfirm] = useState('');
+  const [result, setResult] = useState<RecValidation | null>(null);
+  const [runs, setRuns] = useState<RecRun[] | null>(null);
+  const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
+  const code = (id: string | null) => (id ? d.projects.find((p) => p.id === id)?.code ?? id.slice(0, 8) : 'All projects');
+
+  const loadRuns = useCallback(async () => {
+    const { data, error } = await sb().from('recovery_runs').select('*').order('created_at', { ascending: false }).limit(20);
+    if (error) return setErr(`Could not load recovery history: ${error.message}`);
+    setRuns((data ?? []) as RecRun[]);
+  }, []);
+  useEffect(() => { void loadRuns(); }, [loadRuns]);
+
+  const dryRun = async () => {
+    const iso = manilaToIso(at);
+    if (!iso) return setErr('Enter a valid date and time.');
+    setBusy(true); setErr(null); setPlan(null); setResult(null); setConfirm('');
+    const { data, error } = await sb().rpc('recovery_plan_field_reports', { p_at: iso, p_project: project || null });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    setPlan(data as RecPlan);
+    void loadRuns();
+  };
+
+  const apply = async () => {
+    if (!plan) return;
+    if (!(await askConfirm(`Restore ${plan.restore.length} record(s) to the state of ${manilaText(plan.target_at)}? The current state is backed up first and the restore can be rolled back.`))) return;
+    setBusy(true); setErr(null);
+    const { data, error } = await sb().rpc('recovery_apply_field_reports', { p_run: plan.run_id, p_confirm: confirm });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    const r = data as { restored: RecItem[]; skipped: RecItem[]; validation: RecValidation };
+    setResult(r.validation);
+    notify(`${r.restored.length} record(s) restored${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}.`);
+    setPlan(null); setConfirm('');
+    void loadRuns();
+  };
+
+  const rollback = async (run: RecRun) => {
+    if (!(await askConfirm(`Roll back the recovery from ${when(run.applied_at)}? Records it restored are deleted again (soft delete, nothing is erased).`, { danger: true }))) return;
+    const { error } = await sb().rpc('recovery_rollback_field_reports', { p_run: run.id, p_confirm: 'ROLLBACK' });
+    if (error) return notify(error.message);
+    notify('Recovery rolled back.');
+    void loadRuns();
+  };
+
+  const revalidate = async (run: RecRun) => {
+    const { data, error } = await sb().rpc('recovery_validate_field_reports', { p_run: run.id });
+    if (error) return notify(error.message);
+    setResult(data as RecValidation);
+    void loadRuns();
+  };
+
+  const Items = ({ title, items, empty, extra }: { title: string; items: RecItem[]; empty: string; extra?: (i: RecItem) => ReactNode }) => (
+    <div className="user-section">
+      <h4>{title} ({items.length})</h4>
+      {!items.length ? <p className="note">{empty}</p> : (
+        <div className="table-wrap"><table className="tbl">
+          <thead><tr><th>Type</th><th>Project</th><th>Record</th><th>Details</th></tr></thead>
+          <tbody>{items.map((i) => (
+            <tr key={`${i.entity}:${i.record_id}`}><td>{ENTITY[i.entity] ?? i.entity}</td><td>{code(i.project_id)}</td><td>{i.label || <span className="note">{i.record_id.slice(0, 8)}</span>}</td><td className="note">{extra?.(i)}</td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </div>
+  );
+
+  const Counts = ({ v }: { v: RecValidation }) => (
+    <div className="user-section">
+      <h4>Validation {v.integrity_ok ? <Pill s="ok" /> : <Pill s="error" />}</h4>
+      <table className="tbl">
+        <thead><tr><th>Record type</th><th className="num">At recovery point</th><th className="num">Live now</th></tr></thead>
+        <tbody>{Object.keys(ENTITY).map((k) => <tr key={k}><td>{ENTITY[k]}</td><td className="num">{v.expected?.[k] ?? 0}</td><td className="num">{v.present?.[k] ?? 0}</td></tr>)}</tbody>
+      </table>
+      <p className="note">Links: {v.integrity.reports_without_project} report(s) without a project · {v.integrity.reports_with_deleted_activity} with a deleted activity · {v.integrity.attachments_with_deleted_report} attachment(s) on a deleted report · {v.integrity.attachments_missing_file} attachment(s) whose file is missing. Restored records live: {v.restored.live} of {v.restored.total}.</p>
+      {v.not_present.length > 0 && <p className="note">Not live now: {v.not_present.map((i) => `${ENTITY[i.entity]} ${i.label || i.record_id.slice(0, 8)}`).join('; ')}</p>}
+    </div>
+  );
+
+  return (
+    <>
+      <section className="card">
+        <div className="card-head"><h2>Field reports recovery</h2><span className="note">Super Admin only · every step is recorded in the audit log</span></div>
+        <p className="note">Rebuilds field reports, activities and photo records as they were at a chosen time from the server&apos;s sync history, then restores what has since been deleted. Changes made after that time are kept. Nothing is changed until you review the dry run and type RESTORE.</p>
+        <div className="form-grid">
+          <label className="field">Recovery point (Asia/Manila time)
+            <input className="input" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+          </label>
+          <label className="field">Project
+            <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
+              <option value="">All projects</option>
+              {d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+            </select>
+          </label>
+        </div>
+        {err && <p className="bad" role="alert">{err}</p>}
+        <div className="form-actions">
+          <button className="btn btn-primary" onClick={dryRun} disabled={busy || !at}>{busy && !plan ? 'Checking…' : 'Run dry run'}</button>
+        </div>
+      </section>
+
+      {plan && (
+        <section className="card">
+          <div className="card-head"><h2>Dry run · {manilaText(plan.target_at)}</h2><span className="note">{code(project || null)}</span></div>
+          <div className="user-stats">
+            <div className="user-stat"><div className="user-stat-val">{plan.restore.length}</div><div className="user-stat-label">To restore</div></div>
+            <div className="user-stat"><div className="user-stat-val">0</div><div className="user-stat-label">To update</div></div>
+            <div className="user-stat"><div className="user-stat-val">{plan.conflicts.length}</div><div className="user-stat-label">Conflicts (kept)</div></div>
+            <div className="user-stat"><div className="user-stat-val">{plan.skipped.length}</div><div className="user-stat-label">Cannot restore</div></div>
+            <div className="user-stat"><div className="user-stat-val">{plan.unchanged}</div><div className="user-stat-label">Unchanged</div></div>
+          </div>
+          <div className="user-section">
+            <h4>Snapshot source</h4>
+            <p className="note">{plan.source}. {plan.ledger.operations_before_target} of {plan.ledger.operations_total} synced changes happened before the recovery point{plan.ledger.last_received_before_target ? `; the last one at ${manilaText(plan.ledger.last_received_before_target)}` : ''}.</p>
+            <p className="note">At the recovery point: {Object.keys(ENTITY).map((k) => `${plan.snapshot_counts[k] ?? 0} ${ENTITY[k].toLowerCase()}(s)`).join(' · ')}. Created since and kept: {Object.keys(ENTITY).map((k) => `${plan.created_after[k] ?? 0} ${ENTITY[k].toLowerCase()}(s)`).join(' · ')}.</p>
+            {plan.ledger.operations_before_target === 0 && <p className="bad">No synced history exists before this time, so only soft-deleted rows can be recovered. For anything else use the Supabase project backups (Database → Backups).</p>}
+          </div>
+          <Items title="Records to be restored" items={plan.restore} empty="Nothing is missing compared with the recovery point." extra={(i) => <>{i.action === 'insert' ? 'Re-created under its original id' : 'Undeleted'}{i.note ? ` · ${i.note}` : ''}</>} />
+          <Items title="Conflicts: changed after the recovery point (current version kept)" items={plan.conflicts} empty="No conflicts." extra={(i) => `Changed: ${(i.fields ?? []).join(', ')}`} />
+          <Items title="Cannot be restored" items={plan.skipped} empty="Everything missing can be restored." extra={(i) => i.reason} />
+          <Items title="Missing or unrecoverable files" items={plan.missing_files} empty="All photo files are still in storage." extra={(i) => i.storage_path} />
+
+          <div className="user-section">
+            <h4>Approve and restore</h4>
+            {!plan.restore.length ? <p className="note">There is nothing to restore.</p> : (
+              <>
+                <p className="note">The current state of each record is backed up before it changes, the restore runs as one transaction, and it can be rolled back from the history below. Type <b>RESTORE</b> to enable the button.</p>
+                <div className="form-actions">
+                  <input className="input" style={{ maxWidth: 200 }} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="RESTORE" aria-label="Type RESTORE to confirm" />
+                  <button className="btn btn-primary" onClick={apply} disabled={busy || confirm !== 'RESTORE'}>{busy ? 'Restoring…' : `Restore ${plan.restore.length} record(s)`}</button>
+                  <button className="btn" onClick={() => { setPlan(null); setConfirm(''); }} disabled={busy}>Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
+      {result && <section className="card"><div className="card-head"><h2>Recovery result</h2><span className="note">checked {when(result.checked_at)}</span></div><Counts v={result} /></section>}
+
+      <section className="card">
+        <div className="card-head"><h2>Recovery history</h2><button className="btn btn-sm" onClick={loadRuns}>Refresh</button></div>
+        {runs === null ? <div className="empty">Loading…</div> : !runs.length ? <div className="empty">No recovery runs yet.</div> : (
+          <div className="table-wrap"><table className="tbl">
+            <thead><tr><th>When</th><th>By</th><th>Recovery point</th><th>Project</th><th>Status</th><th className="num">Restore / skip / conflicts</th><th></th></tr></thead>
+            <tbody>{runs.map((r) => (
+              <tr key={r.id}>
+                <td className="note">{when(r.created_at)}</td><td>{r.created_by ? names.get(r.created_by) ?? '—' : '—'}</td><td>{manilaText(r.target_at)}</td><td>{code(r.project_id)}</td>
+                <td><Pill s={r.status} /></td>
+                <td className="num">{r.plan.restore.length} / {r.plan.skipped.length} / {r.plan.conflicts.length}</td>
+                <td style={{ display: 'flex', gap: 6 }}>
+                  {r.status !== 'planned' && <button className="btn btn-sm" onClick={() => revalidate(r)}>Validate</button>}
+                  {r.status === 'applied' && <button className="btn btn-sm btn-danger" onClick={() => rollback(r)}>Roll back</button>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
       </section>
     </>
   );

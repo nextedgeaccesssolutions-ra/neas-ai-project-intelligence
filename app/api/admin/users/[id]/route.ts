@@ -5,13 +5,13 @@ import { UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
 
-type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code';
+type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete';
 
 export const POST = handle(async (req, { params }) => {
   assertSameOrigin(req);
   if (!UUID_RE.test(params.id)) throw new HttpError(400, 'Invalid user id');
   const { sb, user } = await requireSuperAdmin();
-  const body = await readJson<{ action: Action; reason?: string; hours?: number }>(req, 4096);
+  const body = await readJson<{ action: Action; reason?: string; hours?: number; fullName?: string; jobTitle?: string }>(req, 4096);
   const svc = supabaseService();
   const reason = body.reason?.slice(0, 500) ?? null;
 
@@ -51,6 +51,18 @@ export const POST = handle(async (req, { params }) => {
       // Deletes refresh sessions and makes already-issued access tokens useless at the database.
       const { error } = await sb.rpc('admin_revoke_sessions', { p_user: params.id, p_reason: reason });
       if (error) throw new HttpError(400, error.message);
+      break;
+    }
+    case 'update_profile': {
+      const { error } = await sb.rpc('admin_update_profile', { p_user: params.id, p_full_name: body.fullName ?? '', p_job_title: body.jobTitle ?? '' });
+      if (error) throw new HttpError(400, error.message);
+      break;
+    }
+    case 'delete': {
+      // Reversible: the profile stays so reports keep their author; the database revokes access and sessions.
+      const { error } = await sb.rpc('admin_delete_user', { p_user: params.id, p_reason: reason });
+      if (error) throw new HttpError(400, error.message);
+      await svc.auth.admin.updateUserById(params.id, { ban_duration: '876000h' });
       break;
     }
     case 'make_admin':

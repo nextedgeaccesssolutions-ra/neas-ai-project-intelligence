@@ -71,3 +71,15 @@ insert into neas.boq_lines (project_id, description, qty, unit_cost) values ('10
 select test.check('views: restoring all modules restores costing access', (select count(*) = 1 from neas.boq_lines where project_id = '10000000-0000-0000-0000-000000000077'));
 reset role;
 select test.check('views: changes are in the audit log', (select count(*) = 2 from neas.audit_logs where action = 'account:views_changed'));
+
+-- Field reports is always on, even for a user whose module list omits it.
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) values ('00000000-0000-0000-0000-0000000000f7', 'limited@neas.test', '{}', now());
+update neas.profiles set status = 'active', approved_at = now(), allowed_views = array['overview'] where id = '00000000-0000-0000-0000-0000000000f7';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f7', false);
+select test.check('views: field reports stays available when not in the module list',
+  neas.can_view('field_reports') and not neas.can_view('site_evidence'));
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
