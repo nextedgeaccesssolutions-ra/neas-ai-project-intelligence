@@ -18,7 +18,7 @@ const TABS: [Tab, string][] = [
   ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['recovery', 'Data recovery'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
@@ -40,13 +40,14 @@ const EVENT: Record<string, string> = {
   'account:invited_user_created': 'Joined from invitation', 'insert:project_memberships': 'Project access granted',
   'update:project_memberships': 'Project role changed', 'delete:project_memberships': 'Project access removed',
   'update:profiles': 'Account updated (status, role or approval)', 'insert:profiles': 'Account created',
+  'account:deleted': 'Account deleted (reversible)',
   'recovery:dry_run': 'Data recovery dry run', 'recovery:applied': 'Data recovery applied', 'recovery:rolled_back': 'Data recovery rolled back',
   'client:login': 'Client portal sign-in', 'client:login_failed': 'Client portal: wrong passcode', 'client:login_throttled': 'Client portal locked after failed tries', 'system:legacy_import': 'Imported from the old app',
 };
 const eventLabel = (a: string) => EVENT[a] ?? a.replace(':', ' · ').replace(/_/g, ' ');
 const when = (s: string | null) => (s ? new Date(s).toLocaleString() : '—');
 const Pill = ({ s }: { s: string }) => {
-  const tone = ['active', 'approved', 'ok', 'applied'].includes(s) ? 'pill-ok' : ['pending', 'draft', 'conflict', 'skipped'].includes(s) ? 'pill-warn' : ['suspended', 'rejected', 'error', 'archived'].includes(s) ? 'pill-bad' : '';
+  const tone = ['active', 'approved', 'ok', 'applied'].includes(s) ? 'pill-ok' : ['pending', 'draft', 'conflict', 'skipped'].includes(s) ? 'pill-warn' : ['suspended', 'rejected', 'error', 'archived', 'deleted'].includes(s) ? 'pill-bad' : '';
   return <span className={`pill ${tone}`}>{s}</span>;
 };
 
@@ -416,6 +417,10 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   const [role, setRole] = useState('');
   const [project, setProject] = useState('');
   const [open, setOpen] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [saving, setSaving] = useState(false);
   const [sort, setSort] = useState<'name' | 'status' | 'role' | 'last_login' | 'created'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const code = (id: string) => d.projects.find((p) => p.id === id)?.code ?? '?';
@@ -448,9 +453,29 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     }
   };
 
+  const startEdit = (u: Profile) => { setEditing(u.id); setEditName(u.full_name); setEditTitle(u.job_title ?? ''); setOpen(null); };
+  const saveEdit = async (u: Profile) => {
+    const n = checkName(editName);
+    if (!n.ok) return notify(n.error);
+    setSaving(true);
+    try {
+      await api(`/api/admin/users/${u.id}`, { action: 'update_profile', fullName: n.name, jobTitle: editTitle.trim() });
+      notify('Saved. Recorded in the audit log.');
+      setEditing(null);
+      await reload();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = (u: Profile) => act(u, 'delete',
+    `Delete ${u.full_name || u.email}? They are signed out everywhere, can no longer sign in and lose all project access. Their reports and photos are kept, and the account can be restored later with Activate.`,
+    true, 'Deleted by administrator');
+
   const ql = q.trim().toLowerCase();
   const filtered = d.profiles.filter((u) =>
-    (!status || u.status === status) &&
+    (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
     (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
@@ -505,7 +530,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
 
         <div className="form-grid" style={{ marginBottom: 14 }}>
           <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
-          <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option></select></label>
+          <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option><option value="deleted">Deleted</option></select></label>
           <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
           <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
         </div>
@@ -541,15 +566,35 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                         </div>
                       </div>
                     </td>
-                    <td><Pill s={u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
+                    <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
                     <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
                     <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
                     <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+                        <button className="btn btn-sm" onClick={() => startEdit(u)}>Edit</button>
+                        {u.id !== selfId && !u.deleted_at && <button className="btn btn-sm btn-danger" onClick={() => remove(u)}>Delete</button>}
+                        <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
+                      </div>
                     </td>
                   </tr>
+                  {editing === u.id && (
+                    <tr><td colSpan={7}>
+                      <div className="user-section">
+                        <h4>Edit {u.email}</h4>
+                        <div className="form-grid">
+                          <label className="field">Full name<input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={120} autoFocus /></label>
+                          <label className="field">Job title<input className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={120} placeholder="e.g. Rope access technician" /></label>
+                        </div>
+                        <p className="note">E-mail cannot be changed here; the person signs in with it.</p>
+                        <div className="form-actions">
+                          <button className="btn btn-primary" onClick={() => saveEdit(u)} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                          <button className="btn" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
+                        </div>
+                      </div>
+                    </td></tr>
+                  )}
                   {open === u.id && (
                     <tr><td colSpan={7}>
                       <UserPanel u={u} d={d} self={u.id === selfId} act={act} review={review} reload={reload} />
