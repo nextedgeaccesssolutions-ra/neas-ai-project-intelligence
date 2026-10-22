@@ -280,6 +280,7 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 50_one_time_codes.sql
 \ir 60_recovery.sql
 \ir 70_user_edit_delete.sql
+\ir 80_site_evidence_gps.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

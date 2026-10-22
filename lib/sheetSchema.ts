@@ -256,7 +256,7 @@ export function rowsToState(tabs: Partial<Record<TabName, Row[]>>, base: AppStat
   }
   const evidence = (tabs.Site_Evidence ?? [])
     .filter((r) => s(r.evidence_id))
-    .map((r) => ({ id: s(r.evidence_id), projectId: s(r.project_id).toUpperCase(), activityId: s(r.activity_id), kind: (['Before', 'During', 'After'].includes(s(r.kind)) ? s(r.kind) : 'During') as Evidence['kind'], caption: s(r.caption), takenAt: s(r.taken_at), bytes: Number(r.bytes) || 0 }));
+    .map((r) => ({ id: s(r.evidence_id), projectId: s(r.project_id).toUpperCase(), activityId: s(r.activity_id), kind: (['Before', 'During', 'After', 'Inspection', 'Safety', 'Defect'].includes(s(r.kind)) ? s(r.kind) : 'During') as Evidence['kind'], caption: s(r.caption), takenAt: s(r.taken_at), bytes: Number(r.bytes) || 0 }));
   return {
     ...base,
     activeProjectId: projects.some((p) => p.id === base.activeProjectId) ? base.activeProjectId : firstPid,

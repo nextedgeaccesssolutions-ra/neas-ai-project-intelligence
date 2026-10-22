@@ -12,12 +12,15 @@ import { askConfirm, notify } from '@/components/Dialogs';
 import { CLOUD } from '@/lib/cloud/env';
 import { useCanManage } from '@/components/RoleGate';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import type { Evidence } from '@/lib/types';
+import type { Evidence, EvidenceKind } from '@/lib/types';
 import PhotoThumb from '@/components/PhotoThumb';
+import { accuracyWarning, GPS_TARGET_M, gpsLabel, parseManualCoords, photoRef, readPosition } from '@/lib/geo';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-
-const Thumb = ({ id, alt }: { id: string; alt: string }) => <PhotoThumb id={id} alt={alt} />;
+const KINDS: EvidenceKind[] = ['Before', 'After', 'During', 'Inspection', 'Safety', 'Defect'];
+const KIND_TONE: Record<EvidenceKind, string> = { Before: '', After: 'pill-ok', During: 'pill-warn', Inspection: '', Safety: 'pill-warn', Defect: 'pill-bad' };
+const pairable = (k: EvidenceKind) => k === 'Before' || k === 'After';
+const osm = (lat: number, lng: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=19/${lat}/${lng}`;
 
 export default function SiteEvidence() {
   const { ready, project, addEvidence, updateEvidence, deleteEvidence, state } = useStore();
@@ -25,16 +28,31 @@ export default function SiteEvidence() {
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
   const [activityId, setActivityId] = useState('');
-  const [kind, setKind] = useState<Evidence['kind']>('Before');
+  const [kind, setKind] = useState<EvidenceKind>('Before');
   const [caption, setCaption] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [workArea, setWorkArea] = useState('');
+  const [locationDetail, setLocationDetail] = useState('');
+  const [recordGps, setRecordGps] = useState(true);
+  const [manualLoc, setManualLoc] = useState(false);
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState('');
+  const [gpsNote, setGpsNote] = useState<string | null>(null);
+  const [fActivity, setFActivity] = useState('');
+  const [fKind, setFKind] = useState('');
+  const [fGps, setFGps] = useState('');
+  const [fPair, setFPair] = useState('');
+  const [q, setQ] = useState('');
+  const [pairFrom, setPairFrom] = useState<string | null>(null);
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
-  const [editKind, setEditKind] = useState<Evidence['kind']>('Before');
+  const [editKind, setEditKind] = useState<EvidenceKind>('Before');
   const [editCaption, setEditCaption] = useState('');
   const [editActivity, setEditActivity] = useState('');
+  const [editArea, setEditArea] = useState('');
+  const [editLoc, setEditLoc] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!CLOUD || !pid) return;
@@ -42,14 +60,6 @@ export default function SiteEvidence() {
       if (data) setClientVisible(Object.fromEntries(data.map((r) => [r.id, r.client_visible])));
     });
   }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleClientVisible = async (id: string, val: boolean) => {
-    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
-    if (err) return setError(`Could not update: ${err.message}`);
-    setClientVisible((prev) => ({ ...prev, [id]: val }));
-    notify(val ? 'Shared with client.' : 'Hidden from client.');
-  };
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -60,13 +70,33 @@ export default function SiteEvidence() {
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
 
-  const name = (id: string) => activities.find((a) => a.id === id)?.name ?? '(deleted activity)';
+  const toggleClientVisible = async (id: string, val: boolean) => {
+    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
+    if (err) return setError(`Could not update: ${err.message}`);
+    setClientVisible((prev) => ({ ...prev, [id]: val }));
+    notify(val ? 'Shared with client.' : 'Hidden from client.');
+  };
 
-  /** Compress and store photos for the chosen activity (form or Import). */
+  const name = (id: string) => activities.find((a) => a.id === id)?.name ?? '(deleted activity)';
+  const byId = new Map(evidence.map((e) => [e.id, e]));
+  const partnerOf = (e: Evidence) => (e.pairId ? evidence.find((x) => x.pairId === e.pairId && x.id !== e.id) : undefined);
+
+  /** Compress and store photos with capture time, GPS (when allowed) and work-area location. */
   const addPhotos = async (files: File[]) => {
     if (!activityId) return setError('Choose an activity first.');
     if (!files.length) return setError('Choose or capture a photo.');
-    setBusy(true);
+    let manual = null;
+    if (manualLoc) {
+      manual = parseManualCoords(manualLat, manualLng);
+      if (!manual) return setError('Enter a valid latitude (−90 to 90) and longitude (−180 to 180), or turn off manual location.');
+    }
+    setError(null);
+    setGpsNote(null);
+    setBusy(recordGps && !manual ? 'Getting location…' : 'Saving…');
+    // Location is read once, right at capture; a slow or refused fix never blocks saving the photos.
+    const gpsP = manual ? Promise.resolve({ status: 'manual' as const, fix: manual }) : recordGps ? readPosition() : Promise.resolve({ status: 'not_requested' as const, fix: null });
+    const gps = await gpsP;
+    setBusy('Saving…');
     let ok = 0;
     const problems: string[] = [];
     for (const file of files) {
@@ -76,31 +106,73 @@ export default function SiteEvidence() {
         const blob = await compressImage(file);
         if (blob.size > MAX_BYTES) throw new Error('still over 5 MB after compression');
         const id = uid('ev');
+        const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
-        addEvidence({ id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt: new Date(file.lastModified || Date.now()).toISOString(), bytes: blob.size });
+        addEvidence({
+          id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
+          gps: gps.fix, gpsStatus: gps.status, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
+        });
         ok++;
       } catch (e) {
         problems.push(`${file.name}: ${e instanceof Error ? e.message : 'could not be saved'}`);
       }
     }
-    setBusy(false);
+    setBusy(null);
     setCaption('');
     if (fileRef.current) fileRef.current.value = '';
     setError(problems.length ? `${ok} photo(s) added. ${problems.join('; ')}` : null);
+    const probe = { gps: gps.fix, gpsStatus: gps.status };
+    setGpsNote(gps.status === 'captured'
+      ? accuracyWarning(probe) ? `Location recorded, but accuracy is ${gps.fix?.accuracy != null ? `±${Math.round(gps.fix.accuracy)} m` : 'unknown'} (target ${GPS_TARGET_M} m). Add the work area so the spot is clear.` : `Location recorded: ${gpsLabel(probe)}.`
+      : gps.status === 'manual' ? 'Location saved as manually entered.'
+      : gps.status === 'denied' ? 'Location permission was refused, so the photos were saved as "GPS unavailable".'
+      : gps.status === 'unavailable' ? 'No location fix was available, so the photos were saved as "GPS unavailable".' : null);
     if (ok) notify(`${ok} photo(s) added to ${name(activityId)}.`);
   };
   const attach = () => addPhotos(Array.from(fileRef.current?.files ?? []));
+
+  const pair = (a: Evidence, b: Evidence) => {
+    if (!pairable(a.kind) || !pairable(b.kind) || a.kind === b.kind) return notify('Pair one BEFORE photo with one AFTER photo.');
+    for (const old of [partnerOf(a), partnerOf(b)]) if (old && old.id !== a.id && old.id !== b.id) updateEvidence(old.id, { pairId: null });
+    const pairId = uid('pair');
+    updateEvidence(a.id, { pairId });
+    updateEvidence(b.id, { pairId });
+    setPairFrom(null);
+    notify(`Paired ${a.ref || a.kind} with ${b.ref || b.kind}.`);
+  };
+  const unpair = (e: Evidence) => {
+    const other = partnerOf(e);
+    updateEvidence(e.id, { pairId: null });
+    if (other) updateEvidence(other.id, { pairId: null });
+  };
+
+  const ql = q.trim().toLowerCase();
+  const shown = evidence.filter((e) =>
+    (!fActivity || e.activityId === fActivity) &&
+    (!fKind || e.kind === fKind) &&
+    (!fGps || (fGps === 'with' ? e.gpsStatus === 'captured' || e.gpsStatus === 'manual' : fGps === 'without' ? !e.gps : fGps === 'manual' ? e.gpsStatus === 'manual' : !!accuracyWarning(e))) &&
+    (!fPair || (fPair === 'paired' ? !!partnerOf(e) : pairable(e.kind) && !partnerOf(e))) &&
+    (!ql || `${e.ref ?? ''} ${e.caption} ${e.workArea ?? ''} ${e.locationDetail ?? ''}`.toLowerCase().includes(ql)),
+  );
+  const stats = {
+    before: evidence.filter((e) => e.kind === 'Before').length,
+    after: evidence.filter((e) => e.kind === 'After').length,
+    pairs: new Set(evidence.filter((e) => partnerOf(e)).map((e) => e.pairId)).size,
+    geotagged: evidence.filter((e) => e.gpsStatus === 'captured').length,
+    noGps: evidence.filter((e) => !e.gps).length,
+    unpaired: evidence.filter((e) => pairable(e.kind) && !partnerOf(e)).length,
+  };
 
   const evidenceDoc = async () => {
     const images: { caption: string; blob: Blob }[] = [];
     for (const e of shown) {
       const b = await getPhoto(e.id).catch(() => undefined);
-      if (b) images.push({ caption: `${e.kind} · ${name(e.activityId)}${e.caption ? ' · ' + e.caption : ''} · ${new Date(e.takenAt).toLocaleString()}`, blob: b });
+      if (b) images.push({ caption: [e.ref, e.kind, name(e.activityId), e.workArea, e.locationDetail, e.caption, new Date(e.takenAt).toLocaleString(), gpsLabel(e)].filter(Boolean).join(' · '), blob: b });
     }
     return IO.evidenceDoc(state, images);
   };
 
-  const shown = filter ? evidence.filter((e) => e.activityId === filter) : evidence;
+  const filtersOn = fActivity || fKind || fGps || fPair || ql;
 
   return (
     <>
@@ -108,7 +180,7 @@ export default function SiteEvidence() {
         <div>
           <div className="eyebrow">Field operations</div>
           <h1>Site evidence</h1>
-          <p className="lead">Before, during and after photos per activity. Photos are compressed and kept on this device.</p>
+          <p className="lead">Before, after, inspection, safety and defect photos with capture time, device GPS and work-area location. Photos are kept on this device and sync when you are online.</p>
         </div>
         <div className="form-actions" style={{ marginTop: 0 }}>
           <DataIO doc={evidenceDoc} capture={() => document.getElementById('evidence-card')} extraAccept="image/jpeg,image/png,image/webp,image/heic" onExtraFiles={addPhotos} label="photos" />
@@ -117,85 +189,152 @@ export default function SiteEvidence() {
       </div>
       <ProjectBar />
 
+      <div className="user-stats">
+        <div className="user-stat"><div className="user-stat-val">{stats.before} / {stats.after}</div><div className="user-stat-label">Before / After photos</div></div>
+        <div className="user-stat"><div className="user-stat-val">{stats.pairs}</div><div className="user-stat-label">Before/after pairs</div></div>
+        <div className="user-stat"><div className="user-stat-val">{stats.unpaired}</div><div className="user-stat-label">Missing a match</div></div>
+        <div className="user-stat"><div className="user-stat-val">{stats.geotagged}</div><div className="user-stat-label">GPS-tagged</div></div>
+        <div className="user-stat"><div className="user-stat-val">{stats.noGps}</div><div className="user-stat-label">Without GPS</div></div>
+      </div>
+
       <section className="card">
-        <div className="card-head"><h2>Attach photo</h2><span className="note">Up to 5 MB after compression · stored in this browser</span></div>
-          {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
-            <>
-              <div className="form-grid">
-                <label className="field">Activity
-                  <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
-                    {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </label>
-                <label className="field">Photo type
-                  <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Evidence['kind'])}>
-                    <option>Before</option><option>During</option><option>After</option>
-                  </select>
-                </label>
-                <label className="field">Capture photo
-                  <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" multiple />
-                </label>
-                <label className="field">Caption
-                  <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Location and observation" />
-                </label>
-              </div>
-              {error && <p className="bad" role="alert">{error}</p>}
-              <div className="form-actions">
-                <button className="btn btn-primary" onClick={attach} disabled={busy}>{busy ? 'Saving…' : 'Attach photo'}</button>
-              </div>
-            </>
-          )}
+        <div className="card-head"><h2>Capture photo</h2><span className="note">Up to 5 MB after compression · saved on this device first</span></div>
+        {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
+          <>
+            <div className="form-grid">
+              <label className="field">Activity
+                <select className="input" value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+                  {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </label>
+              <label className="field">Photo type
+                <select className="input" value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
+                  {KINDS.map((k) => <option key={k}>{k}</option>)}
+                </select>
+              </label>
+              <label className="field">Work area
+                <input className="input" value={workArea} onChange={(e) => setWorkArea(e.target.value)} maxLength={200} placeholder="e.g. North facade, Turbine 7 blade B" />
+              </label>
+              <label className="field">Building / floor / elevation / grid
+                <input className="input" value={locationDetail} onChange={(e) => setLocationDetail(e.target.value)} maxLength={300} placeholder="e.g. Tower 1 · L12 · Grid C-4" />
+              </label>
+              <label className="field">Take or choose photo
+                <input ref={fileRef} id="photo-file" className="input" type="file" accept="image/*" capture="environment" multiple />
+              </label>
+              <label className="field">Description
+                <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="What the photo shows" />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="checkbox" checked={recordGps && !manualLoc} disabled={manualLoc} onChange={(e) => setRecordGps(e.target.checked)} /> Record GPS location
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="checkbox" checked={manualLoc} onChange={(e) => setManualLoc(e.target.checked)} /> Enter location manually
+              </label>
+              {manualLoc && (
+                <>
+                  <input className="input" style={{ maxWidth: 150 }} inputMode="decimal" value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Latitude" aria-label="Latitude" />
+                  <input className="input" style={{ maxWidth: 150 }} inputMode="decimal" value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="Longitude" aria-label="Longitude" />
+                </>
+              )}
+            </div>
+            <p className="note">
+              {manualLoc ? 'Manual coordinates are saved and labelled "Manually entered", never as device GPS.'
+                : recordGps ? `Your browser may ask for location permission. The device position is recorded with its reported accuracy (target ${GPS_TARGET_M} m) to show where the photo was taken; it is the phone's position, not necessarily the exact surface. If no fix is available the photo is still saved as "GPS unavailable".`
+                : 'Photos will be saved without a location.'}
+            </p>
+            {error && <p className="bad" role="alert">{error}</p>}
+            {gpsNote && <p className={/accuracy is|unavailable|refused/.test(gpsNote) ? 'bad' : 'note'} role="status">{gpsNote}</p>}
+            <div className="form-actions">
+              <button className="btn btn-primary" onClick={attach} disabled={!!busy}>{busy ?? 'Save evidence'}</button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card" id="evidence-card">
-        <div className="card-head">
-          <h2>Evidence ({shown.length})</h2>
-          <select className="input" style={{ maxWidth: 280 }} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter by activity">
-            <option value="">All activities</option>
-            {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+        <div className="card-head"><h2>Evidence gallery ({shown.length}{filtersOn ? ` of ${evidence.length}` : ''})</h2></div>
+        <div className="form-grid" style={{ marginBottom: 12 }}>
+          <label className="field">Search<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Reference, description, work area" /></label>
+          <label className="field">Activity<select className="input" value={fActivity} onChange={(e) => setFActivity(e.target.value)}><option value="">All activities</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+          <label className="field">Type<select className="input" value={fKind} onChange={(e) => setFKind(e.target.value)}><option value="">All types</option>{KINDS.map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label className="field">GPS<select className="input" value={fGps} onChange={(e) => setFGps(e.target.value)}><option value="">Any</option><option value="with">With location</option><option value="without">Without GPS</option><option value="manual">Manually entered</option><option value="warning">Accuracy warning</option></select></label>
+          <label className="field">Pairing<select className="input" value={fPair} onChange={(e) => setFPair(e.target.value)}><option value="">Any</option><option value="paired">Paired</option><option value="unpaired">Missing a match</option></select></label>
         </div>
-        {shown.length === 0 ? <div className="empty">No field evidence captured yet.</div> : (
+        {pairFrom && byId.get(pairFrom) && (
+          <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            Pairing {byId.get(pairFrom)!.ref || byId.get(pairFrom)!.kind}: choose the matching {byId.get(pairFrom)!.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo.
+            <button className="btn btn-sm" onClick={() => setPairFrom(null)}>Cancel</button>
+          </div>
+        )}
+        {shown.length === 0 ? <div className="empty">{evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div> : (
           <div className="photo-grid">
             {shown.map((e) => {
               const isEditing = editing === e.id;
               const edits = e.editCount ?? 0;
               const canEdit = !CLOUD || reviewer || edits < 1;
               const needsApproval = CLOUD && !reviewer && edits >= 1;
+              const partner = partnerOf(e);
+              const from = pairFrom ? byId.get(pairFrom) : undefined;
+              const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
               return (
-                <figure key={e.id} className="photo" style={{ margin: 0 }}>
-                  <Thumb id={e.id} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
+                <figure key={e.id} className="photo" style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }}>
+                  <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
                   <figcaption className="meta">
                     {isEditing ? (
                       <>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as Evidence['kind'])}>
-                            <option>Before</option><option>During</option><option>After</option>
+                          <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as EvidenceKind)}>
+                            {KINDS.map((k) => <option key={k}>{k}</option>)}
                           </select>
                           <select className="input" style={{ width: 'auto', flex: 1 }} value={editActivity} onChange={(ev) => setEditActivity(ev.target.value)}>
                             {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                           </select>
                         </div>
-                        <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Caption" />
+                        <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Description" />
+                        <input className="input" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+                        <input className="input" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+                        <p className="note" style={{ margin: 0 }}>Capture time and GPS are kept as recorded.</p>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn-sm btn-primary" onClick={() => { updateEvidence(e.id, { kind: editKind, activityId: editActivity, caption: editCaption, editCount: edits + 1 }); setEditing(null); notify('Photo updated.'); }}>Save</button>
+                          <button className="btn btn-sm btn-primary" onClick={() => {
+                            const patch: Partial<Evidence> = { kind: editKind, activityId: editActivity, caption: editCaption, workArea: editArea.trim(), locationDetail: editLoc.trim(), editCount: edits + 1 };
+                            if (editKind !== e.kind && partner && (!pairable(editKind) || editKind === partner.kind)) { patch.pairId = null; updateEvidence(partner.id, { pairId: null }); }
+                            updateEvidence(e.id, patch); setEditing(null); notify('Photo updated.');
+                          }}>Save</button>
                           <button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
                         </div>
                       </>
                     ) : (
                       <>
-                        <span><span className={`pill ${e.kind === 'After' ? 'pill-ok' : e.kind === 'Before' ? '' : 'pill-warn'}`}>{e.kind}</span> {name(e.activityId)}</span>
-                        <span>{e.caption || <span className="note">No caption</span>}</span>
-                        <span className="note">{new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+                        <span><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span> <b>{e.ref || '—'}</b></span>
+                        <span>{name(e.activityId)}{e.workArea ? ` · ${e.workArea}` : ''}</span>
+                        {e.locationDetail && <span className="note">{e.locationDetail}</span>}
+                        <span>{e.caption || <span className="note">No description</span>}</span>
+                        <span className="note">Captured {new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+                        <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          📍 {gpsLabel(e)}
+                          {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
+                          {e.gps && <a href={osm(e.gps.lat, e.gps.lng)} target="_blank" rel="noreferrer">Map</a>}
+                          {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => navigator.clipboard?.writeText(`${e.gps!.lat}, ${e.gps!.lng}`).then(() => notify('Coordinates copied.'), () => notify(`${e.gps!.lat}, ${e.gps!.lng}`))}>Copy</button>}
+                        </span>
+                        {pairable(e.kind) && (
+                          <span className="note">
+                            {partner ? <>🔗 Paired with <b>{partner.ref || partner.kind}</b></> : <span className="pill pill-warn">No matching {e.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo</span>}
+                          </span>
+                        )}
                         {CLOUD && reviewer && (
                           <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
                             <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
                           </label>
                         )}
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {canEdit && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); }}>Edit</button>}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
+                          {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
+                          {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
+                          {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                           {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
-                          {canEdit && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo from this device?').then((ok) => ok && deleteEvidence(e.id))}>Delete</button>}
+                          {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
                         </div>
                       </>
                     )}

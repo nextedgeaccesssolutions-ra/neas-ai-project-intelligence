@@ -76,17 +76,41 @@ export interface Quotation {
   history: { at: string; action: string; by: string }[];
 }
 
+export type EvidenceKind = 'Before' | 'During' | 'After' | 'Inspection' | 'Safety' | 'Defect';
+/** How the location was obtained: never invented; "manual" is typed in by a person. */
+export type GpsStatus = 'captured' | 'manual' | 'unavailable' | 'denied' | 'not_requested';
+export interface GpsFix {
+  lat: number;
+  lng: number;
+  /** device-reported horizontal accuracy in metres (null when unknown) */
+  accuracy: number | null;
+  altitude?: number | null;
+  heading?: number | null;
+  /** when the fix was taken (device clock, ISO) */
+  at: string;
+}
+
 export interface Evidence {
   id: string;
   projectId: string;
   activityId: string;
-  kind: 'Before' | 'During' | 'After';
+  kind: EvidenceKind;
   caption: string;
   takenAt: string;
   bytes: number;
   /** cloud mode: object path in the private bucket */
   storagePath?: string;
   editCount?: number;
+  gps?: GpsFix | null;
+  gpsStatus?: GpsStatus;
+  /** structural location, separate from GPS: facade, tower, turbine component… */
+  workArea?: string;
+  /** building / floor / elevation / grid */
+  locationDetail?: string;
+  /** shared by a BEFORE and an AFTER photo of the same spot */
+  pairId?: string | null;
+  /** human-readable photo reference, e.g. BEF-20261023-1A2B */
+  ref?: string;
 }
 
 export interface AppState {
