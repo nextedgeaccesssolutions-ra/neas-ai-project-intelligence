@@ -10,7 +10,7 @@ import { projectProgress, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPHP, fmtPct } from '@/lib/format';
 import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
-import { VIEWS } from '@/lib/cloud/cloudSync';
+import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
 const TABS: [Tab, string][] = [
@@ -642,12 +642,15 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-        {VIEWS.map(([k, label]) => (
-          <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={sel.includes(k)} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
-            {label}
-          </label>
-        ))}
+        {VIEWS.map(([k, label]) => {
+          const always = ALWAYS_VIEWS.includes(k);
+          return (
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={always ? 'Every user always has this module' : undefined}>
+              <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
+              {label}{always && <span className="note"> (always on)</span>}
+            </label>
+          );
+        })}
       </div>
       <div className="form-actions">
         <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save(VIEWS.map(([k]) => k).filter((k) => sel.includes(k)))}>Save module access</button>

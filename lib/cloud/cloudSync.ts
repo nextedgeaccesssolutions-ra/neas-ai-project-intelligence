@@ -53,8 +53,10 @@ export const viewOfPath = (path: string): ViewKey | null => {
   return hit.length ? hit[hit.length - 1][0] : null;
 };
 /** null allowed_views = every module. Super Admins always see everything. */
+/** Modules every signed-in user always has, whatever their module settings. */
+export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
 export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
-  !view || !profile || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
+  !view || !profile || ALWAYS_VIEWS.includes(view) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
 // ---------------------------------------------------------------------------
 type Versions = Record<string, { id: string; version: number }>;
