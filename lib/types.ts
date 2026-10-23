@@ -37,6 +37,8 @@ export interface Activity {
   quantityTotal?: number | null;
   quantityUnit?: string;
   delayReason?: string;
+  /** number of evidence photos this scope must have (optional) */
+  requiredPhotos?: number | null;
 }
 
 export type StopReason = 'weather' | 'wind' | 'client_instruction' | 'site_access' | 'safety' | 'equipment' | 'manpower' | 'material' | 'other';
@@ -53,6 +55,8 @@ export const STOP_REASONS: { value: StopReason; label: string }[] = [
 ];
 
 /** A STOP WORK event and, once confirmed, its RESTART. Never deleted or rewritten. */
+export type GpsSource = 'exif' | 'device' | 'manual';
+
 export interface ActivityStop {
   id: string;
   projectId: string;
@@ -154,6 +158,8 @@ export interface Evidence {
   editCount?: number;
   gps?: GpsFix | null;
   gpsStatus?: GpsStatus;
+  /** where the coordinates came from: the camera's own EXIF GPS, the device position at capture, or typed in */
+  gpsSource?: GpsSource | null;
   /** structural location, separate from GPS: facade, tower, turbine component… */
   workArea?: string;
   /** building / floor / elevation / grid */

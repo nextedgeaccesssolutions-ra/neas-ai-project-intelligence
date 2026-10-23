@@ -14,14 +14,14 @@ import { useCanManage } from '@/components/RoleGate';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence, EvidenceKind } from '@/lib/types';
 import PhotoThumb, { fetchFromServer } from '@/components/PhotoThumb';
+import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
 import EvidenceReportPanel from '@/components/EvidenceReportPanel';
-import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack } from '@/lib/geo';
+import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack, gpsSourceOf, gpsSourceLabel } from '@/lib/geo';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const KINDS: EvidenceKind[] = ['Before', 'After', 'During', 'Inspection', 'Safety', 'Defect'];
 const KIND_TONE: Record<EvidenceKind, string> = { Before: '', After: 'pill-ok', During: 'pill-warn', Inspection: '', Safety: 'pill-warn', Defect: 'pill-bad' };
 const pairable = (k: EvidenceKind) => k === 'Before' || k === 'After';
-const osm = (lat: number, lng: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=19/${lat}/${lng}`;
 
 function summarizeGps(rs: GpsResult[]): string | null {
   if (!rs.length) return null;
@@ -65,6 +65,10 @@ export default function SiteEvidence() {
   const [fPair, setFPair] = useState('');
   const [q, setQ] = useState('');
   const [pairFrom, setPairFrom] = useState<string | null>(null);
+  const [layout, setLayoutState] = useState<'2x4' | '2x6'>(() => { try { return localStorage.getItem('neas-evidence-layout') === '2x6' ? '2x6' : '2x4'; } catch { return '2x4'; } });
+  const setLayout = (l: '2x4' | '2x6') => { setLayoutState(l); setPage(0); try { localStorage.setItem('neas-evidence-layout', l); } catch { /* per-device convenience only */ } };
+  const [page, setPage] = useState(0);
+  const [viewLoc, setViewLoc] = useState<LocationInfo | null>(null);
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [editKind, setEditKind] = useState<EvidenceKind>('Before');
@@ -148,7 +152,7 @@ export default function SiteEvidence() {
         await putPhoto(id, blob);
         addEvidence({
           id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
-          gps: gps.fix, gpsStatus: gps.status, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
+          gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
         });
         ok++;
       } catch (e) {
@@ -206,6 +210,30 @@ export default function SiteEvidence() {
   };
 
   const filtersOn = fActivity || fKind || fGps || fPair || ql;
+  const perPage = layout === '2x6' ? 12 : 8;
+  // required evidence: shown only for the activity being filtered, never filled with other photos
+  const reqAct = fActivity ? activities.find((a) => a.id === fActivity) : undefined;
+  const reqHave = reqAct ? evidence.filter((e) => e.activityId === reqAct.id).length : 0;
+  const reqMissing = reqAct?.requiredPhotos && !fKind && !fGps && !fPair && !ql ? Math.max(0, reqAct.requiredPhotos - reqHave) : 0;
+  const slots = shown.length + reqMissing;
+  const pages = Math.max(1, Math.ceil(slots / perPage));
+  const pg = Math.min(page, pages - 1);
+  const pageItems = shown.slice(pg * perPage, (pg + 1) * perPage);
+  const pageMissing = Math.max(0, Math.min(perPage - pageItems.length, slots - pg * perPage - pageItems.length));
+  const withReq = activities.filter((a) => a.requiredPhotos);
+  const locationOf = (e: Evidence): LocationInfo => ({
+    ref: e.ref, projectName: project?.name ?? '', projectCode: project?.code, client: project?.client, site: project?.site,
+    workArea: e.workArea, location: e.locationDetail, lat: e.gps?.lat ?? null, lng: e.gps?.lng ?? null, accuracy: e.gps?.accuracy ?? null,
+    source: e.gpsSource ?? (e.gpsStatus === 'manual' ? 'manual' : null), status: e.gpsStatus, gpsAt: e.gps?.at ?? null, capturedAt: e.takenAt,
+  });
+  const addFor = (actId: string) => { setActivityId(actId); document.getElementById('capture-card')?.scrollIntoView({ behavior: 'smooth' }); };
+  const pager = pages > 1 && (
+    <div className="grid-pager" role="navigation" aria-label="Gallery pages">
+      <button className="btn btn-sm" disabled={pg === 0} onClick={() => setPage(pg - 1)}>‹ Previous</button>
+      <span className="note">Page {pg + 1} of {pages}</span>
+      <button className="btn btn-sm" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button>
+    </div>
+  );
 
   return (
     <>
@@ -227,7 +255,7 @@ export default function SiteEvidence() {
         project={{ code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate }}
         photos={evidence.map((e) => ({
           id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: activities.find((a) => a.id === e.activityId)?.name,
-          workArea: e.workArea, location: e.locationDetail, pairId: e.pairId, gps: e.gps ? gpsLabel(e) : undefined,
+          workArea: e.workArea, location: e.locationDetail, pairId: e.pairId, gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined,
         }))}
         load={async (p) => (await getPhoto(p.id).catch(() => undefined)) ?? (CLOUD ? await fetchFromServer(p.id, evidence.find((e) => e.id === p.id)?.storagePath ?? `${pid}/${p.id}.jpg`) : null)}
       />
@@ -240,7 +268,7 @@ export default function SiteEvidence() {
         <div className="user-stat"><div className="user-stat-val">{stats.noGps}</div><div className="user-stat-label">Without GPS</div></div>
       </div>
 
-      <section className="card">
+      <section className="card" id="capture-card">
         <div className="card-head"><h2>Capture photo</h2><span className="note">Up to 5 MB after compression · saved on this device first</span></div>
         {activities.length === 0 ? <div className="empty">Add activities in <Link href="/project-management">Project management</Link> first.</div> : (
           <>
@@ -306,13 +334,36 @@ export default function SiteEvidence() {
       </section>
 
       <section className="card" id="evidence-card">
-        <div className="card-head"><h2>Evidence gallery ({shown.length}{filtersOn ? ` of ${evidence.length}` : ''})</h2></div>
+        <div className="card-head">
+          <h2>Evidence gallery ({shown.length}{filtersOn ? ` of ${evidence.length}` : ''})</h2>
+          <label className="note" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>Layout
+            <select className="input" style={{ width: 'auto' }} value={layout} onChange={(e) => setLayout(e.target.value as '2x4' | '2x6')}>
+              <option value="2x4">2 × 4 (8 per page)</option>
+              <option value="2x6">2 × 6 (12 per page)</option>
+            </select>
+          </label>
+        </div>
+        {withReq.length > 0 && (
+          <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <b>Required evidence</b>
+            {withReq.map((a) => {
+              const have = evidence.filter((e) => e.activityId === a.id).length;
+              const done = have >= (a.requiredPhotos ?? 0);
+              return (
+                <span key={a.id} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  <button className="btn btn-sm" onClick={() => { setFActivity(a.id); setPage(0); }} title="Show this scope's photos and missing slots">{a.name}</button>
+                  <span className={`pill ${done ? 'pill-ok' : 'pill-warn'}`}>{have} of {a.requiredPhotos}{done ? '' : ` · ${a.requiredPhotos! - have} missing`}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
         <div className="form-grid" style={{ marginBottom: 12 }}>
-          <label className="field">Search<input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Reference, description, work area" /></label>
-          <label className="field">Activity<select className="input" value={fActivity} onChange={(e) => setFActivity(e.target.value)}><option value="">All activities</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-          <label className="field">Type<select className="input" value={fKind} onChange={(e) => setFKind(e.target.value)}><option value="">All types</option>{KINDS.map((k) => <option key={k}>{k}</option>)}</select></label>
-          <label className="field">GPS<select className="input" value={fGps} onChange={(e) => setFGps(e.target.value)}><option value="">Any</option><option value="with">With location</option><option value="without">Without GPS</option><option value="manual">Manually entered</option><option value="warning">Accuracy warning</option></select></label>
-          <label className="field">Pairing<select className="input" value={fPair} onChange={(e) => setFPair(e.target.value)}><option value="">Any</option><option value="paired">Paired</option><option value="unpaired">Missing a match</option></select></label>
+          <label className="field">Search<input className="input" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} placeholder="Reference, description, work area" /></label>
+          <label className="field">Activity<select className="input" value={fActivity} onChange={(e) => { setFActivity(e.target.value); setPage(0); }}><option value="">All activities</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+          <label className="field">Type<select className="input" value={fKind} onChange={(e) => { setFKind(e.target.value); setPage(0); }}><option value="">All types</option>{KINDS.map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label className="field">GPS<select className="input" value={fGps} onChange={(e) => { setFGps(e.target.value); setPage(0); }}><option value="">Any</option><option value="with">With location</option><option value="without">Without GPS</option><option value="manual">Manually entered</option><option value="warning">Accuracy warning</option></select></label>
+          <label className="field">Pairing<select className="input" value={fPair} onChange={(e) => { setFPair(e.target.value); setPage(0); }}><option value="">Any</option><option value="paired">Paired</option><option value="unpaired">Missing a match</option></select></label>
         </div>
         {pairFrom && byId.get(pairFrom) && (
           <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -320,9 +371,10 @@ export default function SiteEvidence() {
             <button className="btn btn-sm" onClick={() => setPairFrom(null)}>Cancel</button>
           </div>
         )}
-        {shown.length === 0 ? <div className="empty">{evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div> : (
-          <div className="photo-grid">
-            {shown.map((e) => {
+        {slots === 0 ? <div className="empty">{evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div> : (
+          <>{pager}
+          <div className={`evidence-grid layout-${layout}`}>
+            {pageItems.map((e) => {
               const isEditing = editing === e.id;
               const edits = e.editCount ?? 0;
               const canEdit = !CLOUD || reviewer || edits < 1;
@@ -367,7 +419,7 @@ export default function SiteEvidence() {
                         <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                           📍 {gpsLabel(e)}
                           {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
-                          {e.gps && <a href={osm(e.gps.lat, e.gps.lng)} target="_blank" rel="noreferrer">Map</a>}
+                          {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setViewLoc(locationOf(e))}>View location</button>}
                           {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => navigator.clipboard?.writeText(`${e.gps!.lat}, ${e.gps!.lng}`).then(() => notify('Coordinates copied.'), () => notify(`${e.gps!.lat}, ${e.gps!.lng}`))}>Copy</button>}
                         </span>
                         {pairable(e.kind) && (
@@ -394,9 +446,20 @@ export default function SiteEvidence() {
                 </figure>
               );
             })}
+            {Array.from({ length: pageMissing }, (_, i) => (
+              <div key={`missing-${i}`} className="slot-empty">
+                <div className="slot-box">
+                  <b>Photo not provided</b>
+                  <span>Required evidence for {reqAct?.name} ({reqHave} of {reqAct?.requiredPhotos})</span>
+                  {reqAct && <button className="btn btn-sm btn-primary" onClick={() => addFor(reqAct.id)}>Add photo</button>}
+                </div>
+              </div>
+            ))}
           </div>
+          {pager}</>
         )}
       </section>
+      {viewLoc && <LocationViewer info={viewLoc} onClose={() => setViewLoc(null)} />}
     </>
   );
 }

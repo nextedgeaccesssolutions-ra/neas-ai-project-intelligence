@@ -133,7 +133,7 @@ async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promis
       if (img) { const f = fit(img, cellW, boxH); pdf.addImage(img.data, 'JPEG', cx + f.dx, cy + f.dy, f.w, f.h); }
       else { pdf.setTextColor(...rgb(MUTED)); pdf.setFontSize(9); pdf.text('Photo not available', cx + cellW / 2, cy + boxH / 2, { align: 'center' }); }
       const cap = Math.floor((capH - 3) / 9);
-      const wrapped = photoCaption(p, r.audience, undefined, r.datesAre).flatMap((t, j) => { pdf.setFontSize(j === 0 ? 8 : 7.5); return (pdf.splitTextToSize(t, cellW) as string[]).map((s) => ({ s, j })); });
+      const wrapped = photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations).flatMap((t, j) => { pdf.setFontSize(j === 0 ? 8 : 7.5); return (pdf.splitTextToSize(t, cellW) as string[]).map((s) => ({ s, j })); });
       if (wrapped.length > cap) { wrapped.length = cap; wrapped[cap - 1] = { ...wrapped[cap - 1], s: wrapped[cap - 1].s.replace(/.{0,2}$/, '…') }; }
       let ly = cy + boxH + 10;
       for (const { s, j } of wrapped) {
@@ -233,7 +233,7 @@ async function toPptx(r: Report, images: Map<string, ReportImage | null>): Promi
       const img = images.get(p.id);
       if (img) { const f = fit(img, cellW, boxH); s.addImage({ data: img.data, x: x + f.dx, y: y + f.dy, w: f.w, h: f.h }); }
       else s.addText('Photo not available', { x, y, w: cellW, h: boxH, fontSize: 9, color: MUTED, align: 'center', valign: 'middle' });
-      const lines = photoCaption(p, r.audience, undefined, r.datesAre);
+      const lines = photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations);
       s.addText(lines.map((tx, j) => ({ text: tx, options: { bold: j === 0, color: j === 0 ? INK : MUTED, breakLine: true } })),
         { x, y: y + boxH + 0.02, w: cellW, h: capH - 0.02, fontSize: across > 4 ? 6.5 : 7.5, fontFace: 'Arial', valign: 'top', fit: 'shrink', margin: 1 });
     });
@@ -306,7 +306,7 @@ async function toDocx(r: Report, images: Map<string, ReportImage | null>): Promi
       rows.push(new TableRow({ cantSplit: true, children: [0, 1].map((j) => {
         const p = group[i + j];
         return new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, borders: noBorders, margins: { top: 60, bottom: 60, left: 60, right: 60 },
-          children: p ? [img(p, cellPx.w, cellPx.h), ...photoCaption(p, r.audience, undefined, r.datesAre).map((t, k) => new Paragraph({ children: [new TextRun({ text: t, bold: k === 0, color: k === 0 ? INK : MUTED, size: 15 })] }))] : [new Paragraph('')] });
+          children: p ? [img(p, cellPx.w, cellPx.h), ...photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations).map((t, k) => new Paragraph({ children: [new TextRun({ text: t, bold: k === 0, color: k === 0 ? INK : MUTED, size: 15 })] }))] : [new Paragraph('')] });
       }) }));
     }
     return [

@@ -29,9 +29,10 @@ type Draft = {
   qtyTotal: string;
   qtyUnit: string;
   delayReason: string;
+  requiredPhotos: string;
 };
 
-const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '' });
+const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '', requiredPhotos: '' });
 
 const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
   const last = latestReport(a.id, reports);
@@ -50,6 +51,7 @@ const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
     qtyTotal: a.quantityTotal == null ? '' : String(a.quantityTotal),
     qtyUnit: a.quantityUnit ?? '',
     delayReason: a.delayReason ?? '',
+    requiredPhotos: a.requiredPhotos == null ? '' : String(a.requiredPhotos),
   };
 };
 const optNum = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -102,6 +104,8 @@ export default function ProjectManagement() {
     const remaining = optNum(draft.remaining), qtyTotal = optNum(draft.qtyTotal);
     if (remaining != null && (!Number.isFinite(remaining) || remaining < 0)) return setError('Remaining working days must be 0 or more.');
     if (qtyTotal != null && (!Number.isFinite(qtyTotal) || qtyTotal <= 0)) return setError('Approved quantity must be more than 0.');
+    const reqPhotos = optNum(draft.requiredPhotos);
+    if (reqPhotos != null && (!Number.isInteger(reqPhotos) || reqPhotos < 0 || reqPhotos > 500)) return setError('Required photos must be a whole number from 0 to 500.');
     if (draft.actualFinish && !draft.actualStart) return setError('Enter the actual start before the actual finish.');
     if (draft.actualStart && draft.actualFinish && draft.actualFinish < draft.actualStart) return setError('Actual finish cannot be before the actual start.');
     if (editing && (draft.start !== editing.start || draft.end !== editing.end) && !draft.delayReason.trim())
@@ -117,7 +121,7 @@ export default function ProjectManagement() {
       // the original baseline is kept; a new activity takes its first planned dates as baseline
       baselineStart: editing ? editing.baselineStart ?? editing.start : draft.start, baselineEnd: editing ? editing.baselineEnd ?? editing.end : draft.end,
       actualStart: draft.actualStart || null, actualFinish: draft.actualFinish || null, remainingDays: remaining,
-      quantityTotal: qtyTotal, quantityUnit: draft.qtyUnit.trim(), delayReason: draft.delayReason.trim(),
+      quantityTotal: qtyTotal, quantityUnit: draft.qtyUnit.trim(), delayReason: draft.delayReason.trim(), requiredPhotos: reqPhotos || null,
     };
     upsertActivity(a);
     // Progress is stored as a field report, the single source for actual % everywhere
@@ -214,6 +218,10 @@ export default function ProjectManagement() {
                 <input id="act-qty" className="input" type="number" min="0" step="any" value={draft.qtyTotal} onChange={(e) => setDraft({ ...draft, qtyTotal: e.target.value })} placeholder="optional" />
                 <input id="act-qty-unit" className="input" style={{ maxWidth: 90 }} value={draft.qtyUnit} onChange={(e) => setDraft({ ...draft, qtyUnit: e.target.value })} placeholder="m²" aria-label="Quantity unit" />
               </div>
+            </label>
+            <label className="field">
+              Required evidence photos
+              <input id="act-req-photos" className="input" type="number" min="0" max="500" step="1" value={draft.requiredPhotos} onChange={(e) => setDraft({ ...draft, requiredPhotos: e.target.value })} placeholder="optional" />
             </label>
             <label className="field" style={{ gridColumn: 'span 2' }}>
               Delay / change reason

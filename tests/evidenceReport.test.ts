@@ -44,11 +44,16 @@ describe('site evidence report', () => {
     const r = buildReport(base({ from: '2026-10-12', to: '2026-10-13' }));
     expect(r.photos.every((p) => p.takenAt.startsWith('2026-10-12') || p.takenAt.startsWith('2026-10-13'))).toBe(true);
   });
-  it('never puts GPS in a client report', () => {
-    const r = buildReport(base({ audience: 'client' }));
-    expect(r.summary.some((s) => s.label === 'GPS-tagged')).toBe(false);
-    expect(photoCaption(r.photos[0], 'client').join(' ')).not.toContain('GPS');
-    expect(photoCaption(r.photos[0], 'internal').join(' ')).toContain('GPS');
+  it('shows locations to clients only when the project shares them, and never invents one', () => {
+    const hidden = buildReport(base({ audience: 'client', photos: Array.from({ length: 3 }, (_, i) => photo(i, { gps: undefined })) }));
+    expect(hidden.locations).toBe(false);
+    expect(hidden.summary.some((s) => s.label === 'GPS-tagged')).toBe(false);
+    expect(photoCaption(hidden.photos[0], 'client', undefined, 'captured', 1, hidden.locations).join(' ')).not.toContain('GPS');
+    const shared = buildReport(base({ audience: 'client', photos: [photo(1, { gpsSource: 'Device position recorded during capture' }), photo(2, { gps: undefined })] }));
+    expect(shared.locations).toBe(true);
+    expect(photoCaption(shared.photos[0], 'client', undefined, 'captured', 1).join(' ')).toContain('GPS 14.585771, 121.029367 ±10 m · Device position recorded during capture');
+    expect(photoCaption(shared.photos[1], 'client', undefined, 'captured', 2)).toContain('GPS unavailable');
+    expect(photoCaption(shared.photos[0], 'internal', undefined, 'captured', 7)[0]).toMatch(/^Photo 7 · /);
   });
   it('a large collection still gets exactly one title page and all photos', () => {
     const r = buildReport(base({ photos: Array.from({ length: 250 }, (_, i) => photo(i)) }));
@@ -71,5 +76,21 @@ describe('PDF text', () => {
   it('keeps WinAnsi text and replaces characters the PDF fonts cannot draw', () => {
     expect(pdfSafe('Warehouse 4​ RDC – Cainta ñ “ok”')).toBe('Warehouse 4 RDC – Cainta ñ “ok”');
     expect(pdfSafe('Façade ‐ Tower Ⅱ 東')).toBe('Façade - Tower II ?');
+  });
+});
+
+import { buildClientView } from '../lib/cloud/clientView';
+describe('client photo locations', () => {
+  const snap = (gps: boolean) => ({
+    project: { code: 'P-1', name: 'Facade', status: 'active' }, visibility: { show_photos: true }, session_expires_at: '', generated_at: '',
+    files: [{ id: 'f1', kind: 'after', caption: 'North', storage_path: 'p/f1.jpg', mime_type: 'image/jpeg', created_at: '2026-10-23T09:00:00Z', captured_at: '2026-10-23T08:00:00Z', photo_ref: 'AFT-1',
+      ...(gps ? { gps_lat: '14.5', gps_lng: '121.0', gps_accuracy_m: '6.5', gps_source: 'exif', gps_status: 'captured' } : {}) }],
+  });
+  it('maps shared coordinates, source and capture time', () => {
+    const f = buildClientView(snap(true), '2026-10-23').files![0];
+    expect(f).toMatchObject({ capturedAt: '2026-10-23T08:00:00Z', ref: 'AFT-1', gps: { lat: 14.5, lng: 121, accuracy: 6.5, source: 'exif' } });
+  });
+  it('has no location when the project does not share it', () => {
+    expect(buildClientView(snap(false), '2026-10-23').files![0].gps).toBeNull();
   });
 });

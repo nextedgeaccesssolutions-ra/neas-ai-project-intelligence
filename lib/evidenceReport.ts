@@ -39,8 +39,10 @@ export interface ReportPhoto {
   activity?: string;
   workArea?: string;
   location?: string;
-  /** "14.585771, 121.029367 ±10 m" — internal reports only */
+  /** "14.585771, 121.029367 ±10 m"; only present when the viewer may see locations */
   gps?: string;
+  /** where the location came from, e.g. "Device position recorded during capture" */
+  gpsSource?: string;
   pairId?: string | null;
 }
 
@@ -76,6 +78,8 @@ export interface Report {
   findings: string[];
   audience: ReportAudience;
   datesAre: 'captured' | 'uploaded';
+  /** false when the viewer is not shown locations at all (client portal with locations switched off) */
+  locations: boolean;
 }
 
 const fmtDay = (d: string, tz: string) => new Intl.DateTimeFormat('en-PH', { timeZone: tz, year: 'numeric', month: 'short', day: '2-digit' }).format(new Date(d.length === 10 ? `${d}T12:00:00Z` : d));
@@ -140,7 +144,7 @@ export function buildReport(input: ReportInput): Report {
   const findings: string[] = [];
   const pairs = new Set(photos.filter((x) => x.pairId && photos.some((y) => y.id === x.pairId)).map((x) => [x.id, x.pairId].sort().join()));
   if (pairs.size) findings.push(`${pairs.size} before-and-after pair${pairs.size === 1 ? '' : 's'} documented.`);
-  if (input.audience === 'internal') {
+  if (input.audience === 'internal' || photos.some((x) => x.gps)) {
     const located = photos.filter((x) => x.gps).length;
     summary.push({ label: 'GPS-tagged', value: `${located} of ${photos.length}` });
     if (located < photos.length) findings.push(`${photos.length - located} photo${photos.length - located === 1 ? ' has' : 's have'} no GPS location.`);
@@ -152,15 +156,16 @@ export function buildReport(input: ReportInput): Report {
 
   return {
     title: def.label, reference, fileName: safeName(`${p.code} ${def.label} ${stamp(input.generatedAt, tz)}`),
-    project: p, fields, photos, pages, cols: 2, rows: per / 2, cover, summary, findings, audience: input.audience, datesAre: uploaded ? 'uploaded' : 'captured',
+    project: p, fields, photos, pages, cols: 2, rows: per / 2, cover, summary, findings, audience: input.audience, datesAre: uploaded ? 'uploaded' : 'captured', locations: input.audience === 'internal' || photos.some((x) => x.gps),
   };
 }
 
-/** Caption lines under a photo; GPS appears only in internal reports. */
-export function photoCaption(x: ReportPhoto, audience: ReportAudience, tz = 'Asia/Manila', datesAre: 'captured' | 'uploaded' = 'captured'): string[] {
+/** Caption lines under a photo. Location comes only from the photo record (clients get it only when the project shares it). */
+export function photoCaption(x: ReportPhoto, audience: ReportAudience, tz = 'Asia/Manila', datesAre: 'captured' | 'uploaded' = 'captured', n?: number, locations = true): string[] {
   const when = (datesAre === 'uploaded' ? 'Uploaded ' : '') + new Intl.DateTimeFormat('en-PH', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(x.takenAt));
-  const head = [clean(x.ref), cap(x.kind.toLowerCase())].filter(Boolean).join(' · ');
+  const head = [n != null ? `Photo ${n}` : '', clean(x.ref), cap(x.kind.toLowerCase())].filter(Boolean).join(' · ');
   const lines = [head, clean(x.caption), [when, clean(x.activity), clean(x.workArea), clean(x.location)].filter(Boolean).join(' · ')];
-  if (audience === 'internal' && x.gps) lines.push(`GPS ${x.gps}`);
+  if (x.gps) lines.push(`GPS ${x.gps}${x.gpsSource ? ` · ${x.gpsSource}` : ''}`);
+  else if (locations) lines.push('GPS unavailable');
   return lines.filter(Boolean);
 }
