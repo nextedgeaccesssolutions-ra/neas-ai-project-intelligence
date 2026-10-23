@@ -10,7 +10,7 @@ import { getPhoto } from '@/lib/photos';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import { coverPhotos } from '@/lib/coverPhotos';
-import { gpsLabel, gpsSourceLabel } from '@/lib/geo';
+import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
 import { fmtDate } from '@/lib/format';
 import type { ProjectReport } from '@/lib/projectReport';
 
@@ -86,7 +86,7 @@ export default function Reports() {
           })),
           evidence: evidence.filter((e) => e.kind !== 'Reference' && e.takenAt.slice(0, 10) <= asOf).sort((a, b) => a.takenAt.localeCompare(b.takenAt)).map((e) => ({
             id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: name(e.activityId), workArea: e.workArea, location: e.locationDetail, pairId: e.pairId,
-            gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined,
+            gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined, mapUrl: mapUrl(e.gps?.lat, e.gps?.lng),
           })),
         })}
       />

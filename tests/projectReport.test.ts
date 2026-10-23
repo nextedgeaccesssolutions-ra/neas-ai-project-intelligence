@@ -30,7 +30,7 @@ describe('cover photos', () => {
   it('labels location sources with the standard names and never claims GPS without coordinates', () => {
     expect(gpsSourceShort('exif')).toBe('EXIF GPS');
     expect(gpsSourceShort('device')).toBe('Device GPS');
-    expect(gpsSourceShort('manual')).toBe('Manual Location');
+    expect(gpsSourceShort('manual')).toBe('Manual Location — Admin Approved');
     expect(gpsSourceShort('exif', 'captured', false)).toBe('GPS Unavailable');
     const none = coverLines({ id: 'c', caption: 'Gate', takenAt: '2026-10-01T02:00:00Z' }, 2, 'P');
     expect(Object.fromEntries(none.lines)).toMatchObject({ Latitude: 'GPS Unavailable', Longitude: 'GPS Unavailable', 'Location source': 'GPS Unavailable' });
@@ -45,7 +45,7 @@ describe('project report', () => {
     expect(r.fields[0]).toEqual(['Project title', 'Supply of Materials & Manpower for Window Cleaning']);
     expect(r.fileName).toBe('NEAS_NEAS-0027-3-26_Supply-of-Materials-Manpower-for-Window-Cleaning_Project-Report_2026-10-23');
     expect(r.cover[0].title).toBe('Photo 01 — Main building / structure · Tower A');
-    expect(r.cover[0].mapUrl).toBe('https://www.google.com/maps/search/?api=1&query=14.585771,121.029367');
+    expect(r.cover[0].mapUrl).toBe('https://www.google.com/maps?q=14.585771,121.029367');
   });
   it('reports planned vs actual from the schedule and records only', () => {
     expect(r.overall!.actual).toBeCloseTo(0.6 * 40 + 0.4 * 10, 6);

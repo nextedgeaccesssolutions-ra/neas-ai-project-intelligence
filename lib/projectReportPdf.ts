@@ -96,7 +96,7 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
       pdf.setFont('helvetica', 'normal'); pdf.setTextColor(...INK); pdf.text(pdf.splitTextToSize(v, T - 72)[0], x + 72, ly);
       ly += 9.2;
     }
-    if (c.mapUrl) { pdf.setTextColor(...GOLD); pdf.textWithLink('Open location in Google Maps', x, ly, { url: c.mapUrl }); ly += 9.2; }
+    if (c.mapUrl) { pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...GOLD); pdf.textWithLink('VIEW PHOTO LOCATION ON MAP', x, ly, { url: c.mapUrl }); ly += 9.2; }
     return ly;
   };
 
@@ -243,10 +243,11 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
         if (img) { const f = fit(img, cw, boxH); pdf.addImage(img.data, 'JPEG', x + f.dx, ty + f.dy, f.w, f.h); }
         else { pdf.setFontSize(8); pdf.setTextColor(...MUTED); pdf.text('Photo not available', x + cw / 2, ty + boxH / 2, { align: 'center' }); }
         let ly = ty + boxH + 9;
-        photoCaption(p, r.audience, undefined, 'captured', i + k + 1, r.audience === 'internal' || r.evidence.some((e) => e.gps)).slice(0, 4).forEach((t, j) => {
+        photoCaption(p, r.audience, undefined, 'captured', i + k + 1, r.audience === 'internal' || r.evidence.some((e) => e.gps)).slice(0, p.mapUrl ? 3 : 4).forEach((t, j) => {
           pdf.setFont('helvetica', j === 0 ? 'bold' : 'normal'); pdf.setFontSize(j === 0 ? 7.5 : 7); { const c = j === 0 ? INK : MUTED; pdf.setTextColor(c[0], c[1], c[2]); }
           pdf.text(pdf.splitTextToSize(t, cw)[0], x, ly); ly += 8.6;
         });
+        if (p.mapUrl) { pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(...GOLD); pdf.textWithLink('VIEW PHOTO LOCATION ON MAP', x, ly, { url: p.mapUrl }); }
       });
     }
   }

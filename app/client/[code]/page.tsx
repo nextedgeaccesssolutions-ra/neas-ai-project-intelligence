@@ -9,7 +9,7 @@ import ProjectReportPanel from '@/components/ProjectReportPanel';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { COMPANY } from '@/lib/evidenceReport';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
-import { gpsSourceLabel } from '@/lib/geo';
+import { gpsSourceLabel, mapUrl } from '@/lib/geo';
 import type { ClientFile } from '@/lib/cloud/clientView';
 import type { GpsSource, GpsStatus } from '@/lib/types';
 
@@ -83,7 +83,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
     <div className="client-shell">
       <header className="client-top">
         <div className="auth-brand">
-          <span className="brand-mark">NE</span>
+          <img className="brand-mark brand-logo" src="/neas-logo.png" alt="NEAS — NextEdge Access Solutions" width={44} height={44} />
           <span><div className="auth-brand-name">NEXTEDGE ACCESS SOLUTIONS</div><div className="brand-sub">CLIENT PROJECT VIEW</div></span>
         </div>
         {view && !cachedAt && <button className="btn btn-sm" onClick={logout}>Sign out</button>}
@@ -180,7 +180,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
                 photos={view.files.filter((f) => f.mime.startsWith('image/') && f.url).map((f) => ({
                   id: f.id, kind: f.kind, caption: f.caption, takenAt: f.capturedAt ?? f.createdAt, ref: f.ref, activity: f.activity, workArea: f.workArea, location: f.location, pairId: f.pairId,
                   gps: f.gps ? `${f.gps.lat.toFixed(6)}, ${f.gps.lng.toFixed(6)}${f.gps.accuracy != null ? ` ±${Math.round(f.gps.accuracy)} m` : ''}` : undefined,
-                  gpsSource: f.gps ? gpsSourceLabel(f.gps.source as GpsSource | null, f.gps.status as GpsStatus) : undefined,
+                  gpsSource: f.gps ? gpsSourceLabel(f.gps.source as GpsSource | null, f.gps.status as GpsStatus) : undefined, mapUrl: mapUrl(f.gps?.lat, f.gps?.lng),
                 }))}
                 load={async (p) => {
                   const url = view.files?.find((f) => f.id === p.id)?.url;
@@ -213,7 +213,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
                   evidence: files.filter((f) => !f.isCover && f.kind !== 'reference').map((f) => ({
                     id: f.id, kind: f.kind, caption: f.caption, takenAt: f.capturedAt ?? f.createdAt, ref: f.ref, activity: f.activity, workArea: f.workArea, location: f.location, pairId: f.pairId,
                     gps: f.gps ? `${f.gps.lat.toFixed(6)}, ${f.gps.lng.toFixed(6)}${f.gps.accuracy != null ? ` ±${Math.round(f.gps.accuracy)} m` : ''}` : undefined,
-                    gpsSource: f.gps ? gpsSourceLabel(f.gps.source as GpsSource | null, f.gps.status as GpsStatus) : undefined,
+                    gpsSource: f.gps ? gpsSourceLabel(f.gps.source as GpsSource | null, f.gps.status as GpsStatus) : undefined, mapUrl: mapUrl(f.gps?.lat, f.gps?.lng),
                   })),
                 };
               }}

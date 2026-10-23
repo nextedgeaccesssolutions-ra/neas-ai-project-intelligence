@@ -43,6 +43,8 @@ export interface ReportPhoto {
   gps?: string;
   /** where the location came from, e.g. "Device position recorded during capture" */
   gpsSource?: string;
+  /** Google Maps link built from the photo's own validated coordinates (only when the viewer may see them) */
+  mapUrl?: string | null;
   pairId?: string | null;
 }
 

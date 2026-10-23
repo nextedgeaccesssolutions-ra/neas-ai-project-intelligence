@@ -132,7 +132,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
     <div className="shell">
       <aside className={`side${open ? ' open' : ''}`} aria-label="Main navigation">
         <Link href="/" className="brand">
-          <span className="brand-mark">NE</span>
+          <img className="brand-mark brand-logo" src="/neas-logo.png" alt="NEAS — NextEdge Access Solutions" width={44} height={44} />
           <span>
             <div className="brand-name">NEAS INTELLIGENCE</div>
             <div className="brand-sub">PROJECT CONTROL</div>

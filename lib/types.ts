@@ -143,7 +143,7 @@ export const COVER_CATEGORIES: { value: CoverCategory; label: string }[] = [
   { value: 'other', label: 'Other site reference' },
 ];
 /** How the location was obtained: never invented; "manual" is typed in by a person. */
-export type GpsStatus = 'captured' | 'manual' | 'unavailable' | 'denied' | 'not_requested';
+export type GpsStatus = 'captured' | 'manual' | 'unavailable' | 'no_photo_gps' | 'denied' | 'not_requested';
 export interface GpsFix {
   lat: number;
   lng: number;

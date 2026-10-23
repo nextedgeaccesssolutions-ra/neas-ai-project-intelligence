@@ -108,7 +108,10 @@ export default function AdminPage() {
           <h1>Control panel</h1>
           <p className="lead">Projects, accounts, approvals, client access and system health. Every action here is recorded in the audit log.</p>
         </div>
-        <button className="btn btn-sm" onClick={() => void load()}>Refresh</button>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
+          <button className="btn btn-sm" onClick={() => void load()}>Refresh</button>
+        </div>
       </div>
       <nav className="tabbar" aria-label="Control panel sections">
         {TABS.map(([t, label]) => (

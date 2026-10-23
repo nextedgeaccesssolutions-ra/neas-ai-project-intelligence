@@ -88,7 +88,7 @@ export async function locatePhoto(file: File, opts: { enabled: boolean; now?: nu
   if (exif) return { status: 'captured', source: 'photo', fix: { lat: exif.lat, lng: exif.lng, accuracy: exif.accuracy, altitude: exif.altitude, at: new Date(file.lastModified || Date.now()).toISOString() } };
   if (!opts.enabled) return { status: 'not_requested', fix: null };
   const age = (opts.now ?? Date.now()) - (file.lastModified || Date.now());
-  if (age > FRESH_PHOTO_MS) return { status: 'unavailable', fix: null, error: 'Older photo without a saved location.' };
+  if (age > FRESH_PHOTO_MS) return { status: 'no_photo_gps', fix: null, error: 'Older photo without a saved location.' };
   return readPosition();
 }
 
@@ -105,8 +105,21 @@ export const gpsSourceOf = (g: GpsResult): GpsSource | null => (g.status === 'ma
 export function gpsSourceLabel(source: GpsSource | null | undefined, status?: GpsStatus): string {
   if (source === 'exif') return 'Camera GPS saved in the photo';
   if (source === 'device') return 'Device position recorded during capture';
-  if (source === 'manual' || status === 'manual') return 'Manually entered (not GPS-verified)';
-  return status === 'captured' ? 'GPS (source not recorded)' : 'GPS unavailable';
+  if (source === 'manual' || status === 'manual') return 'Manual location — admin approved (not GPS)';
+  return status === 'captured' ? 'GPS (source not recorded)' : status === 'no_photo_gps' ? 'GPS unavailable — original photo has no GPS' : 'GPS unavailable';
+}
+
+/** Google Maps link for validated coordinates; null for anything that is not a real coordinate pair. */
+export function mapUrl(lat: number | null | undefined, lng: number | null | undefined): string | null {
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return `https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+/** Accuracy against the 10 m target, as reported by the device (never improved or inferred). */
+export function accuracyStatus(accuracy: number | null | undefined, hasCoords = true): string {
+  if (!hasCoords) return 'GPS Unavailable';
+  if (accuracy == null || !Number.isFinite(accuracy)) return 'Accuracy Not Reported';
+  return accuracy <= GPS_TARGET_M ? 'Target Accuracy Met' : 'Accuracy Above Target';
 }
 
 export const accuracyWarning = (e: Pick<Evidence, 'gps' | 'gpsStatus'>, target = GPS_TARGET_M) =>
@@ -115,9 +128,10 @@ export const accuracyWarning = (e: Pick<Evidence, 'gps' | 'gpsStatus'>, target =
 export function gpsLabel(e: Pick<Evidence, 'gps' | 'gpsStatus'>): string {
   switch (e.gpsStatus) {
     case 'captured': return e.gps ? `${e.gps.lat.toFixed(6)}, ${e.gps.lng.toFixed(6)}${e.gps.accuracy != null ? ` ±${Math.round(e.gps.accuracy)} m` : ' (accuracy unknown)'}` : 'GPS unavailable';
-    case 'manual': return e.gps ? `${e.gps.lat.toFixed(6)}, ${e.gps.lng.toFixed(6)} (manually entered)` : 'GPS unavailable';
+    case 'manual': return e.gps ? `${e.gps.lat.toFixed(6)}, ${e.gps.lng.toFixed(6)} (manual location — admin approved)` : 'GPS unavailable';
     case 'denied': return 'GPS unavailable (location permission denied)';
     case 'unavailable': return 'GPS unavailable';
+    case 'no_photo_gps': return 'GPS unavailable — original photo has no GPS';
     default: return 'No GPS recorded';
   }
 }

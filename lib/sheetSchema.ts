@@ -263,3 +263,9 @@ export function rowsToState(tabs: Partial<Record<TabName, Row[]>>, base: AppStat
     projects, activities, reports, boq, costSettings, quotations, evidence,
   };
 }
+
+const OWN_LINK = /^=HYPERLINK\("https:\/\/www\.google\.com\/maps\?q=-?\d{1,2}\.\d{6},-?\d{1,3}\.\d{6}","VIEW LOCATION ON MAP"\)$/;
+/** Text that starts like a formula is stored with a leading apostrophe (shown as plain text). */
+export function safeCell(c: Cell): Cell {
+  return typeof c === 'string' && /^[=+\-@]/.test(c) && !OWN_LINK.test(c) ? `'${c}` : c;
+}

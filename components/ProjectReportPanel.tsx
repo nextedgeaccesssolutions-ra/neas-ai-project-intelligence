@@ -30,9 +30,13 @@ export default function ProjectReportPanel({ input, load, onGenerated, note }: {
       if (!logo) throw new Error('The official NEAS logo could not be loaded, so the report was not generated.');
       setBusy('Building PDF…');
       const blob = await projectReportPdf(report, images, logo);
+      const { validateMapLinks } = await import('@/lib/evidenceExport');
+      const expected = [...report.cover.map((c) => c.mapUrl), ...report.evidence.map((e) => e.mapUrl)].filter((u): u is string => !!u);
+      const check = await validateMapLinks('pdf', blob, expected);
+      if (!check.ok) throw new Error(`Report check failed: ${check.missing.length} of ${expected.length} map link(s) are missing from the PDF, so it was not offered.`);
       const missing = [...images.values()].filter((x) => !x).length;
       await onGenerated?.(report);
-      setMsg({ ok: true, text: `${report.reference}: cover with ${Math.min(2, report.cover.length)} of ${report.cover.length} cover photo(s), location register, schedule, ${report.evidence.length} evidence photo(s), observations and summary.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
+      setMsg({ ok: true, text: `${report.reference}: cover with ${Math.min(2, report.cover.length)} of ${report.cover.length} cover photo(s), location register, schedule, ${report.evidence.length} evidence photo(s), observations and summary; ${check.found} clickable map link(s) checked.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
       return { blob, report };
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message || 'Could not build the report.' });

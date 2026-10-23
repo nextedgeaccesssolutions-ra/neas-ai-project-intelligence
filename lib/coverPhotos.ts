@@ -1,6 +1,7 @@
 // Report cover photos: which evidence records are on the cover, in what order, and the location
 // reference printed under each one. Pure functions shared by the web preview and the PDF.
 import { COVER_CATEGORIES, type Evidence, type GpsSource, type GpsStatus } from './types';
+import { mapUrl } from './geo';
 
 /** Physical tile size required for cover photos (exactly 9.21 cm square). */
 export const COVER_TILE_CM = 9.21;
@@ -8,10 +9,10 @@ export const COVER_TILE_PT = (COVER_TILE_CM / 2.54) * 72; // 261.07 pt in the PD
 
 /** Standard location-source labels used on the cover and in the location register. */
 export function gpsSourceShort(source: GpsSource | null | undefined, status?: GpsStatus | string | null, hasCoords = true): string {
-  if (!hasCoords) return 'GPS Unavailable';
+  if (!hasCoords) return status === 'no_photo_gps' ? 'GPS Unavailable — Original Photo Has No GPS' : 'GPS Unavailable';
   if (source === 'exif') return 'EXIF GPS';
   if (source === 'device') return 'Device GPS';
-  if (source === 'manual' || status === 'manual') return 'Manual Location';
+  if (source === 'manual' || status === 'manual') return 'Manual Location — Admin Approved';
   return 'GPS (source not recorded)';
 }
 
@@ -60,6 +61,6 @@ export function coverReference(
   return {
     title: `Photo ${String(n).padStart(2, '0')} — ${label}${e.caption && e.caption !== label ? ` · ${e.caption}` : ''}`,
     lines,
-    mapUrl: has ? `https://www.google.com/maps/search/?api=1&query=${e.gps!.lat.toFixed(6)},${e.gps!.lng.toFixed(6)}` : null,
+    mapUrl: has ? mapUrl(e.gps!.lat, e.gps!.lng) : null,
   };
 }

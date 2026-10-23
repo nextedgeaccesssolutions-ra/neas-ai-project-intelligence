@@ -4,6 +4,7 @@
 import { projectProgress, sCurve, type ProgressPoint } from './calc';
 import { calendarOf, scopeMetrics, type ScopeMetrics, type WorkCalendar } from './schedule';
 import { coverCategoryLabel, gpsSourceShort } from './coverPhotos';
+import { accuracyStatus, mapUrl } from './geo';
 import type { Activity, ActivityStop, FieldReport, GpsSource, GpsStatus } from './types';
 import { STOP_REASONS } from './types';
 import type { ReportAudience, ReportPhoto, ReportProject } from './evidenceReport';
@@ -92,7 +93,7 @@ export function coverLines(c: CoverItem, n: number, projectName: string, tz = 'A
     ['Latitude', has ? c.lat!.toFixed(6) : 'GPS Unavailable'],
     ['Longitude', has ? c.lng!.toFixed(6) : 'GPS Unavailable'],
   ];
-  if (has && c.accuracy != null) lines.push(['Accuracy', `±${Math.round(c.accuracy)} m (reported)`]);
+  if (has) lines.push(['Accuracy', `${c.accuracy != null ? `±${Math.round(c.accuracy)} m · ` : ''}${accuracyStatus(c.accuracy, true)}`]);
   lines.push(['Location source', gpsSourceShort(c.source ?? null, c.status ?? undefined, has)]);
   lines.push(['Captured', fmtWhen(c.takenAt, tz)]);
   if (c.uploadedAt) lines.push(['Uploaded', fmtWhen(c.uploadedAt, tz)]);
@@ -100,7 +101,7 @@ export function coverLines(c: CoverItem, n: number, projectName: string, tz = 'A
     item: c,
     title: `Photo ${String(n).padStart(2, '0')} — ${label}${clean(c.caption) && clean(c.caption) !== label ? ` · ${clean(c.caption)}` : ''}`,
     lines,
-    mapUrl: has ? `https://www.google.com/maps/search/?api=1&query=${c.lat!.toFixed(6)},${c.lng!.toFixed(6)}` : null,
+    mapUrl: has ? mapUrl(c.lat, c.lng) : null,
   };
 }
 

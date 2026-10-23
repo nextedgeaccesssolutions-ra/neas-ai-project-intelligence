@@ -330,3 +330,7 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
 .cover-ref dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
 .cover-ref dt { color: var(--muted); }
 .cover-ref dd { margin: 0; }
+
+/* official NEAS logo in place of the NE mark */
+.brand-mark.brand-logo { background: transparent; object-fit: contain; padding: 0; border-radius: 50%; display: block; }
+.project-search { display: flex; gap: 8px; align-items: center; }

@@ -25,10 +25,10 @@ export default function EvidenceReportPanel({ project, photos, load, audience, p
       const images = await loadImages(report, load, (d, n) => setBusy(`Preparing photos ${d} of ${n}…`));
       const missing = [...images.values()].filter((x) => !x).length;
       setBusy(`Building ${format.toUpperCase()}…`);
-      const res = await exportReport(report, format, images);
+      const { saved: res, links } = await exportReport(report, format, images);
       setMsg(res === 'declined'
         ? { ok: false, text: 'Download cancelled.' }
-        : { ok: true, text: `${report.title} ${report.reference}: title page, ${report.photos.length} photo(s) on ${report.pages.length} page(s), summary.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
+        : { ok: true, text: `${report.title} ${report.reference}: title page, ${report.photos.length} photo(s) on ${report.pages.length} page(s), summary, ${links} clickable map link${links === 1 ? '' : 's'} checked in the file.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message || 'Could not build the report.' });
     } finally {

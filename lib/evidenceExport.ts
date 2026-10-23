@@ -4,6 +4,27 @@ import { COMPANY, photoCaption, type Report, type ReportPhoto } from './evidence
 import { saveFile } from './fileio';
 
 export type ReportFormat = 'pdf' | 'pptx' | 'docx';
+export const MAP_LINK_TEXT = 'VIEW PHOTO LOCATION ON MAP';
+
+/**
+ * Checks the generated file itself: every photo that should have a map link has a real hyperlink to
+ * exactly its own map URL (PDF link annotations, Word/PowerPoint hyperlink relationships).
+ */
+export async function validateMapLinks(format: ReportFormat, blob: Blob, expected: string[]): Promise<{ ok: boolean; missing: string[]; found: number }> {
+  const want = [...new Set(expected)];
+  let haystack = '';
+  if (format === 'pdf') {
+    const raw = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    haystack = (raw.match(/\/URI\s*\(([^)]*)\)/g) ?? []).join('\n');
+  } else {
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const rels = Object.keys(zip.files).filter((n) => n.endsWith('.rels'));
+    haystack = (await Promise.all(rels.map((n) => zip.file(n)!.async('string')))).join('\n').replace(/&amp;/g, '&');
+  }
+  const missing = want.filter((u) => !haystack.includes(format === 'pdf' ? `(${u})` : `Target="${u}"`));
+  return { ok: missing.length === 0, missing, found: want.length - missing.length };
+}
 export interface ReportImage { data: string; w: number; h: number }
 /** Returns the photo's image, or null when it cannot be loaded (the page then says so). */
 export type LoadPhoto = (p: ReportPhoto) => Promise<Blob | null>;
@@ -40,10 +61,18 @@ export const fit = (img: ReportImage, w: number, h: number) => {
   return { w: img.w * k, h: img.h * k, dx: (w - img.w * k) / 2, dy: (h - img.h * k) / 2 };
 };
 
+export async function buildReportFile(report: Report, format: ReportFormat, images: Map<string, ReportImage | null>): Promise<Blob> {
+  return format === 'pdf' ? toPdf(report, images) : format === 'pptx' ? toPptx(report, images) : toDocx(report, images);
+}
+
+/** Builds the file, checks its map links, and only then offers it for download. */
 export async function exportReport(report: Report, format: ReportFormat, images: Map<string, ReportImage | null>) {
-  if (format === 'pdf') return saveFile(`${report.fileName}.pdf`, await toPdf(report, images));
-  if (format === 'pptx') return saveFile(`${report.fileName}.pptx`, await toPptx(report, images));
-  return saveFile(`${report.fileName}.docx`, await toDocx(report, images));
+  const blob = await buildReportFile(report, format, images);
+  const expected = report.photos.map((p) => p.mapUrl).filter((u): u is string => !!u);
+  const check = await validateMapLinks(format, blob, expected);
+  if (!check.ok) throw new Error(`Export check failed: ${check.missing.length} of ${expected.length} map link(s) are missing from the ${format.toUpperCase()} file, so it was not saved.`);
+  const saved = await saveFile(`${report.fileName}.${format}`, blob);
+  return { saved, links: check.found };
 }
 
 const WIN_ANSI_EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
@@ -138,7 +167,7 @@ async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promis
       pdf.setFillColor(241, 244, 246); pdf.rect(cx, cy, cellW, boxH, 'F');
       if (img) { const f = fit(img, cellW, boxH); pdf.addImage(img.data, 'JPEG', cx + f.dx, cy + f.dy, f.w, f.h); }
       else { pdf.setTextColor(...rgb(MUTED)); pdf.setFontSize(9); pdf.text('Photo not available', cx + cellW / 2, cy + boxH / 2, { align: 'center' }); }
-      const cap = Math.floor((capH - 3) / 9);
+      const cap = Math.floor((capH - 3) / 9) - (p.mapUrl ? 1 : 0);
       const wrapped = photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations).flatMap((t, j) => { pdf.setFontSize(j === 0 ? 8 : 7.5); return (pdf.splitTextToSize(t, cellW) as string[]).map((s) => ({ s, j })); });
       if (wrapped.length > cap) { wrapped.length = cap; wrapped[cap - 1] = { ...wrapped[cap - 1], s: wrapped[cap - 1].s.replace(/.{0,2}$/, '…') }; }
       let ly = cy + boxH + 10;
@@ -146,6 +175,10 @@ async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promis
         pdf.setFont('helvetica', j === 0 ? 'bold' : 'normal'); pdf.setFontSize(j === 0 ? 8 : 7.5);
         pdf.setTextColor(...rgb(j === 0 ? INK : MUTED));
         pdf.text(s, cx, ly); ly += 9;
+      }
+      if (p.mapUrl) {
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.setTextColor(...rgb(GOLD));
+        pdf.textWithLink(MAP_LINK_TEXT, cx, ly, { url: p.mapUrl });
       }
     });
     footer(page);
@@ -240,7 +273,9 @@ async function toPptx(r: Report, images: Map<string, ReportImage | null>): Promi
       if (img) { const f = fit(img, cellW, boxH); s.addImage({ data: img.data, x: x + f.dx, y: y + f.dy, w: f.w, h: f.h }); }
       else s.addText('Photo not available', { x, y, w: cellW, h: boxH, fontSize: 9, color: MUTED, align: 'center', valign: 'middle' });
       const lines = photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations);
-      s.addText(lines.map((tx, j) => ({ text: tx, options: { bold: j === 0, color: j === 0 ? INK : MUTED, breakLine: true } })),
+      const runs: { text: string; options: Record<string, unknown> }[] = lines.map((tx, j) => ({ text: tx, options: { bold: j === 0, color: j === 0 ? INK : MUTED, breakLine: true } }));
+      if (p.mapUrl) runs.push({ text: MAP_LINK_TEXT, options: { bold: true, color: GOLD, hyperlink: { url: p.mapUrl, tooltip: 'Recorded photo location' } } });
+      s.addText(runs as never,
         { x, y: y + boxH + 0.02, w: cellW, h: capH - 0.02, fontSize: across > 4 ? 6.5 : 7.5, fontFace: 'Arial', valign: 'top', fit: 'shrink', margin: 1 });
     });
   }
@@ -261,7 +296,7 @@ async function toPptx(r: Report, images: Map<string, ReportImage | null>): Promi
 // ---------------------------------------------------------------- Word (A4 portrait)
 async function toDocx(r: Report, images: Map<string, ReportImage | null>): Promise<Blob> {
   const d = await import('docx');
-  const { AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType, Footer, Header } = d;
+  const { AlignmentType, BorderStyle, Document, ExternalHyperlink, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType, Footer, Header } = d;
   const bytes = (dataUrl: string) => Uint8Array.from(atob(dataUrl.split(',')[1]), (c) => c.charCodeAt(0));
   // docx 8 stores every picture as a .png part, so hand it real PNG data (smaller, at document resolution)
   const png = new Map<string, Uint8Array>();
@@ -312,7 +347,8 @@ async function toDocx(r: Report, images: Map<string, ReportImage | null>): Promi
       rows.push(new TableRow({ cantSplit: true, children: [0, 1].map((j) => {
         const p = group[i + j];
         return new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, borders: noBorders, margins: { top: 60, bottom: 60, left: 60, right: 60 },
-          children: p ? [img(p, cellPx.w, cellPx.h), ...photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations).map((t, k) => new Paragraph({ children: [new TextRun({ text: t, bold: k === 0, color: k === 0 ? INK : MUTED, size: 15 })] }))] : [new Paragraph('')] });
+          children: p ? [img(p, cellPx.w, cellPx.h), ...photoCaption(p, r.audience, undefined, r.datesAre, r.photos.indexOf(p) + 1, r.locations).map((t, k) => new Paragraph({ children: [new TextRun({ text: t, bold: k === 0, color: k === 0 ? INK : MUTED, size: 15 })] })),
+            ...(p.mapUrl ? [new Paragraph({ children: [new ExternalHyperlink({ link: p.mapUrl, children: [new TextRun({ text: MAP_LINK_TEXT, bold: true, color: GOLD, underline: {}, size: 15 })] })] })] : [])] : [new Paragraph('')] });
       }) }));
     }
     return [
