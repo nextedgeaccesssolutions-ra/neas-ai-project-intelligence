@@ -1,4 +1,4 @@
-import type { Evidence, GpsFix, GpsStatus } from './types';
+import type { Evidence, GpsFix, GpsStatus, GpsSource } from './types';
 import { readExifGps } from './exif';
 
 /** Default target accuracy for ordinary outdoor site documentation (metres). */
@@ -99,6 +99,16 @@ export function parseManualCoords(lat: string, lng: string): GpsFix | null {
   return { lat: round(a, 6), lng: round(b, 6), accuracy: null, at: new Date().toISOString() };
 }
 
+/** The stored source for a capture result: camera EXIF, device position at capture, or typed in. */
+export const gpsSourceOf = (g: GpsResult): GpsSource | null => (g.status === 'manual' && g.fix ? 'manual' : g.fix ? (g.source === 'photo' ? 'exif' : 'device') : null);
+
+export function gpsSourceLabel(source: GpsSource | null | undefined, status?: GpsStatus): string {
+  if (source === 'exif') return 'Camera GPS saved in the photo';
+  if (source === 'device') return 'Device position recorded during capture';
+  if (source === 'manual' || status === 'manual') return 'Manually entered (not GPS-verified)';
+  return status === 'captured' ? 'GPS (source not recorded)' : 'GPS unavailable';
+}
+
 export const accuracyWarning = (e: Pick<Evidence, 'gps' | 'gpsStatus'>, target = GPS_TARGET_M) =>
   e.gpsStatus === 'captured' && e.gps && (e.gps.accuracy == null || e.gps.accuracy > target);
 
@@ -112,7 +122,7 @@ export function gpsLabel(e: Pick<Evidence, 'gps' | 'gpsStatus'>): string {
   }
 }
 
-const KIND_CODE: Record<Evidence['kind'], string> = { Before: 'BEF', After: 'AFT', During: 'DUR', Inspection: 'INS', Safety: 'SAF', Defect: 'DEF' };
+const KIND_CODE: Record<Evidence['kind'], string> = { Before: 'BEF', After: 'AFT', During: 'DUR', Inspection: 'INS', Safety: 'SAF', Defect: 'DEF', Reference: 'REF' };
 /** Photo reference such as BEF-20261023-1A2B (local capture date, suffix from the record id). */
 export function photoRef(kind: Evidence['kind'], takenAt: string, id: string) {
   const d = new Date(takenAt);

@@ -58,6 +58,7 @@ export const NAV = [
   { href: '/field-reports', label: 'Field reports', icon: 'spark' },
   { href: '/projects', label: 'Project register', icon: 'table' },
   { href: '/site-evidence', label: 'Site evidence', icon: 'camera' },
+  { href: '/reports', label: 'Project reports', icon: 'doc' },
   { href: '/google-sheets', label: 'Google Sheets setup', icon: 'gear' },
 ] as const;
 
