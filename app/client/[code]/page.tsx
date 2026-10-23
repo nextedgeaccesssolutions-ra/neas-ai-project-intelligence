@@ -4,6 +4,8 @@ import { Gantt, SCurve } from '@/components/Charts';
 import type { ClientView } from '@/lib/cloud/clientView';
 import { fmtDate, fmtPct } from '@/lib/format';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
+import EvidenceReportPanel from '@/components/EvidenceReportPanel';
+import { COMPANY } from '@/lib/evidenceReport';
 
 const cacheKey = (code: string) => `neas-client-cache:${code}`;
 
@@ -172,6 +174,20 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
                   </div>
                 )}
               </section>
+            )}
+            {view.files && view.files.some((f) => f.mime.startsWith('image/') && f.url) && (
+              <EvidenceReportPanel
+                audience="client"
+                datesAre="uploaded"
+                preparedBy={`${COMPANY} (client portal copy)`}
+                project={{ code: view.project.code, name: view.project.name, client: view.project.client, site: view.project.site, referenceNo: view.project.reference_no, status: view.project.status, startDate: view.project.start_date, endDate: view.project.end_date }}
+                photos={view.files.filter((f) => f.mime.startsWith('image/') && f.url).map((f) => ({ id: f.id, kind: f.kind, caption: f.caption, takenAt: f.createdAt }))}
+                load={async (p) => {
+                  const url = view.files?.find((f) => f.id === p.id)?.url;
+                  const r = url ? await fetch(url) : null;
+                  return r?.ok ? r.blob() : null;
+                }}
+              />
             )}
             <p className="note" style={{ textAlign: 'center' }}>Read-only view · session ends {new Date(view.sessionExpiresAt).toLocaleString()}</p>
           </>

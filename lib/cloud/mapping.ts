@@ -24,6 +24,7 @@ const STATUS_MAP: Record<string, ProjectStatus> = { draft: 'draft', active: 'act
 export const projectFromDb = (p: DbProject): Project => ({
   id: p.id, code: p.code, name: p.name, client: p.client_name, site: p.site, status: STATUS_MAP[p.status] ?? 'active',
   contractValue: p.contract_value == null ? null : num(p.contract_value), createdAt: p.created_at,
+  referenceNo: p.reference_no ?? '', startDate: p.start_date ?? null, endDate: p.end_date ?? null,
 });
 export const activityFromDb = (a: DbActivity): Activity => ({
   id: a.id, projectId: a.project_id, name: a.name, start: a.start_date, end: a.end_date, weight: num(a.weight),

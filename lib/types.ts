@@ -11,6 +11,10 @@ export interface Project {
   site: string;
   status: ProjectStatus;
   contractValue: number | null; // PHP
+  /** client's reference / PO number, planned start and completion (cloud mode) */
+  referenceNo?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   createdAt: string;
 }
 

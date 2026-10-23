@@ -13,7 +13,8 @@ import { CLOUD } from '@/lib/cloud/env';
 import { useCanManage } from '@/components/RoleGate';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence, EvidenceKind } from '@/lib/types';
-import PhotoThumb from '@/components/PhotoThumb';
+import PhotoThumb, { fetchFromServer } from '@/components/PhotoThumb';
+import EvidenceReportPanel from '@/components/EvidenceReportPanel';
 import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack } from '@/lib/geo';
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -220,6 +221,16 @@ export default function SiteEvidence() {
         </div>
       </div>
       <ProjectBar />
+      <EvidenceReportPanel
+        audience="internal"
+        preparedBy={state.userName || 'NEAS'}
+        project={{ code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate }}
+        photos={evidence.map((e) => ({
+          id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: activities.find((a) => a.id === e.activityId)?.name,
+          workArea: e.workArea, location: e.locationDetail, pairId: e.pairId, gps: e.gps ? gpsLabel(e) : undefined,
+        }))}
+        load={async (p) => (await getPhoto(p.id).catch(() => undefined)) ?? (CLOUD ? await fetchFromServer(p.id, evidence.find((e) => e.id === p.id)?.storagePath ?? `${pid}/${p.id}.jpg`) : null)}
+      />
 
       <div className="user-stats">
         <div className="user-stat"><div className="user-stat-val">{stats.before} / {stats.after}</div><div className="user-stat-label">Before / After photos</div></div>
