@@ -14,13 +14,32 @@ import { useCanManage } from '@/components/RoleGate';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence, EvidenceKind } from '@/lib/types';
 import PhotoThumb from '@/components/PhotoThumb';
-import { accuracyWarning, GPS_TARGET_M, gpsLabel, parseManualCoords, photoRef, readPosition } from '@/lib/geo';
+import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack } from '@/lib/geo';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const KINDS: EvidenceKind[] = ['Before', 'After', 'During', 'Inspection', 'Safety', 'Defect'];
 const KIND_TONE: Record<EvidenceKind, string> = { Before: '', After: 'pill-ok', During: 'pill-warn', Inspection: '', Safety: 'pill-warn', Defect: 'pill-bad' };
 const pairable = (k: EvidenceKind) => k === 'Before' || k === 'After';
 const osm = (lat: number, lng: number) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=19/${lat}/${lng}`;
+
+function summarizeGps(rs: GpsResult[]): string | null {
+  if (!rs.length) return null;
+  const fromPhoto = rs.filter((r) => r.status === 'captured' && r.source === 'photo').length;
+  const fromDevice = rs.filter((r) => r.status === 'captured' && r.source === 'device');
+  const manual = rs.filter((r) => r.status === 'manual').length;
+  const denied = rs.filter((r) => r.status === 'denied').length;
+  const none = rs.filter((r) => r.status === 'unavailable').length;
+  const parts: string[] = [];
+  if (fromPhoto) parts.push(`${fromPhoto} located from the photo's own GPS`);
+  if (fromDevice.length) {
+    const weak = fromDevice.filter((r) => accuracyWarning({ gps: r.fix, gpsStatus: 'captured' })).length;
+    parts.push(`${fromDevice.length} located by device GPS${fromDevice.length === 1 && fromDevice[0].fix ? ` (${gpsLabel({ gps: fromDevice[0].fix, gpsStatus: 'captured' })})` : ''}${weak ? ` — ${weak} above the ${GPS_TARGET_M} m accuracy target, add the work area` : ''}`);
+  }
+  if (manual) parts.push(`${manual} saved with manually entered coordinates`);
+  if (denied) parts.push(`${denied} without location (permission refused)`);
+  if (none) parts.push(`${none} without location (no GPS fix, or an older photo with no saved location)`);
+  return parts.join('; ') + '.';
+}
 
 export default function SiteEvidence() {
   const { ready, project, addEvidence, updateEvidence, deleteEvidence, state } = useStore();
@@ -53,6 +72,23 @@ export default function SiteEvidence() {
   const [editArea, setEditArea] = useState('');
   const [editLoc, setEditLoc] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [gpsTrack, setGpsTrack] = useState<GpsTrack>({ state: 'off', fix: null });
+  const [online, setOnline] = useState(true);
+
+  // GPS stays on while this page is open so a fix (satellite, no internet needed) is ready at capture.
+  useEffect(() => subscribeGps(setGpsTrack), []);
+  useEffect(() => {
+    if (recordGps && !manualLoc) startGpsTracking();
+    else stopGpsTracking();
+    return () => stopGpsTracking();
+  }, [recordGps, manualLoc]);
+  useEffect(() => {
+    const upd = () => setOnline(navigator.onLine);
+    upd();
+    window.addEventListener('online', upd);
+    window.addEventListener('offline', upd);
+    return () => { window.removeEventListener('online', upd); window.removeEventListener('offline', upd); };
+  }, []);
 
   useEffect(() => {
     if (!CLOUD || !pid) return;
@@ -92,17 +128,18 @@ export default function SiteEvidence() {
     }
     setError(null);
     setGpsNote(null);
-    setBusy(recordGps && !manual ? 'Getting location…' : 'Saving…');
-    // Location is read once, right at capture; a slow or refused fix never blocks saving the photos.
-    const gpsP = manual ? Promise.resolve({ status: 'manual' as const, fix: manual }) : recordGps ? readPosition() : Promise.resolve({ status: 'not_requested' as const, fix: null });
-    const gps = await gpsP;
-    setBusy('Saving…');
     let ok = 0;
     const problems: string[] = [];
+    const results: GpsResult[] = [];
     for (const file of files) {
       if (!file.type.startsWith('image/')) { problems.push(`${file.name}: not an image`); continue; }
       if (file.size > MAX_BYTES * 4) { problems.push(`${file.name}: over 20 MB`); continue; }
       try {
+        // Per photo: the camera's own GPS first, else the live fix for a just-taken photo. A slow or refused fix never blocks saving.
+        setBusy(manual ? 'Saving…' : 'Reading location…');
+        const gps: GpsResult = manual ? { status: 'manual', fix: manual } : await locatePhoto(file, { enabled: recordGps });
+        results.push(gps);
+        setBusy('Saving…');
         const blob = await compressImage(file);
         if (blob.size > MAX_BYTES) throw new Error('still over 5 MB after compression');
         const id = uid('ev');
@@ -121,12 +158,7 @@ export default function SiteEvidence() {
     setCaption('');
     if (fileRef.current) fileRef.current.value = '';
     setError(problems.length ? `${ok} photo(s) added. ${problems.join('; ')}` : null);
-    const probe = { gps: gps.fix, gpsStatus: gps.status };
-    setGpsNote(gps.status === 'captured'
-      ? accuracyWarning(probe) ? `Location recorded, but accuracy is ${gps.fix?.accuracy != null ? `±${Math.round(gps.fix.accuracy)} m` : 'unknown'} (target ${GPS_TARGET_M} m). Add the work area so the spot is clear.` : `Location recorded: ${gpsLabel(probe)}.`
-      : gps.status === 'manual' ? 'Location saved as manually entered.'
-      : gps.status === 'denied' ? 'Location permission was refused, so the photos were saved as "GPS unavailable".'
-      : gps.status === 'unavailable' ? 'No location fix was available, so the photos were saved as "GPS unavailable".' : null);
+    setGpsNote(summarizeGps(results));
     if (ok) notify(`${ok} photo(s) added to ${name(activityId)}.`);
   };
   const attach = () => addPhotos(Array.from(fileRef.current?.files ?? []));
@@ -229,6 +261,15 @@ export default function SiteEvidence() {
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <input type="checkbox" checked={recordGps && !manualLoc} disabled={manualLoc} onChange={(e) => setRecordGps(e.target.checked)} /> Record GPS location
               </label>
+              {recordGps && !manualLoc && (
+                <span className={`pill ${gpsTrack.state === 'ready' && !accuracyWarning({ gps: gpsTrack.fix, gpsStatus: 'captured' }) ? 'pill-ok' : gpsTrack.state === 'denied' || gpsTrack.state === 'unavailable' ? 'pill-bad' : 'pill-warn'}`} role="status">
+                  {gpsTrack.state === 'ready' && gpsTrack.fix ? `📍 GPS ready${gpsTrack.fix.accuracy != null ? ` ±${Math.round(gpsTrack.fix.accuracy)} m` : ''}`
+                    : gpsTrack.state === 'denied' ? 'Location permission refused: allow it in the browser to geotag'
+                    : gpsTrack.state === 'unavailable' ? 'No location service on this device'
+                    : 'Searching for GPS…'}
+                  {!online && ' · offline (satellite GPS still works)'}
+                </span>
+              )}
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <input type="checkbox" checked={manualLoc} onChange={(e) => setManualLoc(e.target.checked)} /> Enter location manually
               </label>
@@ -241,7 +282,7 @@ export default function SiteEvidence() {
             </div>
             <p className="note">
               {manualLoc ? 'Manual coordinates are saved and labelled "Manually entered", never as device GPS.'
-                : recordGps ? `Your browser may ask for location permission. The device position is recorded with its reported accuracy (target ${GPS_TARGET_M} m) to show where the photo was taken; it is the phone's position, not necessarily the exact surface. If no fix is available the photo is still saved as "GPS unavailable".`
+                : recordGps ? `Location is on automatically and works without internet (satellite GPS). Each photo uses the GPS saved in the photo by the camera when present, otherwise the phone's current position with its reported accuracy (target ${GPS_TARGET_M} m). It is the phone's position, not necessarily the exact surface. Older gallery photos without saved GPS are not stamped with today's location; if no fix is available the photo is still saved as "GPS unavailable". For best accuracy, turn on the phone's precise location and the camera's location tag.`
                 : 'Photos will be saved without a location.'}
             </p>
             {error && <p className="bad" role="alert">{error}</p>}

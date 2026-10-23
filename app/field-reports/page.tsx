@@ -14,6 +14,7 @@ import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
 import { compressImage, putPhoto } from '@/lib/photos';
+import { locatePhoto, photoRef } from '@/lib/geo';
 import type { Evidence } from '@/lib/types';
 import WalkthroughReport from '@/components/WalkthroughReport';
 
@@ -77,10 +78,12 @@ export default function FieldReports() {
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
+        const gps = await locatePhoto(file, { enabled: true });
         const blob = await compressImage(file);
         const id = uid('ev');
+        const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
-        addEvidence({ id, projectId: pid, activityId, kind: photoKind, caption: file.name.replace(/\.[^.]+$/, ''), takenAt: new Date(file.lastModified || Date.now()).toISOString(), bytes: blob.size });
+        addEvidence({ id, projectId: pid, activityId, kind: photoKind, caption: file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size, gps: gps.fix, gpsStatus: gps.status, pairId: null, ref: photoRef(photoKind, takenAt, id) });
         ok++;
       } catch { /* skip */ }
     }

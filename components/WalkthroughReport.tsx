@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { locatePhoto, photoRef, startGpsTracking, stopGpsTracking } from '@/lib/geo';
 import PhotoThumb from '@/components/PhotoThumb';
 import { notify } from '@/components/Dialogs';
 import { todayLocal } from '@/lib/calc';
@@ -32,6 +33,8 @@ export default function WalkthroughReport({
   const fileRef = useRef<HTMLInputElement>(null);
   const [target, setTarget] = useState(activities[0]?.id ?? '');
   const [busy, setBusy] = useState(false);
+  // Keep a GPS fix ready (works offline) so walkthrough photos are geotagged automatically.
+  useEffect(() => { startGpsTracking(); return () => stopGpsTracking(); }, []);
   const withStatus = activities.map((a) => ({ a, s: activityStatus(a, reports, day), photo: latestPhoto(a.id, evidence) }));
   const issues = withStatus.filter((x) => x.s.tone === 'warn' || x.s.tone === 'bad').length;
 
@@ -48,11 +51,13 @@ export default function WalkthroughReport({
     for (const file of files) {
       if (!file.type.startsWith('image/')) { problems.push(`${file.name}: not an image`); continue; }
       try {
+        const gps = await locatePhoto(file, { enabled: true });
         const blob = await compressImage(file);
         if (blob.size > MAX_BYTES) throw new Error('over 5 MB after compression');
         const id = uid('ev');
+        const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
-        addEvidence({ id, projectId: pid, activityId, kind: 'During', caption: file.name.replace(/\.[^.]+$/, ''), takenAt: new Date().toISOString(), bytes: blob.size });
+        addEvidence({ id, projectId: pid, activityId, kind: 'During', caption: file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size, gps: gps.fix, gpsStatus: gps.status, pairId: null, ref: photoRef('During', takenAt, id) });
         ok++;
       } catch (e) {
         problems.push(`${file.name}: ${e instanceof Error ? e.message : 'could not be saved'}`);
