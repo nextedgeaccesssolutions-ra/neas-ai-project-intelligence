@@ -158,7 +158,7 @@ function Overview({ d, go }: { d: { profiles: Profile[]; projects: Project[]; me
   const portfolio = d.projects.map((p) => {
     const acts = state.activities.filter((a) => a.projectId === p.id);
     const reps = state.reports.filter((r) => r.projectId === p.id && (r.status ?? 'approved') === 'approved');
-    const prog = projectProgress(acts, reps, today);
+    const prog = projectProgress(acts, reps, today, (id) => state.calendars?.[id]);
     const cv = Number(p.contract_value ?? 0);
     return { p, planned: prog.planned, actual: prog.actual, pv: (cv * prog.planned) / 100, ev: (cv * prog.actual) / 100, spi: prog.planned > 0 ? prog.actual / prog.planned : null, acts: acts.length };
   });

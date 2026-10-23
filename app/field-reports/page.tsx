@@ -36,6 +36,7 @@ export default function FieldReports() {
   const [activityId, setActivityId] = useState('');
   const [date, setDate] = useState(() => todayLocal());
   const [pct, setPct] = useState('');
+  const [qty, setQty] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -53,7 +54,9 @@ export default function FieldReports() {
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
 
-  const prev = activityId ? actualPct(activityId, reports, date) : 0;
+  const current = activities.find((a) => a.id === activityId);
+  const measurable = !!current?.quantityTotal && current.quantityTotal > 0;
+  const prev = activityId ? actualPct(activityId, reports, date, current) : 0;
   const name = (id: string) => activities.find((a) => a.id === id)?.name ?? '(deleted activity)';
 
   const save = async () => {
@@ -61,11 +64,15 @@ export default function FieldReports() {
     if (!activityId) return setError('Choose an activity. Add activities in Project management first.');
     if (!date) return setError('Report date is required.');
     if (pct.trim() === '' || !Number.isFinite(v) || v < 0 || v > 100) return setError('Actual completion must be a number from 0 to 100.');
+    const q = measurable && qty.trim() !== '' ? Number(qty) : null;
+    if (q != null && (!Number.isFinite(q) || q < 0)) return setError('Completed quantity must be 0 or more.');
+    if (q != null && q > current!.quantityTotal! && !(await askConfirm(`Completed quantity is more than the approved ${current!.quantityTotal} ${current!.quantityUnit ?? ''}. Save anyway?`, { danger: false }))) return;
     if (v < prev && !(await askConfirm(`This is lower than the previous report (${fmtPct(prev)}). Save anyway?`, { danger: false }))) return;
-    addReport({ id: uid('rep'), projectId: pid, activityId, date, actualPct: v, notes: notes.trim(), createdAt: new Date().toISOString() });
+    addReport({ id: uid('rep'), projectId: pid, activityId, date, actualPct: v, completedQty: q, notes: notes.trim(), createdAt: new Date().toISOString() });
     setMsg(`Saved: ${name(activityId)} at ${fmtPct(v)} on ${fmtDate(date)}.`);
     setError(null);
     setPct('');
+    setQty('');
     setNotes('');
   };
 
@@ -144,6 +151,16 @@ export default function FieldReports() {
                   Actual completion (%) <span className="note">Previous: {fmtPct(prev)}</span>
                   <input className="input" type="number" inputMode="decimal" min="0" max="100" step="0.1" value={pct} onChange={(e) => setPct(e.target.value)} />
                 </label>
+                {measurable && (
+                  <label className="field">
+                    Completed quantity ({current!.quantityUnit || 'units'}) <span className="note">of {current!.quantityTotal}</span>
+                    <input className="input" type="number" inputMode="decimal" min="0" step="any" value={qty} onChange={(e) => {
+                      setQty(e.target.value);
+                      const n = Number(e.target.value);
+                      if (e.target.value.trim() !== '' && Number.isFinite(n)) setPct(String(Math.min(100, Math.round((n / current!.quantityTotal!) * 1000) / 10)));
+                    }} />
+                  </label>
+                )}
                 <label className="field">
                   Report notes
                   <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Site work completed / issues" />

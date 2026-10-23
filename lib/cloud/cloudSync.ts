@@ -85,6 +85,48 @@ function rememberVersions(b: M.DbBundle) {
   for (const q of b.quotes) versions[vkey('quotations', q.project_id)] = { id: q.id, version: q.version };
 }
 
+const mergeStops = <T extends { id: string }>(server: T[], local: T[]) => {
+  const ids = new Set(local.map((s) => s.id));
+  return [...server.filter((s) => !ids.has(s.id)), ...local];
+};
+
+// calendar edits not yet accepted by the server (offline or failed); retried on every sync
+const pendingCalendars = new Map<string, import('../schedule').WorkCalendar>();
+async function flushCalendars() {
+  const sb = supabaseBrowser();
+  if (!sb) return;
+  for (const [pid, cal] of pendingCalendars) {
+    const { error } = await sb.from('project_calendars').upsert(M.calendarToDb(pid, cal), { onConflict: 'project_id' });
+    if (!error) pendingCalendars.delete(pid);
+    else set({ error: `Calendar not saved yet (will retry): ${error.message}` });
+  }
+}
+
+// stop/restart events go straight to the table (append-only); unsent ones are retried on every sync
+const pendingStops = new Map<string, { op: 'stop' | 'restart'; stop: AppState['stops'] extends (infer T)[] | undefined ? T : never }>();
+async function flushStops() {
+  const sb = supabaseBrowser();
+  if (!sb) return;
+  for (const [key, { op, stop }] of pendingStops) {
+    // a restart waits until its stop is on the server
+    if (op === 'restart' && pendingStops.has(`${stop.id}:stop`)) continue;
+    let error: { code?: string; message: string } | null;
+    if (op === 'stop') ({ error } = await sb.from('activity_stops').insert(M.stopToDb(stop)));
+    else {
+      const res = await sb.from('activity_stops').update(M.restartToDb(stop)).eq('id', stop.id).is('restarted_at', null).select('id');
+      error = res.error ?? (res.data?.length ? null : { code: '42501', message: 'only the project manager or a Super Admin can confirm a restart, or it was already restarted' });
+    }
+    // 23505: this stop was already recorded (a retry after a lost reply)
+    if (!error || (op === 'stop' && error.code === '23505')) { pendingStops.delete(key); continue; }
+    const permanent = ['42501', '23514', '22023', '23503', '23505'].includes(error.code ?? '') || (error.code ?? '').startsWith('PGRST');
+    if (permanent) {
+      pendingStops.delete(key);
+      if (op === 'stop') pendingStops.delete(`${stop.id}:restart`);
+      set({ error: `${op === 'stop' ? 'Stop' : 'Restart'} refused by the server: ${error.message}. The next sync shows the saved record.` });
+    } else set({ error: `${op === 'stop' ? 'Stop' : 'Restart'} not saved yet (will retry): ${error.message}` });
+  }
+}
+
 /** Load everything this user may see. Records with unsent local changes keep the local copy. */
 export async function pullAll(): Promise<void> {
   const sb = supabaseBrowser();
@@ -103,6 +145,13 @@ export async function pullAll(): Promise<void> {
     if (d.cost_settings) bundle.costs.push(d.cost_settings);
     if (d.quotation) bundle.quotes.push(d.quotation);
   }
+  await flushCalendars();
+  await flushStops();
+  const { data: stopRows } = await sb.from('activity_stops').select('*').order('stopped_at');
+  bundle.stops = (stopRows ?? []) as M.DbStop[];
+  // calendars are optional: before migration 000016 the table does not exist yet
+  const { data: cals } = await sb.from('project_calendars').select('*');
+  bundle.calendars = (cals ?? []) as M.DbCalendar[];
   rememberVersions(bundle);
   await setMeta('versions', versions);
   const server = M.bundleToState(bundle, read());
@@ -118,6 +167,8 @@ export async function pullAll(): Promise<void> {
     reports: keep(server.reports, local.reports),
     boq: keep(server.boq, local.boq),
     evidence: keep(server.evidence, local.evidence),
+    calendars: { ...server.calendars, ...Object.fromEntries(pendingCalendars) },
+    stops: mergeStops(server.stops ?? [], [...pendingStops.values()].map((x) => x.stop)),
     userName: status.profile?.full_name || local.userName,
   });
   set({ lastSyncAt: new Date().toISOString(), error: null });
@@ -152,6 +203,21 @@ export async function cloudOnChange(prev: AppState, next: AppState) {
   await queueCollection('project_reports', prev.reports, next.reports.filter((r) => isUuid(r.id)), M.reportToDb);
   await queueCollection('boq_lines', prev.boq, next.boq.filter((b) => isUuid(b.id)), M.boqToDb);
   await queueCollection<Evidence>('report_attachments', prev.evidence, next.evidence.filter((e) => isUuid(e.id)), (e) => M.evidenceToDb({ ...e, storagePath: e.storagePath ?? `${e.projectId}/${e.id}.jpg` }), (e) => ({ blob_key: e.id }));
+  const before = new Map((prev.stops ?? []).map((s) => [s.id, s]));
+  for (const s of next.stops ?? []) {
+    const old = before.get(s.id);
+    if (!old) pendingStops.set(`${s.id}:stop`, { op: 'stop', stop: s });
+    if (s.restartedAt && !old?.restartedAt) pendingStops.set(`${s.id}:restart`, { op: 'restart', stop: s });
+  }
+  if (pendingStops.size) await flushStops();
+  // calendars write straight to the table (online only; PM or Super Admin, enforced by RLS)
+  const sb = supabaseBrowser();
+  for (const [pid, cal] of Object.entries(next.calendars ?? {})) {
+    if (sb && !same(prev.calendars?.[pid], cal)) {
+      pendingCalendars.set(pid, cal);
+      await flushCalendars();
+    }
+  }
   for (const pid of new Set([...Object.keys(next.costSettings), ...Object.keys(prev.costSettings)])) {
     const a = prev.costSettings[pid], b = next.costSettings[pid];
     if (b && !same(a, b)) {
