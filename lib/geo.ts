@@ -1,4 +1,4 @@
-import type { Evidence, GpsFix, GpsStatus } from './types';
+import type { Evidence, GpsFix, GpsStatus, GpsSource } from './types';
 import { readExifGps } from './exif';
 
 /** Default target accuracy for ordinary outdoor site documentation (metres). */
@@ -97,6 +97,16 @@ export function parseManualCoords(lat: string, lng: string): GpsFix | null {
   const a = Number(lat.trim()), b = Number(lng.trim());
   if (!lat.trim() || !lng.trim() || !Number.isFinite(a) || !Number.isFinite(b) || a < -90 || a > 90 || b < -180 || b > 180) return null;
   return { lat: round(a, 6), lng: round(b, 6), accuracy: null, at: new Date().toISOString() };
+}
+
+/** The stored source for a capture result: camera EXIF, device position at capture, or typed in. */
+export const gpsSourceOf = (g: GpsResult): GpsSource | null => (g.status === 'manual' && g.fix ? 'manual' : g.fix ? (g.source === 'photo' ? 'exif' : 'device') : null);
+
+export function gpsSourceLabel(source: GpsSource | null | undefined, status?: GpsStatus): string {
+  if (source === 'exif') return 'Camera GPS saved in the photo';
+  if (source === 'device') return 'Device position recorded during capture';
+  if (source === 'manual' || status === 'manual') return 'Manually entered (not GPS-verified)';
+  return status === 'captured' ? 'GPS (source not recorded)' : 'GPS unavailable';
 }
 
 export const accuracyWarning = (e: Pick<Evidence, 'gps' | 'gpsStatus'>, target = GPS_TARGET_M) =>
