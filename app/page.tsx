@@ -8,6 +8,8 @@ import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { SCurve } from '@/components/Charts';
 import GanttControls from '@/components/GanttControls';
 import { useCanManage } from '@/components/RoleGate';
+import ShareDialog from '@/components/ShareDialog';
+import { CLOUD } from '@/lib/cloud/env';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, plannedPct, projectProgress, projectSpan, sCurve, todayLocal, totalWeight } from '@/lib/calc';
 import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
@@ -19,6 +21,7 @@ export default function Overview() {
   const { activities, reports, evidence, stops } = useProjectData();
   const canManage = useCanManage();
   const [asOf, setAsOf] = useState<string>(() => todayLocal());
+  const [sharing, setSharing] = useState(false);
   const calendars = state.calendars;
   const calFor = useCallback((pid: string) => calendars?.[pid], [calendars]);
 
@@ -40,10 +43,13 @@ export default function Overview() {
           <p className="lead">Live project schedule, planned vs actual progress and field activity.</p>
         </div>
         <div className="form-actions" style={{ marginTop: 0 }}>
+          {CLOUD && canManage && <button className="btn" onClick={() => setSharing(true)} title="Share the approved report by e-mail, QR code or link">Share</button>}
+          <Link className="btn" href={`/reports?project=${project.id}`}>Preview reports</Link>
           <DataIO doc={() => IO.overviewDoc(state, asOf)} capture={() => document.querySelector('main.content')} label="items" />
           <Link className="btn btn-primary" href="/projects?new=1">+ New project</Link>
         </div>
       </div>
+      {sharing && <ShareDialog projectId={project.id} projectCode={project.code ?? project.id} projectName={project.name} onClose={() => setSharing(false)} />}
 
       <PortfolioSummary />
 

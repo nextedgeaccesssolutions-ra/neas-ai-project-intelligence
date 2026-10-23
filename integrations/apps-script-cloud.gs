@@ -52,6 +52,22 @@ function doPost(e) {
     if (body.key) cache.put('done:' + body.key, '1', 3600);
     return json_({ ok: true, notified: true });
   }
+  if (data.shareEmail) {
+    // shared report link: the server created and authorised the share; the e-mail carries only the link
+    var m = data.shareEmail;
+    var rcpt = String(m.to || '').trim();
+    if (!/^[^@\s<>",;]+@[^@\s<>",;]+\.[a-z]{2,}$/i.test(rcpt) || rcpt.length > 254) return json_({ ok: false, error: 'bad_recipient' });
+    if (MailApp.getRemainingDailyQuota() < 1) return json_({ ok: false, error: 'daily_quota_reached' });
+    MailApp.sendEmail({
+      to: rcpt,
+      subject: String(m.subject || 'NEAS project report').replace(/[\r\n]+/g, ' ').slice(0, 150),
+      body: String(m.text || '').slice(0, 5000),
+      htmlBody: String(m.html || '').slice(0, 20000),
+      name: 'NEAS Project Reports'
+    });
+    if (body.key) cache.put('done:' + body.key, '1', 21600);
+    return json_({ ok: true, emailed: true });
+  }
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {

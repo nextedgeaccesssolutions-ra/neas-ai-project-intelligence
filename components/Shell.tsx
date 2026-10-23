@@ -9,7 +9,7 @@ import { CLOUD } from '@/lib/cloud/env';
 import { canManage, canView, cloudSignOut, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
-const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/account/];
+const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
 const MANAGER_ONLY = new Set(['/estimating', '/quotation']);
 
 function CloudPill() {
@@ -56,6 +56,7 @@ export const NAV = [
   { href: '/project-management', label: 'Schedule & Gantt', icon: 'gantt', group: 'Projects' },
   { href: '/field-reports', label: 'Field reports', icon: 'spark', group: 'Field operations' },
   { href: '/site-evidence', label: 'Site evidence', icon: 'camera', group: 'Field operations' },
+  { href: '/global-reports', label: 'Global reports', icon: 'chart', group: 'Reports' },
   { href: '/reports', label: 'Project reports', icon: 'doc', group: 'Reports' },
   { href: '/google-sheets', label: 'Google Sheets sync', icon: 'sheet', group: 'Reports' },
   { href: '/estimating', label: 'Estimating & BOQ', icon: 'list', group: 'Commercial' },
@@ -68,6 +69,7 @@ function Icon({ name }: { name: string }) {
   const paths: Record<string, ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" {...p} /><rect x="14" y="3" width="7" height="7" rx="1.5" {...p} /><rect x="3" y="14" width="7" height="7" rx="1.5" {...p} /><rect x="14" y="14" width="7" height="7" rx="1.5" {...p} /></>,
     list: <><path d="M8 6h13M8 12h13M8 18h13" {...p} /><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" {...p} strokeWidth={3} /></>,
+    chart: <><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" {...p} /></>,
     doc: <><path d="M6 3h9l4 4v14H6z" {...p} /><path d="M9 12h7M9 16h7M14 3v5h5" {...p} /></>,
     gantt: <><path d="M4 6h9M8 12h10M6 18h8" {...p} strokeWidth={3} /></>,
     spark: <><path d="M12 3v6M12 15v6M3 12h6M15 12h6" {...p} /></>,
