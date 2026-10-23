@@ -5,7 +5,7 @@ export default function AuthCard({ title, subtitle, children }: { title: string;
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark">NE</span>
+          <img className="brand-mark brand-logo" src="/neas-logo.png" alt="NEAS — NextEdge Access Solutions" width={44} height={44} />
           <span>
             <div className="auth-brand-name">NEAS INTELLIGENCE</div>
             <div className="brand-sub">PROJECT CONTROL</div>
