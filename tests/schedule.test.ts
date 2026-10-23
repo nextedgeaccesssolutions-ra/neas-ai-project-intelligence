@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Calendar, DEFAULT_CALENDAR, plannedPctWorking, scopeMetrics, weightedProgress, actualPhysicalPct } from '../lib/schedule';
+import { Calendar, DEFAULT_CALENDAR, localDay, plannedPctWorking, scopeMetrics, weightedProgress, actualPhysicalPct } from '../lib/schedule';
 import { plannedPct, projectProgress } from '../lib/calc';
 import type { Activity, FieldReport } from '../lib/types';
 
@@ -79,7 +79,7 @@ describe('scope metrics', () => {
     const late = scopeMetrics({ ...a, remainingDays: 3 }, [], '2026-11-20', monSat);
     expect(late.timeConsumptionPct!).toBeGreaterThan(100);
     expect(late.flags).toContain('Time used exceeds planned duration');
-    expect(late.status).toBe('Overdue');
+    expect(late.status).toBe('Delayed');
   });
   it('shows N/A time consumption when the dates hold no working days', () => {
     const sundayOnly = scopeMetrics(act({ start: '2026-11-08', end: '2026-11-08' }), [], '2026-11-08', monSat);
@@ -117,5 +117,45 @@ describe('cloud mapping of schedule fields', () => {
   it('round-trips a project calendar', () => {
     const c = { workDays: [1, 2, 3, 4, 5, 6], exceptions: [{ date: '2026-11-30', kind: 'holiday' as const, name: 'Bonifacio Day' }], hoursPerDay: 8, timeZone: 'Asia/Manila' };
     expect(calendarFromDb(calendarToDb('p1', c))).toEqual(c);
+  });
+});
+
+import type { ActivityStop } from '../lib/types';
+const stop = (o: Partial<ActivityStop>): ActivityStop => ({ id: 's1', projectId: 'p1', activityId: 'a1', stoppedAt: '2026-11-04T10:00:00+08:00', reason: 'weather', remarks: '', supervisor: 'R. Santos', affectsSchedule: true, restartedAt: null, restartSupervisor: '', restartRemarks: '', safetyCleared: false, remainingDays: null, ...o });
+describe('stop and restart', () => {
+  const a = act({ actualStart: '2026-11-02', remainingDays: 5 });
+  it('marks an open stoppage as Stopped and stops counting worked days', () => {
+    const m = scopeMetrics(a, [], '2026-11-07', monSat, [stop({})]);
+    expect(m.status).toBe('Stopped');
+    expect(m.grossDays).toBe(6); // Mon 2 – Sat 7
+    expect(m.stoppedDays).toBe(3); // Thu 5 – Sat 7 lost; the stop day counts as worked
+    expect(m.actualDays).toBe(3);
+    expect(m.flags.some((f) => f.startsWith('Stopped since 2026-11-04'))).toBe(true);
+  });
+  it('keeps several stop/restart cycles and counts only the days lost', () => {
+    const cycles = [
+      stop({ restartedAt: '2026-11-06T08:00:00+08:00', safetyCleared: true }),
+      stop({ id: 's2', stoppedAt: '2026-11-09T13:00:00+08:00', restartedAt: '2026-11-11T08:00:00+08:00', safetyCleared: true, remainingDays: 2 }),
+    ];
+    const m = scopeMetrics({ ...a, remainingDays: null, end: '2026-11-20' }, [rep({ actualPct: 60, date: '2026-11-10' })], '2026-11-11', monSat, cycles);
+    expect(m.stoppedDays).toBe(2); // Thu 5 and Tue 10
+    expect(m.actualDays).toBe(m.grossDays! - 2);
+    expect(m.status).toBe('Restarted');
+    expect(m.remainingDays).toBe(2); // estimate recorded at the restart
+  });
+  it('a schedule change alone never changes actual progress', () => {
+    const r = [rep({ completedQty: 250, date: '2026-11-03' })];
+    const before = scopeMetrics(act({ quantityTotal: 1000 }), r, '2026-11-05', monSat);
+    const after = scopeMetrics(act({ quantityTotal: 1000, start: '2026-11-09', end: '2026-11-20', baselineStart: '2026-11-02', baselineEnd: '2026-11-11' }), r, '2026-11-05', monSat);
+    expect(after.actualPct).toBe(25);
+    expect(after.actualPct).toBe(before.actualPct);
+  });
+});
+
+describe('stop dates use the project time zone', () => {
+  it('a 07:00 Manila stop belongs to that Manila day, not the UTC day before', () => {
+    expect(localDay('2026-10-23T23:00:00.000Z')).toBe('2026-10-24');
+    const m = scopeMetrics(act({ actualStart: '2026-11-02', remainingDays: 5 }), [], '2026-11-07', monSat, [stop({ stoppedAt: '2026-11-04T23:00:00.000Z' })]);
+    expect(m.stoppedDays).toBe(2); // stop day Thu 5 (Manila) counts as worked; Fri 6 and Sat 7 lost
   });
 });

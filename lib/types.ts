@@ -35,6 +35,37 @@ export interface Activity {
   delayReason?: string;
 }
 
+export type StopReason = 'weather' | 'wind' | 'client_instruction' | 'site_access' | 'safety' | 'equipment' | 'manpower' | 'material' | 'other';
+export const STOP_REASONS: { value: StopReason; label: string }[] = [
+  { value: 'weather', label: 'Rain or adverse weather' },
+  { value: 'wind', label: 'High winds / unsafe conditions' },
+  { value: 'client_instruction', label: 'Client instruction' },
+  { value: 'site_access', label: 'Site access restriction' },
+  { value: 'safety', label: 'Safety concern / permit suspended' },
+  { value: 'equipment', label: 'Equipment breakdown' },
+  { value: 'manpower', label: 'Manpower shortage' },
+  { value: 'material', label: 'Material delay' },
+  { value: 'other', label: 'Other (explain)' },
+];
+
+/** A STOP WORK event and, once confirmed, its RESTART. Never deleted or rewritten. */
+export interface ActivityStop {
+  id: string;
+  projectId: string;
+  activityId: string;
+  /** ISO timestamp */
+  stoppedAt: string;
+  reason: StopReason;
+  remarks: string;
+  supervisor: string;
+  affectsSchedule: boolean;
+  restartedAt: string | null;
+  restartSupervisor: string;
+  restartRemarks: string;
+  safetyCleared: boolean;
+  remainingDays: number | null;
+}
+
 export interface FieldReport {
   id: string;
   projectId: string;
@@ -142,6 +173,8 @@ export interface AppState {
   evidence: Evidence[];
   /** per-project working calendars; a project without one uses DEFAULT_CALENDAR */
   calendars?: Record<string, WorkCalendar>;
+  /** work stoppages and restarts */
+  stops?: ActivityStop[];
   savedAt: string | null;
 }
 

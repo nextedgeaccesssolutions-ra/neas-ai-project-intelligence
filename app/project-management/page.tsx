@@ -58,7 +58,7 @@ const tone = (v: number) => (v >= 0 ? 'ok' : v > -10 ? 'warn' : 'bad');
 
 export default function ProjectManagement() {
   const { ready, project, upsertActivity, deleteActivity, addReport, state, replaceAll, calendarFor } = useStore();
-  const { pid, activities, reports } = useProjectData();
+  const { pid, activities, reports, stops } = useProjectData();
   const editParam = useQueryParam('edit');
   const canEdit = useCanManage();
   const [draft, setDraft] = useState<Draft>(blank);
@@ -339,7 +339,7 @@ export default function ProjectManagement() {
               </thead>
               <tbody>
                 {activities.map((a) => {
-                  const m = scopeMetrics(a, reports, today, calendarOf(cal));
+                  const m = scopeMetrics(a, reports, today, calendarOf(cal), stops);
                   const range = (x?: string | null, y?: string | null) => (x ? `${fmtDate(x)} – ${y ? fmtDate(y) : '…'}` : '—');
                   return (
                     <tr key={a.id} style={draft.id === a.id ? { background: '#fff8ea' } : undefined} title={m.flags.join('\n') || undefined}>
@@ -356,7 +356,7 @@ export default function ProjectManagement() {
                       <td className={`num ${tone(m.variancePts)}`}>{fmtPP(m.variancePts)}</td>
                       <td className={`num ${m.timeConsumptionPct != null && m.timeConsumptionPct > 100 ? 'bad' : ''}`}>{m.timeConsumptionPct == null ? 'N/A' : fmtPct(m.timeConsumptionPct)}</td>
                       <td className={m.slipDays > 0 ? 'bad' : undefined}>{fmtDate(m.forecastFinish)}{m.slipDays > 0 ? ` (+${m.slipDays}d)` : ''}</td>
-                      <td><span className={`pill ${m.status === 'Complete' ? 'pill-ok' : m.status === 'Overdue' || m.status === 'Behind' ? 'pill-warn' : ''}`}>{m.status}</span>{m.flags.length ? <span title={m.flags.join('\n')}> ⚠</span> : null}</td>
+                      <td><span className={`pill ${m.status === 'Complete' ? 'pill-ok' : m.status === 'Delayed' || m.status === 'Stopped' ? 'pill-warn' : ''}`}>{m.status}</span>{m.flags.length ? <span title={m.flags.join('\n')}> ⚠</span> : null}</td>
                       <td className="note">{a.delayReason || '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         {canEdit && <><button className="btn btn-sm" onClick={() => startEdit(a)}>Edit</button>{' '}</>}

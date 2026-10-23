@@ -1,5 +1,5 @@
 // Working-day calendar and per-scope schedule metrics. Pure functions; dates are YYYY-MM-DD, inclusive.
-import type { Activity, FieldReport } from './types';
+import type { Activity, ActivityStop, FieldReport } from './types';
 
 const DAY = 86_400_000;
 const ms = (d: string) => Date.parse(d.slice(0, 10) + 'T00:00:00Z');
@@ -17,6 +17,13 @@ export interface WorkCalendar {
 }
 /** NEAS default: every day is a working day; holidays and shutdowns are added per project. */
 export const DEFAULT_CALENDAR: WorkCalendar = { workDays: [1, 2, 3, 4, 5, 6, 7], exceptions: [], hoursPerDay: 8, timeZone: 'Asia/Manila' };
+
+/** The calendar date of a timestamp in the project's time zone (a 07:00 Manila stop is that day, not the UTC day before). */
+export function localDay(ts: string, timeZone = 'Asia/Manila'): string {
+  const d = new Date(ts);
+  if (!ts.includes('T') || Number.isNaN(d.getTime())) return ts.slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
 
 const isoWeekday = (d: string) => { const w = new Date(ms(d)).getUTCDay(); return w === 0 ? 7 : w; };
 
@@ -104,8 +111,12 @@ export function actualPhysicalPct(a: Pick<Activity, 'id' | 'quantityTotal'>, rep
 export interface ScopeMetrics {
   baselineDuration: number | null;
   currentDuration: number;
-  /** working days from actual start to the cut-off (or actual finish) */
+  /** working days actually worked: gross days minus working days lost to stoppages */
   actualDays: number | null;
+  /** working days from actual start to the cut-off (or actual finish), stoppages included */
+  grossDays: number | null;
+  /** working days lost to recorded stoppages */
+  stoppedDays: number;
   remainingDays: number | null;
   plannedPct: number;
   actualPct: number;
@@ -117,12 +128,14 @@ export interface ScopeMetrics {
   forecastFinish: string;
   /** forecast finish vs current planned finish, in working days (+ = late) */
   slipDays: number;
-  status: 'Not started' | 'In progress' | 'Complete' | 'Overdue' | 'Behind';
+  status: 'Not started' | 'In progress' | 'Stopped' | 'Restarted' | 'Rescheduled' | 'Delayed' | 'Complete';
+  /** the stoppage still open on `day`, if any */
+  openStop: ActivityStop | null;
   flags: string[];
 }
 
 /** All schedule metrics for one scope at the reporting cut-off `day`. */
-export function scopeMetrics(a: Activity, reports: FieldReport[], day: string, cal: Calendar): ScopeMetrics {
+export function scopeMetrics(a: Activity, reports: FieldReport[], day: string, cal: Calendar, stops: ActivityStop[] = []): ScopeMetrics {
   const flags: string[] = [];
   const baselineDuration = a.baselineStart && a.baselineEnd ? cal.workingDays(a.baselineStart, a.baselineEnd) : null;
   const currentDuration = cal.workingDays(a.start, a.end);
@@ -130,8 +143,15 @@ export function scopeMetrics(a: Activity, reports: FieldReport[], day: string, c
   const actual = actualPhysicalPct(a, reports, day);
   const done = !!a.actualFinish && a.actualFinish <= day;
   const started = !!a.actualStart && a.actualStart <= day;
-  const actualDays = started ? cal.workingDays(a.actualStart!, done ? a.actualFinish! : day) : null;
-  const remaining = done ? 0 : a.remainingDays ?? null;
+  const until = done ? a.actualFinish! : day;
+  const grossDays = started ? cal.workingDays(a.actualStart!, until) : null;
+  const tz = cal.def.timeZone;
+  const mine = stops.filter((s) => s.activityId === a.id && localDay(s.stoppedAt, tz) <= day);
+  const openStop = done ? null : mine.find((s) => !s.restartedAt || localDay(s.restartedAt, tz) > day) ?? null;
+  const stoppedDays = started ? stoppedWorkingDays(mine, a.actualStart!, until, cal) : 0;
+  const actualDays = grossDays == null ? null : Math.max(0, grossDays - stoppedDays);
+  const lastRestart = mine.filter((s) => s.restartedAt && localDay(s.restartedAt, tz) <= day).sort((x, y) => x.restartedAt!.localeCompare(y.restartedAt!)).pop();
+  const remaining = done ? 0 : a.remainingDays ?? lastRestart?.remainingDays ?? null;
 
   let forecastFinish: string;
   if (done) forecastFinish = a.actualFinish!;
@@ -145,20 +165,39 @@ export function scopeMetrics(a: Activity, reports: FieldReport[], day: string, c
   if (timeConsumptionPct != null && timeConsumptionPct > 100 && !done) flags.push('Time used exceeds planned duration');
   if (!started && day > a.start && actual === 0) flags.push('Planned start passed without an actual start');
   if (started && remaining == null && !done) flags.push('Remaining working days not estimated');
+  if (openStop) flags.push(`Stopped since ${localDay(openStop.stoppedAt, tz)}: forecast assumes a restart on the next working day`);
+  if (openStop?.affectsSchedule) flags.push('Stoppage affects the approved schedule: review dependent activities and milestones');
   if (a.quantityTotal && !reports.some((r) => r.activityId === a.id && r.completedQty != null && r.status !== 'rejected')) flags.push('No verified quantity reported');
 
   const slipDays = forecastFinish > a.end ? cal.workingDays(addDay(a.end), forecastFinish) : -cal.workingDays(addDay(forecastFinish), a.end);
+  const moved = !!a.baselineStart && !!a.baselineEnd && (a.baselineStart !== a.start || a.baselineEnd !== a.end);
   const status: ScopeMetrics['status'] = done || actual >= 100 ? 'Complete'
-    : day > a.end ? 'Overdue'
-    : actual + 5 < planned ? 'Behind'
+    : openStop ? 'Stopped'
+    : day > a.end || actual + 5 < planned ? 'Delayed'
+    : lastRestart ? 'Restarted'
+    : moved ? 'Rescheduled'
     : started || actual > 0 ? 'In progress' : 'Not started';
 
   return {
-    baselineDuration, currentDuration, actualDays, remainingDays: remaining, plannedPct: planned, actualPct: actual,
+    baselineDuration, currentDuration, actualDays, grossDays, stoppedDays, openStop, remainingDays: remaining, plannedPct: planned, actualPct: actual,
     variancePts: actual - planned, timeConsumptionPct, forecastDuration, forecastFinish, slipDays, status, flags,
   };
 }
 const addDay = (d: string) => add(d, 1);
+
+/**
+ * Working days lost to stoppages within [from, to]. The stop day and the restart day count as
+ * worked (part days); the days strictly between them are lost. An open stop runs to `to`.
+ */
+export function stoppedWorkingDays(stops: ActivityStop[], from: string, to: string, cal: Calendar): number {
+  const lost = new Set<string>();
+  for (const s of stops) {
+    const tz = cal.def.timeZone;
+    const last = s.restartedAt ? add(localDay(s.restartedAt, tz), -1) : to;
+    for (let d = addDay(localDay(s.stoppedAt, tz)); d <= last && d <= to; d = addDay(d)) if (d >= from && cal.isWorkingDay(d)) lost.add(d);
+  }
+  return lost.size;
+}
 
 /** Weighted overall progress: Σ(weight × %) ÷ Σ(weight); planned and actual on the same basis. */
 export function weightedProgress(items: { weight: number; planned: number; actual: number }[]): { planned: number; actual: number } {

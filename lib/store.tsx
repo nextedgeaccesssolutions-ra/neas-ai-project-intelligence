@@ -1,7 +1,7 @@
 'use client';
 // Device data store: one JSON document in localStorage, versioned, synced across tabs.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Activity, AppState, BoqLine, CostSettings, Evidence, FieldReport, Project, Quotation } from './types';
+import type { Activity, ActivityStop, AppState, BoqLine, CostSettings, Evidence, FieldReport, Project, Quotation } from './types';
 import { DEFAULT_COST_SETTINGS } from './types';
 import { emptyState, seedState } from './seed';
 export { emptyState, seedState };
@@ -51,6 +51,8 @@ interface StoreApi {
   quotationFor: (projectId: string) => Quotation;
   setQuotation: (q: Quotation) => void;
   setCalendar: (projectId: string, c: WorkCalendar) => void;
+  stopWork: (s: ActivityStop) => void;
+  restartWork: (id: string, r: Pick<ActivityStop, 'restartedAt' | 'restartSupervisor' | 'restartRemarks' | 'safetyCleared' | 'remainingDays'>) => void;
   calendarFor: (projectId: string) => WorkCalendar;
   addEvidence: (e: Evidence) => void;
   updateEvidence: (id: string, patch: Partial<Evidence>) => void;
@@ -196,6 +198,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       costSettingsFor,
       quotationFor,
       setQuotation: (q) => update((s) => ({ ...s, quotations: { ...s.quotations, [q.projectId]: q } })),
+      stopWork: (st) => update((s) => ({ ...s, stops: [...(s.stops ?? []), st] })),
+      restartWork: (id, r) => update((s) => ({ ...s, stops: (s.stops ?? []).map((x) => (x.id === id && !x.restartedAt ? { ...x, ...r } : x)) })),
       setCalendar: (pid, c) => update((s) => ({ ...s, calendars: { ...s.calendars, [pid]: c } })),
       calendarFor: (pid) => state.calendars?.[pid] ?? DEFAULT_CALENDAR,
       addEvidence: (e) => update((s) => ({ ...s, evidence: [...s.evidence, e] })),
@@ -238,7 +242,8 @@ export function useProjectData(projectId?: string) {
     const reports = state.reports.filter((r) => r.projectId === pid).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
     const boq = state.boq.filter((b) => b.projectId === pid).sort((a, b) => a.item.localeCompare(b.item, undefined, { numeric: true }));
     const evidence = state.evidence.filter((e) => e.projectId === pid).sort((a, b) => b.takenAt.localeCompare(a.takenAt));
-    return { pid, activities, reports, boq, evidence };
+    const stops = (state.stops ?? []).filter((s) => s.projectId === pid).sort((a, b) => a.stoppedAt.localeCompare(b.stoppedAt));
+    return { pid, activities, reports, boq, evidence, stops };
   }, [state, pid]);
 }
 

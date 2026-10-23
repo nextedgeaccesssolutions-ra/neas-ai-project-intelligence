@@ -4,7 +4,9 @@ import { useCallback, useMemo, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
-import { Gantt, SCurve } from '@/components/Charts';
+import { SCurve } from '@/components/Charts';
+import GanttControls from '@/components/GanttControls';
+import { useCanManage } from '@/components/RoleGate';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, plannedPct, projectProgress, projectSpan, sCurve, todayLocal, totalWeight } from '@/lib/calc';
 import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
@@ -13,7 +15,8 @@ const tone = (v: number) => (v >= 0 ? 'ok' : v > -10 ? 'warn' : 'bad');
 
 export default function Overview() {
   const { ready, project, state } = useStore();
-  const { activities, reports, evidence } = useProjectData();
+  const { activities, reports, evidence, stops } = useProjectData();
+  const canManage = useCanManage();
   const [asOf, setAsOf] = useState<string>(() => todayLocal());
   const calendars = state.calendars;
   const calFor = useCallback((pid: string) => calendars?.[pid], [calendars]);
@@ -96,7 +99,7 @@ export default function Overview() {
         </div>
         <SCurve series={series} asOf={asOf} />
         <p className="note">
-          Planned progress spreads each activity evenly over its calendar days (start and finish inclusive), weighted by activity weight.
+          Planned progress spreads each activity evenly over its working days (start and finish inclusive), weighted by activity weight.
           Actual progress uses the latest saved field report per activity on or before each date.
         </p>
       </section>
@@ -106,7 +109,7 @@ export default function Overview() {
           <h2>Project Gantt chart</h2>
           <span className="note">{span ? `${fmtDate(span.start)} — ${fmtDate(span.end)}` : ''}</span>
         </div>
-        <Gantt rows={activities} asOf={asOf} actualOf={(id) => actualPct(id, reports, asOf, activities.find((a) => a.id === id))} />
+        <GanttControls pid={project.id} activities={activities} reports={reports} stops={stops} asOf={asOf} canManage={canManage} />
       </section>
 
       <section className="card">

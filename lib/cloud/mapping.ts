@@ -1,10 +1,11 @@
 // Database rows (neas schema) ⇄ the app's in-memory model. Pure functions.
-import type { Activity, AppState, BoqLine, CostSettings, Evidence, FieldReport, Project, ProjectStatus, Quotation } from '../types';
+import type { Activity, ActivityStop, AppState, BoqLine, CostSettings, Evidence, FieldReport, Project, ProjectStatus, Quotation } from '../types';
 import type { WorkCalendar } from '../schedule';
 
 export interface DbProject { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | string | null; client_portal_enabled: boolean; version: number; created_at: string }
 export interface DbActivity { id: string; project_id: string; name: string; start_date: string; end_date: string; weight: number | string; is_milestone: boolean; client_visible: boolean; sort_order: number; version: number; deleted_at: string | null;
   baseline_start?: string | null; baseline_end?: string | null; actual_start?: string | null; actual_finish?: string | null; remaining_days?: number | string | null; quantity_total?: number | string | null; quantity_unit?: string | null; delay_reason?: string | null }
+export interface DbStop { id: string; project_id: string; activity_id: string; stopped_at: string; reason: string; remarks: string; supervisor: string; affects_schedule: boolean; restarted_at: string | null; restart_supervisor: string; restart_remarks: string; safety_cleared: boolean; remaining_days: number | string | null }
 export interface DbCalendar { project_id: string; work_days: number[]; exceptions: WorkCalendar['exceptions'] | null; hours_per_day?: number | string | null; time_zone?: string | null }
 export interface DbReport { id: string; project_id: string; activity_id: string | null; report_type: string; report_date: string; actual_pct: number | string | null; completed_qty?: number | string | null; notes: string; status: string; client_visible: boolean; submitted_by: string | null; version: number; created_at: string; deleted_at: string | null }
 export interface DbBoq { id: string; project_id: string; item: string; description: string; category: string; unit: string; qty: number | string; unit_cost: number | string; version: number; deleted_at: string | null }
@@ -30,6 +31,13 @@ export const activityFromDb = (a: DbActivity): Activity => ({
   remainingDays: optNum(a.remaining_days), quantityTotal: optNum(a.quantity_total), quantityUnit: a.quantity_unit ?? '', delayReason: a.delay_reason ?? '',
 });
 export const calendarFromDb = (c: DbCalendar): WorkCalendar => ({ workDays: c.work_days ?? [], exceptions: c.exceptions ?? [], hoursPerDay: c.hours_per_day == null ? 8 : num(c.hours_per_day), timeZone: c.time_zone ?? 'Asia/Manila' });
+export const stopFromDb = (s: DbStop): ActivityStop => ({
+  id: s.id, projectId: s.project_id, activityId: s.activity_id, stoppedAt: s.stopped_at, reason: s.reason as ActivityStop['reason'], remarks: s.remarks ?? '', supervisor: s.supervisor ?? '',
+  affectsSchedule: s.affects_schedule, restartedAt: s.restarted_at, restartSupervisor: s.restart_supervisor ?? '', restartRemarks: s.restart_remarks ?? '', safetyCleared: s.safety_cleared, remainingDays: optNum(s.remaining_days),
+});
+/** STOP WORK insert: the restart columns are added later, once, by restartToDb. */
+export const stopToDb = (s: ActivityStop) => ({ id: s.id, project_id: s.projectId, activity_id: s.activityId, stopped_at: s.stoppedAt, reason: s.reason, remarks: s.remarks, supervisor: s.supervisor, affects_schedule: s.affectsSchedule });
+export const restartToDb = (s: ActivityStop) => ({ restarted_at: s.restartedAt, restart_supervisor: s.restartSupervisor, restart_remarks: s.restartRemarks, safety_cleared: s.safetyCleared, remaining_days: s.remainingDays });
 export const reportFromDb = (r: DbReport): FieldReport => ({ id: r.id, projectId: r.project_id, activityId: r.activity_id ?? '', date: r.report_date, actualPct: num(r.actual_pct), completedQty: optNum(r.completed_qty), notes: r.notes, createdAt: r.created_at, status: r.status as FieldReport['status'], clientVisible: r.client_visible });
 export const boqFromDb = (b: DbBoq): BoqLine => ({ id: b.id, projectId: b.project_id, item: b.item, description: b.description, category: b.category as BoqLine['category'], unit: b.unit, qty: num(b.qty), unitCost: num(b.unit_cost) });
 export const costFromDb = (c: DbCost): CostSettings => ({ overheadPct: num(c.overhead_pct), contingencyPct: num(c.contingency_pct), insurancePct: num(c.insurance_pct), bondPct: num(c.bond_pct), warrantyPct: num(c.warranty_pct), markupPct: num(c.markup_pct), vatPct: num(c.vat_pct), vatMode: c.vat_mode === 'exempt' ? 'exempt' : 'exclusive' });
@@ -81,6 +89,7 @@ export interface DbBundle {
   quotes: DbQuote[];
   attachments: DbAttachment[];
   calendars?: DbCalendar[];
+  stops?: DbStop[];
 }
 
 /** Whole database bundle → app state (deleted rows dropped). */
@@ -97,6 +106,7 @@ export function bundleToState(b: DbBundle, base: AppState): AppState {
     costSettings: Object.fromEntries(b.costs.map((c) => [c.project_id, costFromDb(c)])),
     quotations: Object.fromEntries(b.quotes.map((q) => [q.project_id, quoteFromDb(q)])),
     evidence: alive(b.attachments).map(evidenceFromDb),
+    stops: (b.stops ?? []).map(stopFromDb),
     calendars: Object.fromEntries((b.calendars ?? []).map((c) => [c.project_id, calendarFromDb(c)])),
   };
 }
