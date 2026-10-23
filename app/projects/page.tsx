@@ -104,7 +104,7 @@ export default function ProjectRegister() {
                 {rows.map((p) => {
                   const acts = state.activities.filter((a) => a.projectId === p.id);
                   const reps = state.reports.filter((r) => r.projectId === p.id);
-                  const prog = projectProgress(acts, reps, today);
+                  const prog = projectProgress(acts, reps, today, (id) => state.calendars?.[id]);
                   const boq = boqTotals(state.boq.filter((b) => b.projectId === p.id), costSettingsFor(p.id));
                   const active = p.id === state.activeProjectId;
                   return (
@@ -118,6 +118,7 @@ export default function ProjectRegister() {
                       <td className="num">{acts.length ? fmtPct(prog.actual) : '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm btn-primary" href="/" onClick={() => setActiveProject(p.id)}>Open</Link>{' '}
+                        <Link className="btn btn-sm" href={`/reports?project=${encodeURIComponent(p.id)}`} onClick={() => setActiveProject(p.id)}>View reports</Link>{' '}
                         {!CLOUD && <><button className="btn btn-sm" onClick={() => { setDraft({ ...p, contractValue: p.contractValue == null ? '' : String(p.contractValue), isNew: false }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>{' '}
                         <button className="btn btn-sm btn-danger" onClick={() => askConfirm(`Delete ${p.id} and all its activities, reports, BOQ and photos? This cannot be undone.`).then((ok) => ok && deleteProject(p.id))}>Delete</button></>}
                       </td>

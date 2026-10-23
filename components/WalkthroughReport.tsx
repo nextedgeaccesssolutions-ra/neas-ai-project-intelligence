@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { locatePhoto, photoRef, startGpsTracking, stopGpsTracking } from '@/lib/geo';
+import { locatePhoto, photoRef, startGpsTracking, stopGpsTracking, gpsSourceOf } from '@/lib/geo';
 import PhotoThumb from '@/components/PhotoThumb';
 import { notify } from '@/components/Dialogs';
 import { todayLocal } from '@/lib/calc';
@@ -57,7 +57,7 @@ export default function WalkthroughReport({
         const id = uid('ev');
         const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
-        addEvidence({ id, projectId: pid, activityId, kind: 'During', caption: file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size, gps: gps.fix, gpsStatus: gps.status, pairId: null, ref: photoRef('During', takenAt, id) });
+        addEvidence({ id, projectId: pid, activityId, kind: 'During', caption: file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size, gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), pairId: null, ref: photoRef('During', takenAt, id) });
         ok++;
       } catch (e) {
         problems.push(`${file.name}: ${e instanceof Error ? e.message : 'could not be saved'}`);

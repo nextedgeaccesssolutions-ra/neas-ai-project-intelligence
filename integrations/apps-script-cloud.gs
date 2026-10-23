@@ -38,7 +38,7 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'bad_json' }); }
   var ts = Number(body.ts);
   if (!ts || Math.abs(Date.now() - ts) > MAX_SKEW_MS) return json_({ ok: false, error: 'stale' });
-  var expected = hex_(Utilities.computeHmacSha256Signature(ts + '.' + body.payload, secret));
+  var expected = hex_(Utilities.computeHmacSha256Signature(ts + '.' + body.payload, secret, Utilities.Charset.UTF_8));
   if (!safeEqual_(expected, String(body.sig || ''))) return json_({ ok: false, error: 'bad_signature' });
 
   var cache = CacheService.getScriptCache();
@@ -51,6 +51,22 @@ function doPost(e) {
     MailApp.sendEmail(to, String(data.notify.subject || 'NEAS notice').slice(0, 150), String(data.notify.text || '').slice(0, 2000));
     if (body.key) cache.put('done:' + body.key, '1', 3600);
     return json_({ ok: true, notified: true });
+  }
+  if (data.shareEmail) {
+    // shared report link: the server created and authorised the share; the e-mail carries only the link
+    var m = data.shareEmail;
+    var rcpt = String(m.to || '').trim();
+    if (!/^[^@\s<>",;]+@[^@\s<>",;]+\.[a-z]{2,}$/i.test(rcpt) || rcpt.length > 254) return json_({ ok: false, error: 'bad_recipient' });
+    if (MailApp.getRemainingDailyQuota() < 1) return json_({ ok: false, error: 'daily_quota_reached' });
+    MailApp.sendEmail({
+      to: rcpt,
+      subject: String(m.subject || 'NEAS project report').replace(/[\r\n]+/g, ' ').slice(0, 150),
+      body: String(m.text || '').slice(0, 5000),
+      htmlBody: String(m.html || '').slice(0, 20000),
+      name: 'NEAS Project Reports'
+    });
+    if (body.key) cache.put('done:' + body.key, '1', 21600);
+    return json_({ ok: true, emailed: true });
   }
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
