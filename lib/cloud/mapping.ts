@@ -15,6 +15,7 @@ export interface DbAttachment {
   id: string; project_id: string; report_id: string | null; activity_id: string | null; kind: string; storage_path: string; caption: string; mime_type: string; bytes: number; client_visible: boolean; created_at: string; version: number; deleted_at: string | null;
   captured_at?: string | null; gps_lat?: number | string | null; gps_lng?: number | string | null; gps_accuracy_m?: number | string | null; gps_altitude_m?: number | string | null; gps_heading?: number | string | null; gps_captured_at?: string | null; gps_status?: string | null;
   work_area?: string | null; location_detail?: string | null; pair_id?: string | null; photo_ref?: string | null; gps_source?: string | null;
+  cover_category?: string | null; is_cover?: boolean | null; cover_order?: number | null; cover_primary?: boolean | null;
 }
 
 const num = (v: unknown) => (v == null || v === '' ? 0 : Number(v));
@@ -44,7 +45,7 @@ export const reportFromDb = (r: DbReport): FieldReport => ({ id: r.id, projectId
 export const boqFromDb = (b: DbBoq): BoqLine => ({ id: b.id, projectId: b.project_id, item: b.item, description: b.description, category: b.category as BoqLine['category'], unit: b.unit, qty: num(b.qty), unitCost: num(b.unit_cost) });
 export const costFromDb = (c: DbCost): CostSettings => ({ overheadPct: num(c.overhead_pct), contingencyPct: num(c.contingency_pct), insurancePct: num(c.insurance_pct), bondPct: num(c.bond_pct), warrantyPct: num(c.warranty_pct), markupPct: num(c.markup_pct), vatPct: num(c.vat_pct), vatMode: c.vat_mode === 'exempt' ? 'exempt' : 'exclusive' });
 export const quoteFromDb = (q: DbQuote): Quotation => ({ projectId: q.project_id, number: q.number, status: q.status as Quotation['status'], validityDays: q.validity_days, terms: q.terms, approvedBy: q.approved_by, approvedAt: q.approved_at, issuedAt: q.issued_at, approvedTotal: q.approved_total == null ? null : num(q.approved_total), history: q.history ?? [] });
-const KIND_FROM_DB: Record<string, Evidence['kind']> = { before: 'Before', after: 'After', during: 'During', inspection: 'Inspection', safety: 'Safety', defect: 'Defect' };
+const KIND_FROM_DB: Record<string, Evidence['kind']> = { before: 'Before', after: 'After', during: 'During', inspection: 'Inspection', safety: 'Safety', defect: 'Defect', reference: 'Reference' };
 export const evidenceFromDb = (f: DbAttachment): Evidence => {
   const lat = optNum(f.gps_lat), lng = optNum(f.gps_lng);
   return {
@@ -53,6 +54,7 @@ export const evidenceFromDb = (f: DbAttachment): Evidence => {
     gps: lat != null && lng != null ? { lat, lng, accuracy: optNum(f.gps_accuracy_m), altitude: optNum(f.gps_altitude_m), heading: optNum(f.gps_heading), at: f.gps_captured_at ?? f.captured_at ?? f.created_at } : null,
     gpsStatus: (f.gps_status as Evidence['gpsStatus']) ?? 'not_requested',
     gpsSource: (f.gps_source as Evidence['gpsSource']) ?? (f.gps_status === 'manual' ? 'manual' : null),
+    coverCategory: (f.cover_category as Evidence['coverCategory']) ?? null, isCover: !!f.is_cover, coverOrder: f.cover_order ?? null, coverPrimary: !!f.cover_primary,
     workArea: f.work_area ?? '', locationDetail: f.location_detail ?? '', pairId: f.pair_id ?? null, ref: f.photo_ref ?? '',
   };
 };
@@ -81,6 +83,7 @@ export const evidenceToDb = (e: Evidence) => {
     gps_accuracy_m: located ? e.gps!.accuracy ?? null : null, gps_altitude_m: located ? e.gps!.altitude ?? null : null,
     gps_heading: located ? e.gps!.heading ?? null : null, gps_captured_at: located ? e.gps!.at : null,
     gps_source: located ? (status === 'manual' ? 'manual' : e.gpsSource ?? null) : null,
+    cover_category: e.coverCategory ?? null, is_cover: !!e.isCover, cover_order: e.isCover ? e.coverOrder ?? null : null, cover_primary: !!(e.isCover && e.coverPrimary),
     work_area: e.workArea ?? '', location_detail: e.locationDetail ?? '', pair_id: e.pairId ?? null, photo_ref: e.ref ?? '',
   };
 };

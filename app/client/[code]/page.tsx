@@ -5,6 +5,8 @@ import type { ClientView } from '@/lib/cloud/clientView';
 import { fmtDate, fmtPct } from '@/lib/format';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
 import EvidenceReportPanel from '@/components/EvidenceReportPanel';
+import ProjectReportPanel from '@/components/ProjectReportPanel';
+import { coverPhotos } from '@/lib/coverPhotos';
 import { COMPANY } from '@/lib/evidenceReport';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
 import { gpsSourceLabel } from '@/lib/geo';
@@ -187,6 +189,35 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
                 }}
               />
             )}
+            <ProjectReportPanel
+              note="Contains only information NEAS has approved for you."
+              load={async (id) => {
+                const url = view.files?.find((f) => f.id === id)?.url;
+                const r = url ? await fetch(url) : null;
+                return r?.ok ? r.blob() : null;
+              }}
+              input={(asOf) => {
+                const files = (view.files ?? []).filter((f) => f.mime.startsWith('image/') && f.url);
+                const acts = (view.gantt ?? []).map((g) => ({ id: g.id, projectId: view.project.code, name: g.name, start: g.start, end: g.end, weight: g.weight }));
+                return {
+                  audience: 'client' as const, generatedAt: new Date(), preparedBy: `${COMPANY} (client portal copy)`, asOf: view.asOf <= asOf ? view.asOf : asOf,
+                  project: { code: view.project.code, name: view.project.name, client: view.project.client, site: view.project.site, referenceNo: view.project.reference_no, status: view.project.status, startDate: view.project.start_date, endDate: view.project.end_date },
+                  activities: acts,
+                  reports: (view.gantt ?? []).map((g) => ({ id: `g-${g.id}`, projectId: view.project.code, activityId: g.id, date: view.asOf, actualPct: g.actual, notes: '', createdAt: view.generatedAt, status: 'approved' as const })),
+                  series: view.scurve ?? [], overall: view.progress ?? null,
+                  cover: coverPhotos(files.map((f) => ({ ...f, takenAt: f.capturedAt ?? f.createdAt }))).map((f) => ({
+                    id: f.id, caption: f.caption, category: f.coverCategory, ref: f.ref, workArea: f.workArea, location: f.location,
+                    lat: f.gps?.lat ?? null, lng: f.gps?.lng ?? null, accuracy: f.gps?.accuracy ?? null, source: (f.gps?.source ?? null) as GpsSource | null, status: f.gps?.status ?? null,
+                    takenAt: f.capturedAt ?? f.createdAt, uploadedAt: f.createdAt,
+                  })),
+                  evidence: files.filter((f) => !f.isCover && f.kind !== 'reference').map((f) => ({
+                    id: f.id, kind: f.kind, caption: f.caption, takenAt: f.capturedAt ?? f.createdAt, ref: f.ref, activity: f.activity, workArea: f.workArea, location: f.location, pairId: f.pairId,
+                    gps: f.gps ? `${f.gps.lat.toFixed(6)}, ${f.gps.lng.toFixed(6)}${f.gps.accuracy != null ? ` ±${Math.round(f.gps.accuracy)} m` : ''}` : undefined,
+                    gpsSource: f.gps ? gpsSourceLabel(f.gps.source as GpsSource | null, f.gps.status as GpsStatus) : undefined,
+                  })),
+                };
+              }}
+            />
             <p className="note" style={{ textAlign: 'center' }}>Read-only view · session ends {new Date(view.sessionExpiresAt).toLocaleString()}</p>
           </>
         )}

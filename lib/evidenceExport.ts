@@ -12,7 +12,7 @@ const NAVY = '071D29', GOLD = 'CA9332', GOLD_SOFT = 'EBC07E', INK = '0B1F2A', MU
 const rgb = (hex: string) => [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 
 /** Decode, orient and downscale a photo to a JPEG data URL (max 1600 px) so large collections stay small. */
-async function toImage(blob: Blob, max = 1600): Promise<ReportImage> {
+export async function toImage(blob: Blob, max = 1600): Promise<ReportImage> {
   const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' } as ImageBitmapOptions);
   const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
@@ -35,7 +35,7 @@ export async function loadImages(report: Report, load: LoadPhoto, onProgress?: (
 }
 
 /** Fit an image into a box, keeping its aspect ratio and centring it. */
-const fit = (img: ReportImage, w: number, h: number) => {
+export const fit = (img: ReportImage, w: number, h: number) => {
   const k = Math.min(w / img.w, h / img.h);
   return { w: img.w * k, h: img.h * k, dx: (w - img.w * k) / 2, dy: (h - img.h * k) / 2 };
 };
@@ -58,15 +58,21 @@ export function pdfSafe(s: string): string {
     .replace(/[^\u0009\u000A -~ -ÿ]/g, (c) => (WIN_ANSI_EXTRA.includes(c) ? c : c.normalize('NFKD').replace(/[^ -~]/g, '') || '?'));
 }
 
+/** Route every text call of a jsPDF document through pdfSafe. */
+export function makePdfSafe(pdf: { text: unknown; splitTextToSize: unknown }) {
+  const p = pdf as { text: (...a: unknown[]) => unknown; splitTextToSize: (...a: unknown[]) => string[] };
+  const text = p.text.bind(p), split = p.splitTextToSize.bind(p);
+  p.text = (t: unknown, ...rest: unknown[]) => text(Array.isArray(t) ? t.map((x) => pdfSafe(String(x))) : pdfSafe(String(t)), ...rest);
+  p.splitTextToSize = (t: unknown, ...rest: unknown[]) => split(pdfSafe(String(t)), ...rest);
+}
+
 // ---------------------------------------------------------------- PDF (A4 portrait)
 async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   // the built-in PDF fonts only cover WinAnsi; other characters (non-breaking or zero-width spaces,
   // fancy dashes, CJK…) otherwise turn a whole line into garbled UTF-16, so map or replace them
-  const text = pdf.text.bind(pdf), split = pdf.splitTextToSize.bind(pdf);
-  pdf.text = ((t: string | string[], ...rest: unknown[]) => (text as (...a: unknown[]) => unknown)(Array.isArray(t) ? t.map(pdfSafe) : pdfSafe(t), ...rest)) as typeof pdf.text;
-  pdf.splitTextToSize = ((t: string, ...rest: unknown[]) => (split as (...a: unknown[]) => string[])(pdfSafe(t), ...rest)) as typeof pdf.splitTextToSize;
+  makePdfSafe(pdf);
   const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight(), M = 40;
   const band = (sub: string) => {
     pdf.setFillColor(...rgb(NAVY)); pdf.rect(0, 0, W, 54, 'F');

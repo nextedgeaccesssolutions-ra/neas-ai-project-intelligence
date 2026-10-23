@@ -131,7 +131,17 @@ export interface Quotation {
   history: { at: string; action: string; by: string }[];
 }
 
-export type EvidenceKind = 'Before' | 'During' | 'After' | 'Inspection' | 'Safety' | 'Defect';
+export type EvidenceKind = 'Before' | 'During' | 'After' | 'Inspection' | 'Safety' | 'Defect' | 'Reference';
+/** building / site reference photo categories for the report cover */
+export type CoverCategory = 'main_building' | 'site_overview' | 'exterior' | 'entrance' | 'roof_work_area' | 'other';
+export const COVER_CATEGORIES: { value: CoverCategory; label: string }[] = [
+  { value: 'main_building', label: 'Main building / structure' },
+  { value: 'site_overview', label: 'Overall project site' },
+  { value: 'exterior', label: 'Building exterior / elevation' },
+  { value: 'entrance', label: 'Entrance / site identification' },
+  { value: 'roof_work_area', label: 'Roof deck / work area' },
+  { value: 'other', label: 'Other site reference' },
+];
 /** How the location was obtained: never invented; "manual" is typed in by a person. */
 export type GpsStatus = 'captured' | 'manual' | 'unavailable' | 'denied' | 'not_requested';
 export interface GpsFix {
@@ -168,6 +178,11 @@ export interface Evidence {
   pairId?: string | null;
   /** human-readable photo reference, e.g. BEF-20261023-1A2B */
   ref?: string;
+  /** report cover: category, whether it is on the cover, its order and the primary cover photo */
+  coverCategory?: CoverCategory | null;
+  isCover?: boolean;
+  coverOrder?: number | null;
+  coverPrimary?: boolean;
 }
 
 export interface AppState {

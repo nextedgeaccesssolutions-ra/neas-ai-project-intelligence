@@ -17,12 +17,14 @@ export interface SnapshotInput {
     /** present only when the project lets clients see photo locations */
     gps_lat?: number | string | null; gps_lng?: number | string | null; gps_accuracy_m?: number | string | null; gps_captured_at?: string | null;
     gps_status?: string | null; gps_source?: string | null; location_detail?: string | null;
+    is_cover?: boolean | null; cover_category?: string | null; cover_order?: number | null; cover_primary?: boolean | null;
   }[];
 }
 
 export interface ClientFile {
   id: string; kind: string; caption: string; mime: string; url: string | null; createdAt: string;
   capturedAt: string | null; ref: string; workArea: string; location: string; activity: string; pairId: string | null;
+  isCover: boolean; coverCategory: string | null; coverOrder: number | null; coverPrimary: boolean;
   gps: { lat: number; lng: number; accuracy: number | null; at: string | null; status: string; source: string | null } | null;
 }
 
@@ -63,6 +65,7 @@ export function buildClientView(s: SnapshotInput, asOf: string, signed: Record<s
       return {
         id: f.id, kind: f.kind, caption: f.caption, mime: f.mime_type, url: signed[f.storage_path] ?? null, createdAt: f.created_at,
         capturedAt: f.captured_at ?? null, ref: f.photo_ref ?? '', workArea: f.work_area ?? '', location: f.location_detail ?? '', activity: f.activity ?? '', pairId: f.pair_id ?? null,
+        isCover: !!f.is_cover, coverCategory: f.cover_category ?? null, coverOrder: f.cover_order ?? null, coverPrimary: !!f.cover_primary,
         gps: lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
           ? { lat, lng, accuracy: f.gps_accuracy_m == null ? null : Number(f.gps_accuracy_m), at: f.gps_captured_at ?? null, status: f.gps_status ?? 'captured', source: f.gps_source ?? null }
           : null,

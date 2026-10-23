@@ -61,6 +61,7 @@ export const canView = (view: ViewKey | null, profile: Profile | null = status.p
 // ---------------------------------------------------------------------------
 type Versions = Record<string, { id: string; version: number }>;
 let versions: Versions = {};
+let lastNudge = 0;
 let apply: ((s: AppState) => void) | null = null;
 let read: (() => AppState) | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -290,6 +291,8 @@ export async function syncNow(): Promise<void> {
     await setMeta('versions', versions);
     const left = await allOps();
     if (!rep.networkError && !left.some((o) => o.status === 'pending')) await pullAll();
+    // ask the server to refresh the Google Sheet after real changes (it coalesces and skips duplicates)
+    if (rep.applied.length && Date.now() - lastNudge > 120_000) { lastNudge = Date.now(); fetch('/api/integrations/sheets/nudge', { method: 'POST' }).catch(() => undefined); }
     set({ error: rep.networkError ? 'Connection problem. Will retry automatically.' : null, lastSyncAt: new Date().toISOString() });
   } catch (e) {
     set({ error: (e as Error).message });

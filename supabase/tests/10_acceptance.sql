@@ -284,6 +284,7 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 90_schedule_engine.sql
 \ir 91_activity_stops.sql
 \ir 92_evidence_locations.sql
+\ir 93_project_cover_reports.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

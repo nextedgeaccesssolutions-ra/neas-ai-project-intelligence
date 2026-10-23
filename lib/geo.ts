@@ -122,7 +122,7 @@ export function gpsLabel(e: Pick<Evidence, 'gps' | 'gpsStatus'>): string {
   }
 }
 
-const KIND_CODE: Record<Evidence['kind'], string> = { Before: 'BEF', After: 'AFT', During: 'DUR', Inspection: 'INS', Safety: 'SAF', Defect: 'DEF' };
+const KIND_CODE: Record<Evidence['kind'], string> = { Before: 'BEF', After: 'AFT', During: 'DUR', Inspection: 'INS', Safety: 'SAF', Defect: 'DEF', Reference: 'REF' };
 /** Photo reference such as BEF-20261023-1A2B (local capture date, suffix from the record id). */
 export function photoRef(kind: Evidence['kind'], takenAt: string, id: string) {
   const d = new Date(takenAt);
