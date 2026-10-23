@@ -1,4 +1,5 @@
 'use client';
+import { clientPath } from '@/lib/clientUrl';
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabaseBrowser } from '@/lib/cloud/browser';
@@ -331,7 +332,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                               <h3 className="h3">Links</h3>
                               <div className="kv">
                                 <span className="note">Team URL</span><span><code>/projects/{p.code}</code> <button className="btn btn-sm" onClick={() => copy(`${location.origin}/projects/${p.code}`)}>Copy</button></span>
-                                <span className="note">Client URL</span><span><code>/client/{p.code}</code> <button className="btn btn-sm" onClick={() => copy(`${location.origin}/client/${p.code}`)}>Copy</button></span>
+                                <span className="note">Client URL</span><span><code>{clientPath(p)}</code> <button className="btn btn-sm" onClick={() => copy(`${location.origin}${clientPath(p)}`)}>Copy</button></span>
                               </div>
                               <p className="note">A link never grants access by itself: team members must be assigned above, and clients need a valid passcode.</p>
                             </div>
@@ -975,13 +976,13 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <div className="field">Client portal
             <button className={`btn ${p?.client_portal_enabled ? 'btn-danger' : 'btn-primary'}`} onClick={toggleEnabled}>{p?.client_portal_enabled ? 'Turn off client viewing' : 'Turn on client viewing'}</button>
           </div>
-          <div className="field">Client URL<code style={{ padding: '10px 0' }}>/client/{p?.code}</code></div>
+          <div className="field">Client URL<code style={{ padding: '10px 0', wordBreak: 'break-all' }}>{p ? clientPath(p) : ''}</code></div>
         </div>
       </section>
 
       {shown && (
         <div className="banner" role="status">
-          <b>New passcode for /client/{p?.code}: </b><code style={{ fontSize: 18, letterSpacing: '.08em' }}>{shown}</code>{' '}
+          <b>New passcode for {p ? clientPath(p) : ''}: </b><code style={{ fontSize: 18, letterSpacing: '.08em' }}>{shown}</code>{' '}
           <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(shown).then(() => notify('Copied.'), () => undefined)}>Copy</button>
           <div className="note">Shown once. Share it with the client by phone or a separate message from the link. It is stored only as a hash.</div>
         </div>
