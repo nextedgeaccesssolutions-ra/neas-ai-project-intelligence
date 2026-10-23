@@ -46,10 +46,27 @@ export async function exportReport(report: Report, format: ReportFormat, images:
   return saveFile(`${report.fileName}.docx`, await toDocx(report, images));
 }
 
+const WIN_ANSI_EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+/** Text the standard PDF fonts can draw: common look-alikes mapped, anything else becomes "?". */
+export function pdfSafe(s: string): string {
+  return s
+    .replace(/[​-‍⁠﻿\u0000-\u0008\u000B-\u001F]/g, '')
+    .replace(/[  -   　]/g, ' ')
+    .replace(/[‐-‒−]/g, '-')
+    .replace(/[′ʼ]/g, "'")
+    .normalize('NFC')
+    .replace(/[^\u0009\u000A -~ -ÿ]/g, (c) => (WIN_ANSI_EXTRA.includes(c) ? c : c.normalize('NFKD').replace(/[^ -~]/g, '') || '?'));
+}
+
 // ---------------------------------------------------------------- PDF (A4 portrait)
 async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  // the built-in PDF fonts only cover WinAnsi; other characters (non-breaking or zero-width spaces,
+  // fancy dashes, CJK…) otherwise turn a whole line into garbled UTF-16, so map or replace them
+  const text = pdf.text.bind(pdf), split = pdf.splitTextToSize.bind(pdf);
+  pdf.text = ((t: string | string[], ...rest: unknown[]) => (text as (...a: unknown[]) => unknown)(Array.isArray(t) ? t.map(pdfSafe) : pdfSafe(t), ...rest)) as typeof pdf.text;
+  pdf.splitTextToSize = ((t: string, ...rest: unknown[]) => (split as (...a: unknown[]) => string[])(pdfSafe(t), ...rest)) as typeof pdf.splitTextToSize;
   const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight(), M = 40;
   const band = (sub: string) => {
     pdf.setFillColor(...rgb(NAVY)); pdf.rect(0, 0, W, 54, 'F');

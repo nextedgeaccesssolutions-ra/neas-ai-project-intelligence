@@ -65,3 +65,11 @@ describe('client portal dates', () => {
     expect(photoCaption(r.photos[0], 'client', undefined, 'uploaded')[2]).toMatch(/^Uploaded /);
   });
 });
+
+import { pdfSafe } from '../lib/evidenceExport';
+describe('PDF text', () => {
+  it('keeps WinAnsi text and replaces characters the PDF fonts cannot draw', () => {
+    expect(pdfSafe('Warehouse 4​ RDC – Cainta ñ “ok”')).toBe('Warehouse 4 RDC – Cainta ñ “ok”');
+    expect(pdfSafe('Façade ‐ Tower Ⅱ 東')).toBe('Façade - Tower II ?');
+  });
+});
