@@ -38,7 +38,7 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'bad_json' }); }
   var ts = Number(body.ts);
   if (!ts || Math.abs(Date.now() - ts) > MAX_SKEW_MS) return json_({ ok: false, error: 'stale' });
-  var expected = hex_(Utilities.computeHmacSha256Signature(ts + '.' + body.payload, secret));
+  var expected = hex_(Utilities.computeHmacSha256Signature(ts + '.' + body.payload, secret, Utilities.Charset.UTF_8));
   if (!safeEqual_(expected, String(body.sig || ''))) return json_({ ok: false, error: 'bad_signature' });
 
   var cache = CacheService.getScriptCache();

@@ -108,7 +108,10 @@ export default function AdminPage() {
           <h1>Control panel</h1>
           <p className="lead">Projects, accounts, approvals, client access and system health. Every action here is recorded in the audit log.</p>
         </div>
-        <button className="btn btn-sm" onClick={() => void load()}>Refresh</button>
+        <div className="form-actions" style={{ marginTop: 0 }}>
+          <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
+          <button className="btn btn-sm" onClick={() => void load()}>Refresh</button>
+        </div>
       </div>
       <nav className="tabbar" aria-label="Control panel sections">
         {TABS.map(([t, label]) => (
@@ -158,7 +161,7 @@ function Overview({ d, go }: { d: { profiles: Profile[]; projects: Project[]; me
   const portfolio = d.projects.map((p) => {
     const acts = state.activities.filter((a) => a.projectId === p.id);
     const reps = state.reports.filter((r) => r.projectId === p.id && (r.status ?? 'approved') === 'approved');
-    const prog = projectProgress(acts, reps, today);
+    const prog = projectProgress(acts, reps, today, (id) => state.calendars?.[id]);
     const cv = Number(p.contract_value ?? 0);
     return { p, planned: prog.planned, actual: prog.actual, pv: (cv * prog.planned) / 100, ev: (cv * prog.actual) / 100, spi: prog.planned > 0 ? prog.actual / prog.planned : null, acts: acts.length };
   });
@@ -926,7 +929,7 @@ const VIS: [string, string][] = [
   ['show_project_register', 'Project register'], ['show_site_evidence', 'Site evidence'],
   ['show_google_sheets', 'Google Sheets setup'], ['show_offline_queue', 'Offline queue'],
   ['show_milestones', 'Approved milestones'], ['show_progress', 'Overall progress %'], ['show_gantt', 'Gantt chart'],
-  ['show_scurve', 'S-curve'], ['show_reports', 'Approved progress reports'], ['show_photos', 'Approved before/after photos'], ['show_documents', 'Approved documents'], ['show_completion', 'Completion status'],
+  ['show_scurve', 'S-curve'], ['show_reports', 'Approved progress reports'], ['show_photos', 'Approved before/after photos'], ['show_photo_locations', 'Photo locations (GPS)'], ['show_documents', 'Approved documents'], ['show_completion', 'Completion status'],
 ];
 
 function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
