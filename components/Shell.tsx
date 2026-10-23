@@ -51,16 +51,17 @@ function SyncPill() {
 }
 
 export const NAV = [
-  { href: '/', label: 'Overview', icon: 'grid' },
-  { href: '/estimating', label: 'Estimating & BOQ', icon: 'list' },
-  { href: '/quotation', label: 'Quotation preview', icon: 'doc' },
-  { href: '/project-management', label: 'Project management', icon: 'gantt' },
-  { href: '/field-reports', label: 'Field reports', icon: 'spark' },
-  { href: '/projects', label: 'Project register', icon: 'table' },
-  { href: '/site-evidence', label: 'Site evidence', icon: 'camera' },
-  { href: '/reports', label: 'Project reports', icon: 'doc' },
-  { href: '/google-sheets', label: 'Google Sheets setup', icon: 'gear' },
+  { href: '/', label: 'Overview', icon: 'grid', group: 'Dashboard' },
+  { href: '/projects', label: 'Project register', icon: 'table', group: 'Projects' },
+  { href: '/project-management', label: 'Schedule & Gantt', icon: 'gantt', group: 'Projects' },
+  { href: '/field-reports', label: 'Field reports', icon: 'spark', group: 'Field operations' },
+  { href: '/site-evidence', label: 'Site evidence', icon: 'camera', group: 'Field operations' },
+  { href: '/reports', label: 'Project reports', icon: 'doc', group: 'Reports' },
+  { href: '/google-sheets', label: 'Google Sheets sync', icon: 'sheet', group: 'Reports' },
+  { href: '/estimating', label: 'Estimating & BOQ', icon: 'list', group: 'Commercial' },
+  { href: '/quotation', label: 'Quotation preview', icon: 'quote', group: 'Commercial' },
 ] as const;
+const GROUPS = ['Dashboard', 'Projects', 'Field operations', 'Reports', 'Commercial'] as const;
 
 function Icon({ name }: { name: string }) {
   const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -72,6 +73,12 @@ function Icon({ name }: { name: string }) {
     spark: <><path d="M12 3v6M12 15v6M3 12h6M15 12h6" {...p} /></>,
     table: <><rect x="3" y="4" width="18" height="16" rx="2" {...p} /><path d="M3 10h18M9 10v10" {...p} /></>,
     camera: <><rect x="3" y="7" width="18" height="13" rx="2" {...p} /><circle cx="12" cy="13.5" r="3.5" {...p} /><path d="M9 7l1.5-3h3L15 7" {...p} /></>,
+    sheet: <><rect x="4" y="3" width="16" height="18" rx="2" {...p} /><path d="M4 9h16M4 15h16M10 3v18" {...p} /></>,
+    quote: <><path d="M6 3h9l4 4v14H6z" {...p} /><path d="M9 13h3m-3 4h7M10 8.5h3" {...p} /></>,
+    sync: <><path d="M20 11a8 8 0 0 0-14-4.9L4 8M4 13a8 8 0 0 0 14 4.9L20 16M4 4v4h4M20 20v-4h-4" {...p} /></>,
+    user: <><circle cx="12" cy="8" r="4" {...p} /><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" {...p} /></>,
+    collapse: <><path d="M15 6l-6 6 6 6" {...p} /></>,
+    expand: <><path d="M9 6l6 6-6 6" {...p} /></>,
     gear: <><circle cx="12" cy="12" r="3" {...p} /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" {...p} /></>,
   };
   return <svg className="ico" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
@@ -102,6 +109,16 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   const { state, persistError, ready, resetDemo } = useStore();
   const cloud = useCloudStatus();
   const [open, setOpen] = useState(false);
+  // desktop: icon-only sidebar, remembered per device
+  const [mini, setMini] = useState(false);
+  useEffect(() => { try { setMini(localStorage.getItem('neas-side-mini') === '1'); } catch { /* per-device convenience */ } }, []);
+  const toggleMini = () => setMini((m) => { try { localStorage.setItem('neas-side-mini', m ? '0' : '1'); } catch { /* ignore */ } return !m; });
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [open]);
   const online = useOnline();
   const current = NAV.find((n) => (n.href === '/' ? pathname === '/' : pathname.startsWith(n.href))) ?? NAV[0];
 
@@ -128,43 +145,63 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   const blocked = CLOUD && !pathname.startsWith('/admin') && !canView(viewOfPath(pathname), cloud.profile);
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
+  const page = pathname.startsWith('/admin') ? { label: 'Control panel', group: 'Administration', href: '/admin' }
+    : pathname.startsWith('/offline-queue') ? { label: 'Offline queue', group: 'System', href: '/offline-queue' } : current;
+  const role = !CLOUD ? 'Device mode' : isAdmin ? 'Super Admin' : canManage(state.activeProjectId) ? 'Project manager' : 'Staff';
+  const link = (href: string, label: string, icon: string, active: boolean) => (
+    <Link key={href} href={href} aria-current={active ? 'page' : undefined} title={mini ? label : undefined} aria-label={mini ? label : undefined}>
+      <Icon name={icon} />
+      <span className="nav-text">{label}</span>
+    </Link>
+  );
+
   return (
-    <div className="shell">
+    <div className={`shell${mini ? ' mini' : ''}`}>
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      {open && <div className="side-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />}
       <aside className={`side${open ? ' open' : ''}`} aria-label="Main navigation">
-        <Link href="/" className="brand">
+        <Link href="/" className="brand" title="NEAS Intelligence · Project Control">
           <img className="brand-mark brand-logo" src="/neas-logo.png" alt="NEAS — NextEdge Access Solutions" width={44} height={44} />
-          <span>
+          <span className="nav-text">
             <div className="brand-name">NEAS INTELLIGENCE</div>
             <div className="brand-sub">PROJECT CONTROL</div>
           </span>
         </Link>
-        <div className="side-label">WORKSPACE</div>
-        <nav className="nav">
-          {nav.map((n) => (
-            <Link key={n.href} href={n.href} aria-current={n.href === current.href && !pathname.startsWith('/admin') && !pathname.startsWith('/offline-queue') ? 'page' : undefined}>
-              <Icon name={n.icon} />
-              {n.label}
-            </Link>
-          ))}
+        <nav className="side-scroll" aria-label="Main">
+          {GROUPS.map((g) => {
+            const items = nav.filter((n) => n.group === g);
+            if (!items.length) return null;
+            return (
+              <div key={g} className="nav-group" role="group" aria-labelledby={`nav-${g.replace(/\W+/g, '-')}`}>
+                <div className="side-label" id={`nav-${g.replace(/\W+/g, '-')}`}>{g.toUpperCase()}</div>
+                <div className="nav">
+                  {items.map((n) => link(n.href, n.label, n.icon, n.href === current.href && page === current))}
+                </div>
+              </div>
+            );
+          })}
           {CLOUD && canView('offline_queue', cloud.profile) && (
-            <Link href="/offline-queue" aria-current={pathname.startsWith('/offline-queue') ? 'page' : undefined}>
-              <Icon name="list" />
-              Offline queue
-            </Link>
+            <div className="nav-group" role="group" aria-labelledby="nav-system">
+              <div className="side-label" id="nav-system">SYSTEM</div>
+              <div className="nav">{link('/offline-queue', 'Offline queue', 'sync', pathname.startsWith('/offline-queue'))}</div>
+            </div>
+          )}
+          {isAdmin && (
+            <div className="nav-group" role="group" aria-labelledby="nav-admin">
+              <div className="side-label" id="nav-admin">ADMINISTRATION</div>
+              <div className="nav">{link('/admin', 'Control panel', 'gear', pathname.startsWith('/admin'))}</div>
+            </div>
           )}
         </nav>
-        {isAdmin && (
-          <>
-            <div className="side-label">ADMINISTRATION</div>
-            <nav className="nav">
-              <Link href="/admin" aria-current={pathname.startsWith('/admin') ? 'page' : undefined}>
-                <Icon name="gear" />
-                Control panel
-              </Link>
-            </nav>
-          </>
+        <button className="side-collapse" onClick={toggleMini} aria-label={mini ? 'Expand sidebar' : 'Collapse sidebar'} title={mini ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <Icon name={mini ? 'expand' : 'collapse'} /><span className="nav-text">Collapse</span>
+        </button>
+        {mini && (
+          <div className="nav side-mini-foot">
+            {link('/account', CLOUD ? 'Your account and sign out' : 'About this preview build', 'user', pathname.startsWith('/account'))}
+          </div>
         )}
-        <div className="side-foot">
+        <div className="side-foot nav-text">
           {CLOUD && cloud.profile ? (
             <>
               <Link href="/account" style={{ color: '#fff', textDecoration: 'none' }}><b>{cloud.profile.full_name || cloud.profile.email}</b></Link>
@@ -183,12 +220,18 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
 
       <div className="main">
         <header className="topbar">
-          <button className="btn btn-sm menu-btn" onClick={() => setOpen((o) => !o)} aria-label="Open menu" aria-expanded={open}>
+          <button className="btn btn-sm menu-btn" onClick={() => setOpen((o) => !o)} aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}>
             ☰
           </button>
-          <div>
-            <div className="crumb">NEAS / Project Intelligence</div>
-            <div className="top-title">{pathname.startsWith('/admin') ? 'Control panel' : pathname.startsWith('/offline-queue') ? 'Offline queue' : current.label}</div>
+          <div style={{ minWidth: 0 }}>
+            <nav className="crumb" aria-label="Breadcrumb">
+              <ol>
+                <li><Link href="/">Dashboard</Link></li>
+                {page.group !== 'Dashboard' && <li>{page.group}</li>}
+                {page.href !== '/' && <li aria-current="page">{page.label}</li>}
+              </ol>
+            </nav>
+            <div className="top-title">{page.label}</div>
           </div>
           <div className="top-right">
             <span className={`pill ${online ? 'pill-ok' : 'pill-warn'}`} title="Network status of this device">
@@ -203,9 +246,15 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
               </span>
             )}
             {CLOUD ? <CloudPill /> : <SyncPill />}
+            {CLOUD && cloud.profile && (
+              <Link href="/account" className="user-chip hide-sm" title="Your account">
+                <span className="user-initial" aria-hidden="true">{(cloud.profile.full_name || cloud.profile.email || '?').trim()[0]?.toUpperCase()}</span>
+                <span><b>{cloud.profile.full_name || cloud.profile.email}</b><small>{role}</small></span>
+              </Link>
+            )}
           </div>
         </header>
-        <main className="content">
+        <main className="content" id="main-content" tabIndex={-1}>
           {blocked ? (
             <section className="card">
               <h2 style={{ marginTop: 0 }}>Not available for your account</h2>
