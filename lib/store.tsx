@@ -6,6 +6,7 @@ import { DEFAULT_COST_SETTINGS } from './types';
 import { emptyState, seedState } from './seed';
 export { emptyState, seedState };
 import { boqTotals } from './calc';
+import { DEFAULT_CALENDAR, type WorkCalendar } from './schedule';
 import { newQuotation, returnToDraft } from './quote';
 import { deletePhoto } from './photos';
 import { initSync, queueSync } from './sheetsSync';
@@ -49,6 +50,8 @@ interface StoreApi {
   costSettingsFor: (projectId: string) => CostSettings;
   quotationFor: (projectId: string) => Quotation;
   setQuotation: (q: Quotation) => void;
+  setCalendar: (projectId: string, c: WorkCalendar) => void;
+  calendarFor: (projectId: string) => WorkCalendar;
   addEvidence: (e: Evidence) => void;
   updateEvidence: (id: string, patch: Partial<Evidence>) => void;
   deleteEvidence: (id: string) => void;
@@ -193,6 +196,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       costSettingsFor,
       quotationFor,
       setQuotation: (q) => update((s) => ({ ...s, quotations: { ...s.quotations, [q.projectId]: q } })),
+      setCalendar: (pid, c) => update((s) => ({ ...s, calendars: { ...s.calendars, [pid]: c } })),
+      calendarFor: (pid) => state.calendars?.[pid] ?? DEFAULT_CALENDAR,
       addEvidence: (e) => update((s) => ({ ...s, evidence: [...s.evidence, e] })),
       updateEvidence: (id, patch) => update((s) => ({ ...s, evidence: s.evidence.map((e) => e.id === id ? { ...e, ...patch } : e) })),
       deleteEvidence: (id) => {

@@ -85,12 +85,14 @@ export function SCurve({ series, asOf }: { series: ProgressPoint[]; asOf: string
   );
 }
 
-/** Gantt: planned bar per activity with an actual-progress bar underneath. */
+/** Gantt: baseline outline, current planned bar, actual dates and progress per activity. */
 export function Gantt({ rows, asOf, actualOf }: { rows: Activity[]; asOf: string; actualOf: (id: string) => number }) {
   const data = useMemo(() => rows.slice().sort((a, b) => a.start.localeCompare(b.start)), [rows]);
   if (!data.length) return <div className="empty">No activities yet.</div>;
-  const start = data.reduce((m, a) => (a.start < m ? a.start : m), data[0].start);
-  const end = addDays(data.reduce((m, a) => (a.end > m ? a.end : m), data[0].end), 1);
+  const lo = (a: Activity) => [a.start, a.baselineStart, a.actualStart].filter(Boolean).sort()[0] as string;
+  const hi = (a: Activity) => [a.end, a.baselineEnd, a.actualFinish].filter(Boolean).sort().reverse()[0] as string;
+  const start = data.reduce((m, a) => (lo(a) < m ? lo(a) : m), lo(data[0]));
+  const end = addDays(data.reduce((m, a) => (hi(a) > m ? hi(a) : m), hi(data[0])), 1);
   const total = Math.max(1, daysBetween(start, end));
   const LW = 260;
   const rowH = 46;
@@ -116,11 +118,17 @@ export function Gantt({ rows, asOf, actualOf }: { rows: Activity[]; asOf: string
           const act = actualOf(a.id);
           return (
             <g key={a.id}>
-              <title>{`${a.name}: ${fmtDate(a.start)} – ${fmtDate(a.end)}, weight ${a.weight}%, actual ${fmtPct(act)}`}</title>
+              <title>{`${a.name}: ${fmtDate(a.start)} – ${fmtDate(a.end)}${a.baselineStart && (a.baselineStart !== a.start || a.baselineEnd !== a.end) ? ` (baseline ${fmtDate(a.baselineStart)} – ${fmtDate(a.baselineEnd ?? a.end)})` : ''}${a.actualStart ? `, actual from ${fmtDate(a.actualStart)}` : ''}, weight ${a.weight}%, actual ${fmtPct(act)}`}</title>
               <text x={0} y={y0 + 15} fontSize="13" fill="#0b1f2a">{clip(a.name)}</text>
               <text x={0} y={y0 + 31} fontSize="11" fill="#5d6f7b">Actual {fmtPct(act)} · weight {a.weight}%</text>
               <rect x={LW} y={y0 + 4} width={W - LW - 10} height={18} rx="4" fill="#f1f4f6" />
               <rect x={xs} y={y0 + 4} width={Math.max(3, xe - xs)} height={18} rx="4" fill="var(--planned-soft)" />
+              {a.baselineStart && a.baselineEnd && (a.baselineStart !== a.start || a.baselineEnd !== a.end) && (
+                <rect x={x(a.baselineStart)} y={y0 + 2} width={Math.max(3, x(addDays(a.baselineEnd, 1)) - x(a.baselineStart))} height={22} rx="4" fill="none" stroke="#5d6f7b" strokeDasharray="3 3">
+                  <title>{`Baseline ${fmtDate(a.baselineStart)} – ${fmtDate(a.baselineEnd)}`}</title>
+                </rect>
+              )}
+              {a.actualStart && <rect x={x(a.actualStart)} y={y0 + 34} width={Math.max(3, x(addDays(a.actualFinish ?? (asOf > a.actualStart ? asOf : a.actualStart), 1)) - x(a.actualStart))} height={3} fill="#0b1f2a" opacity={0.55} />}
               <rect x={xs} y={y0 + 26} width={Math.max(0, ((xe - xs) * act) / 100)} height={5} rx="2.5" fill="var(--gold)" />
             </g>
           );

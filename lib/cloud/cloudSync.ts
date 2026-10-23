@@ -85,6 +85,18 @@ function rememberVersions(b: M.DbBundle) {
   for (const q of b.quotes) versions[vkey('quotations', q.project_id)] = { id: q.id, version: q.version };
 }
 
+// calendar edits not yet accepted by the server (offline or failed); retried on every sync
+const pendingCalendars = new Map<string, import('../schedule').WorkCalendar>();
+async function flushCalendars() {
+  const sb = supabaseBrowser();
+  if (!sb) return;
+  for (const [pid, cal] of pendingCalendars) {
+    const { error } = await sb.from('project_calendars').upsert(M.calendarToDb(pid, cal), { onConflict: 'project_id' });
+    if (!error) pendingCalendars.delete(pid);
+    else set({ error: `Calendar not saved yet (will retry): ${error.message}` });
+  }
+}
+
 /** Load everything this user may see. Records with unsent local changes keep the local copy. */
 export async function pullAll(): Promise<void> {
   const sb = supabaseBrowser();
@@ -103,6 +115,10 @@ export async function pullAll(): Promise<void> {
     if (d.cost_settings) bundle.costs.push(d.cost_settings);
     if (d.quotation) bundle.quotes.push(d.quotation);
   }
+  await flushCalendars();
+  // calendars are optional: before migration 000016 the table does not exist yet
+  const { data: cals } = await sb.from('project_calendars').select('*');
+  bundle.calendars = (cals ?? []) as M.DbCalendar[];
   rememberVersions(bundle);
   await setMeta('versions', versions);
   const server = M.bundleToState(bundle, read());
@@ -118,6 +134,7 @@ export async function pullAll(): Promise<void> {
     reports: keep(server.reports, local.reports),
     boq: keep(server.boq, local.boq),
     evidence: keep(server.evidence, local.evidence),
+    calendars: { ...server.calendars, ...Object.fromEntries(pendingCalendars) },
     userName: status.profile?.full_name || local.userName,
   });
   set({ lastSyncAt: new Date().toISOString(), error: null });
@@ -152,6 +169,14 @@ export async function cloudOnChange(prev: AppState, next: AppState) {
   await queueCollection('project_reports', prev.reports, next.reports.filter((r) => isUuid(r.id)), M.reportToDb);
   await queueCollection('boq_lines', prev.boq, next.boq.filter((b) => isUuid(b.id)), M.boqToDb);
   await queueCollection<Evidence>('report_attachments', prev.evidence, next.evidence.filter((e) => isUuid(e.id)), (e) => M.evidenceToDb({ ...e, storagePath: e.storagePath ?? `${e.projectId}/${e.id}.jpg` }), (e) => ({ blob_key: e.id }));
+  // calendars write straight to the table (online only; PM or Super Admin, enforced by RLS)
+  const sb = supabaseBrowser();
+  for (const [pid, cal] of Object.entries(next.calendars ?? {})) {
+    if (sb && !same(prev.calendars?.[pid], cal)) {
+      pendingCalendars.set(pid, cal);
+      await flushCalendars();
+    }
+  }
   for (const pid of new Set([...Object.keys(next.costSettings), ...Object.keys(prev.costSettings)])) {
     const a = prev.costSettings[pid], b = next.costSettings[pid];
     if (b && !same(a, b)) {

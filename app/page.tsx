@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
@@ -15,10 +15,12 @@ export default function Overview() {
   const { ready, project, state } = useStore();
   const { activities, reports, evidence } = useProjectData();
   const [asOf, setAsOf] = useState<string>(() => todayLocal());
+  const calendars = state.calendars;
+  const calFor = useCallback((pid: string) => calendars?.[pid], [calendars]);
 
-  const series = useMemo(() => sCurve(activities, reports), [activities, reports]);
+  const series = useMemo(() => sCurve(activities, reports, calFor), [activities, reports, calFor]);
   const span = projectSpan(activities);
-  const status = useMemo(() => projectProgress(activities, reports, asOf), [activities, reports, asOf]);
+  const status = useMemo(() => projectProgress(activities, reports, asOf, calFor), [activities, reports, asOf, calFor]);
   const variance = status.actual - status.planned;
   const weight = totalWeight(activities);
 
@@ -104,7 +106,7 @@ export default function Overview() {
           <h2>Project Gantt chart</h2>
           <span className="note">{span ? `${fmtDate(span.start)} — ${fmtDate(span.end)}` : ''}</span>
         </div>
-        <Gantt rows={activities} asOf={asOf} actualOf={(id) => actualPct(id, reports, asOf)} />
+        <Gantt rows={activities} asOf={asOf} actualOf={(id) => actualPct(id, reports, asOf, activities.find((a) => a.id === id))} />
       </section>
 
       <section className="card">
@@ -130,8 +132,8 @@ export default function Overview() {
               </thead>
               <tbody>
                 {activities.map((a) => {
-                  const p = plannedPct(a, asOf);
-                  const act = actualPct(a.id, reports, asOf);
+                  const p = plannedPct(a, asOf, calFor(a.projectId));
+                  const act = actualPct(a.id, reports, asOf, a);
                   return (
                     <tr key={a.id}>
                       <td>{a.name}</td>
