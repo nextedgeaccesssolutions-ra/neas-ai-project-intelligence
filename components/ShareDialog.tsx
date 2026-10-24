@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import { askConfirm, notify } from '@/components/Dialogs';
+import { askPin, isPinRequired, withPin } from '@/components/PinPrompt';
 import { defaultSubject, validEmail } from '@/lib/shareEmail';
 import { fmtDate } from '@/lib/format';
 
@@ -39,7 +40,7 @@ export default function ShareDialog({ projectId, projectCode, projectName, onClo
   }, [onClose]);
 
   const create = async (method: 'link' | 'qr', label: string): Promise<Created | null> => {
-    const { data, error } = await supabaseBrowser()!.rpc('create_report_share', { p_project: projectId, p_method: method, p_days: days, p_label: label });
+    const { data, error } = await withPin(() => supabaseBrowser()!.rpc('create_report_share', { p_project: projectId, p_method: method, p_days: days, p_label: label }));
     if (error || !data) {
       notify(error?.message ?? 'Could not create the link.');
       return null;
@@ -139,6 +140,7 @@ function EmailTab({ projectId, projectCode, projectName, days, onSent }: { proje
     const j = r ? await r.json().catch(() => ({})) : {};
     setBusy(false);
     if (!r) return setResult({ ok: false, text: 'Cannot reach the server. Nothing was sent.' });
+    if (!r.ok && isPinRequired(j.error) && (await askPin())) { setBusy(false); return send(e); }
     if (!r.ok) {
       if (r.status !== 409) key.current = crypto.randomUUID();
       return setResult({ ok: false, text: j.error ?? 'The e-mail was not sent.' });

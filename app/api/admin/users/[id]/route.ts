@@ -5,13 +5,13 @@ import { UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
 
-type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete';
+type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete' | 'set_username' | 'unlock_pin';
 
 export const POST = handle(async (req, { params }) => {
   assertSameOrigin(req);
   if (!UUID_RE.test(params.id)) throw new HttpError(400, 'Invalid user id');
   const { sb, user } = await requireSuperAdmin();
-  const body = await readJson<{ action: Action; reason?: string; hours?: number; fullName?: string; jobTitle?: string }>(req, 4096);
+  const body = await readJson<{ action: Action; reason?: string; hours?: number; fullName?: string; jobTitle?: string; username?: string }>(req, 4096);
   const svc = supabaseService();
   const reason = body.reason?.slice(0, 500) ?? null;
 
@@ -68,6 +68,16 @@ export const POST = handle(async (req, { params }) => {
     case 'make_admin':
     case 'make_staff': {
       const { error } = await sb.rpc('admin_set_global_role', { p_user: params.id, p_role: body.action === 'make_admin' ? 'super_admin' : 'staff' });
+      if (error) throw new HttpError(400, error.message);
+      break;
+    }
+    case 'set_username': {
+      const { error } = await sb.rpc('admin_set_username', { p_user: params.id, p_username: String(body.username ?? '') });
+      if (error) throw new HttpError(error.code === '23505' ? 409 : 400, error.message);
+      break;
+    }
+    case 'unlock_pin': {
+      const { error } = await sb.rpc('admin_unlock_pin', { p_user: params.id });
       if (error) throw new HttpError(400, error.message);
       break;
     }

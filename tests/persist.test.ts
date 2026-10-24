@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestPersistentStorage, unsentSummary } from '../lib/offline/persist';
 
 const setStorage = (v: unknown) => Object.defineProperty(globalThis, 'navigator', { value: { storage: v }, configurable: true });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe('persistent storage', () => {
   it('reports already persisted storage without asking again', async () => {

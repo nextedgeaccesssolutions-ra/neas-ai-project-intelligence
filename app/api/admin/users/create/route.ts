@@ -1,5 +1,5 @@
 import { assertSameOrigin, handle, HttpError, readJson, requireSuperAdmin, supabaseService } from '@/lib/cloud/server';
-import { checkEmail, checkName, UUID_RE } from '@/lib/cloud/validate';
+import { checkEmail, checkName, checkUsername, normaliseUsername, UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +8,12 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req) => {
   assertSameOrigin(req);
   const { sb } = await requireSuperAdmin();
-  const body = await readJson<{ fullName?: string; email?: string; projectId?: string; role?: string; hours?: number }>(req, 4096);
+  // check the PIN re-check before creating anything, so a prompt never leaves a half-made account
+  const { error: pinErr } = await sb.rpc('require_reauth');
+  if (pinErr) throw new HttpError(403, pinErr.message);
+  const body = await readJson<{ fullName?: string; email?: string; username?: string; projectId?: string; role?: string; hours?: number }>(req, 4096);
+  const username = normaliseUsername(body.username ?? '');
+  if (username && !checkUsername(username)) throw new HttpError(400, 'Usernames are 3 to 32 lowercase letters, numbers, dots or dashes.');
   const n = checkName(body.fullName ?? '');
   if (!n.ok) throw new HttpError(400, n.error);
   const e = checkEmail(body.email ?? '');
@@ -25,6 +30,10 @@ export const POST = handle(async (req) => {
   // approval and code go through the admin's own session, so the database checks Super Admin rights and audits them
   const { error: apErr } = await sb.rpc('admin_review_registration', { p_user: id, p_approve: true, p_reason: null });
   if (apErr && !/No pending registration/.test(apErr.message)) throw new HttpError(400, apErr.message);
+  if (username) {
+    const { error: uErr } = await sb.rpc('admin_set_username', { p_user: id, p_username: username });
+    if (uErr) throw new HttpError(409, `Account created, but the username was not saved: ${uErr.message}. Set it in the User directory.`);
+  }
   if (body.projectId) {
     const { error: mErr } = await sb.from('project_memberships').upsert({ project_id: body.projectId, user_id: id, role, can_approve_reports: role === 'project_manager' });
     if (mErr) throw new HttpError(400, mErr.message);

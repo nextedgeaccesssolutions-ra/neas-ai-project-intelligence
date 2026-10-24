@@ -44,6 +44,8 @@ insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) value
 
 -- bootstrap: the first Super Admin is promoted by the database owner (documented in the manual)
 update neas.profiles set global_role = 'super_admin', status = 'active', approved_at = now() where email = 'admin@neas.test';
+-- the earlier suites test business rules, not the PIN re-check: treat every test account as recently re-checked
+update neas.profiles set reauth_at = now() + interval '7 days';
 
 select test.check('registration: new sign-ups start as pending', (select count(*) = 4 from neas.profiles where status = 'pending'));
 select test.check('registration: each sign-up creates a registration request', (select count(*) = (select count(*) from auth.users) from neas.registration_requests where status = 'pending'));
@@ -289,6 +291,7 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 95_report_sharing.sql
 \ir 96_view_organization.sql
 \ir 97_p0_hardening.sql
+\ir 98_pin_login.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

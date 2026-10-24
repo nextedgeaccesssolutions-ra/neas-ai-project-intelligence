@@ -10,6 +10,7 @@ import { projectProgress, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPHP, fmtPct } from '@/lib/format';
 import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
+import { askPin, isPinRequired, withPin } from '@/components/PinPrompt';
 import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
@@ -18,7 +19,7 @@ const TABS: [Tab, string][] = [
   ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['recovery', 'Data recovery'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
@@ -28,9 +29,11 @@ interface IntLog { id: number; at: string; status: string; rows_written: number;
 interface Content { project_id: string; [k: string]: unknown }
 
 const sb = () => supabaseBrowser()!;
-const api = async (url: string, body: unknown) => {
+const api = async (url: string, body: unknown, retried = false): Promise<{ message?: string }> => {
   const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
+  // sensitive changes need the PIN again: ask once, then retry
+  if (!r.ok && !retried && isPinRequired(j.error) && (await askPin())) return api(url, body, true);
   if (!r.ok) throw new Error(j.error ?? 'Request failed');
   return j as { message?: string };
 };
@@ -261,7 +264,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   const addMember = async (p: Project, userId: string, role: string) => {
     if (!userId) return;
-    const { error } = await sb().from('project_memberships').upsert({ project_id: p.id, user_id: userId, role, can_approve_reports: role === 'project_manager' });
+    const { error } = await withPin(() => sb().from('project_memberships').upsert({ project_id: p.id, user_id: userId, role, can_approve_reports: role === 'project_manager' }));
     if (error) return notify(error.message);
     await reload();
   };
@@ -423,6 +426,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editTitle, setEditTitle] = useState('');
+  const [editUser, setEditUser] = useState('');
   const [saving, setSaving] = useState(false);
   const [sort, setSort] = useState<'name' | 'status' | 'role' | 'last_login' | 'created'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -456,13 +460,14 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     }
   };
 
-  const startEdit = (u: Profile) => { setEditing(u.id); setEditName(u.full_name); setEditTitle(u.job_title ?? ''); setOpen(null); };
+  const startEdit = (u: Profile) => { setEditing(u.id); setEditName(u.full_name); setEditTitle(u.job_title ?? ''); setEditUser(u.username ?? ''); setOpen(null); };
   const saveEdit = async (u: Profile) => {
     const n = checkName(editName);
     if (!n.ok) return notify(n.error);
     setSaving(true);
     try {
       await api(`/api/admin/users/${u.id}`, { action: 'update_profile', fullName: n.name, jobTitle: editTitle.trim() });
+      if (editUser.trim().toLowerCase() !== (u.username ?? '')) await api(`/api/admin/users/${u.id}`, { action: 'set_username', username: editUser.trim().toLowerCase() });
       notify('Saved. Recorded in the audit log.');
       setEditing(null);
       await reload();
@@ -569,7 +574,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                         </div>
                       </div>
                     </td>
-                    <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.status_reason && <div className="note">{u.status_reason}</div>}</td>
+                    <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.pin_locked_at && <> <span className="pill pill-bad">PIN locked</span></>}{u.status_reason && <div className="note">{u.status_reason}</div>}{u.username && <div className="note">@{u.username}</div>}</td>
                     <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
                     <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
@@ -589,8 +594,10 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                         <div className="form-grid">
                           <label className="field">Full name<input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={120} autoFocus /></label>
                           <label className="field">Job title<input className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={120} placeholder="e.g. Rope access technician" /></label>
+                          <label className="field">Username (for PIN sign-in)<input className="input" value={editUser} onChange={(e) => setEditUser(e.target.value)} maxLength={32} autoCapitalize="none" spellCheck={false} placeholder="e.g. j.granaderos" /></label>
                         </div>
-                        <p className="note">E-mail cannot be changed here; the person signs in with it.</p>
+                        <p className="note">Usernames are 3–32 lowercase letters, numbers, dots or dashes. After setting one, issue a one-time code: the person uses it on the activation page to choose their own 6-digit PIN. E-mail cannot be changed here.</p>
+                        {u.pin_locked_at && <p className="bad">Locked after repeated wrong PINs since {new Date(u.pin_locked_at).toLocaleString()}. <button className="btn btn-sm" onClick={async () => { try { await api(`/api/admin/users/${u.id}`, { action: 'unlock_pin' }); notify('Unlocked. Recorded in the audit log.'); await reload(); } catch (e) { notify((e as Error).message); } }}>Unlock</button></p>}
                         <div className="form-actions">
                           <button className="btn btn-primary" onClick={() => saveEdit(u)} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
                           <button className="btn" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
@@ -633,7 +640,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
   const [saving, setSaving] = useState(false);
   const save = async (next: string[] | null) => {
     setSaving(true);
-    const { error } = await sb().rpc('admin_set_views', { p_user: u.id, p_views: next });
+    const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: next }));
     setSaving(false);
     if (error) return notify(error.message);
     notify(next === null ? 'All modules allowed.' : 'Module access saved. It applies on their next page load.');
@@ -692,7 +699,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
   const log = d.audit.filter((a) => a.target_id === u.id || a.actor_id === u.id).slice(0, 40);
 
   const setMember = async (projectId: string, role: string, canApprove: boolean) => {
-    const { error } = await sb().from('project_memberships').upsert({ project_id: projectId, user_id: u.id, role, can_approve_reports: role === 'project_manager' || canApprove });
+    const { error } = await withPin(() => sb().from('project_memberships').upsert({ project_id: projectId, user_id: u.id, role, can_approve_reports: role === 'project_manager' || canApprove }));
     if (error) return notify(error.message);
     await reload();
   };
@@ -953,14 +960,14 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
     if (!p) return;
     if (rotate && !(await askConfirm('Rotate the passcode? All current client passcodes and sessions for this project stop working.'))) return;
     const expires = days ? new Date(Date.now() + Number(days) * 864e5).toISOString() : null;
-    const { data, error } = await sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate, p_one_time: oneTime });
+    const { data, error } = await withPin(() => sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate, p_one_time: oneTime }));
     if (error) return notify(error.message);
     setShown(String(data));
     await reload();
   };
   const revoke = async (c: Cred) => {
     if (!(await askConfirm(`Revoke “${c.label}”? Clients using it are signed out.`))) return;
-    const { error } = await sb().rpc('admin_revoke_client_passcode', { p_credential: c.id });
+    const { error } = await withPin(() => sb().rpc('admin_revoke_client_passcode', { p_credential: c.id }));
     if (error) return notify(error.message);
     await reload();
   };
