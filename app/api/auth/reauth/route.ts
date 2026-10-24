@@ -18,7 +18,9 @@ export const POST = handle(async (req) => {
   if (secret.length < 6 || secret.length > 128) throw new HttpError(400, 'Enter your PIN.');
   const svc = supabaseService();
   const { data: me } = await svc.from('profiles').select('username, email').eq('id', user.id).single();
-  const key = (me?.username as string | null) ?? `id:${user.id}`;
+  // its own counter (needs a live session to reach), so locking a username on the sign-in screen
+  // can never stop a signed-in Super Admin from confirming an unlock
+  const key = `id:${user.id}`;
   const ip = ipHash(req);
 
   const { data: begin } = await svc.rpc('pin_login_begin', { p_username: key, p_ip_hash: ip });

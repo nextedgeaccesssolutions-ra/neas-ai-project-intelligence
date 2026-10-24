@@ -1,16 +1,18 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
+import { HttpError } from './server';
 
 // A 6-digit PIN is never stored or sent to Supabase Auth as the password itself. The password is
 // derived on the server from the PIN with a server-only key, so guessing PINs directly against
 // Supabase's sign-in endpoint (skipping our lockout) is useless without that key.
-// PIN_PEPPER can be set explicitly; otherwise a key is derived (HMAC, domain-separated) from the
-// server-only service-role key. Changing either invalidates every PIN (people set a new one with a code).
+// Set PIN_PEPPER (32+ random characters) in the server environment before PINs are issued. Without it a
+// key is derived from the service-role key, so ROTATING THAT KEY WOULD INVALIDATE EVERY PIN. Changing
+// PIN_PEPPER also invalidates every PIN: everyone then sets a new one with a one-time code.
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 const PEPPER = process.env.PIN_PEPPER || (SERVICE_ROLE_KEY ? createHmac('sha256', SERVICE_ROLE_KEY).update('neas:pin-pepper:v1').digest('hex') : '');
 
 export function pinPassword(userId: string, pin: string): string {
-  if (!PEPPER) throw new Error('PIN sign-in is not configured on the server');
+  if (!PEPPER) throw new HttpError(503, 'PIN sign-in is not configured on the server. Ask your NEAS administrator.');
   return `p1.${createHmac('sha256', PEPPER).update(`neas-pin:v1:${userId}:${pin}`).digest('base64url')}`;
 }
 

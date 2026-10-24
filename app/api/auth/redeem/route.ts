@@ -40,6 +40,10 @@ export const POST = handle(async (req) => {
   // a PIN is stored as a long password derived on the server (lib/cloud/pin.ts), never as the 6 digits
   const { error: upd } = await svc.auth.admin.updateUserById(row.user_id, { password: usingPin ? pinPassword(row.user_id, body.pin!) : body.password!, email_confirm: true });
   if (upd) throw new HttpError(500, 'Your code was accepted but it could not be saved. Ask your administrator for a new code.');
-  if (usingPin) await svc.from('profiles').update({ pin_locked_at: null }).eq('id', row.user_id);
+  if (usingPin) {
+    // a new PIN starts with a clean slate: clear the lock and the earlier wrong attempts
+    await svc.from('profiles').update({ pin_locked_at: null }).eq('id', row.user_id);
+    await svc.from('pin_login_attempts').delete().eq('username', normaliseUsername(body.username ?? '')).eq('ok', false);
+  }
   return Response.json({ ok: true });
 });
