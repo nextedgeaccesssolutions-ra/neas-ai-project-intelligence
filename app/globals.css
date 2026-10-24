@@ -474,3 +474,7 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
 .group-row td { background: var(--bg); padding: 0; }
 .group-toggle { width: 100%; text-align: left; background: none; border: 0; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
 .group-toggle:hover { background: rgba(202, 147, 50, .08); }
+.filters .input { min-width: 0; max-width: 100%; }
+.report-tbl td.clip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-tbl .nowrap { white-space: nowrap; }
+.report-tbl .row-actions { white-space: nowrap; }

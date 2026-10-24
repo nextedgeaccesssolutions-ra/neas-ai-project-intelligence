@@ -40,11 +40,14 @@ export default function GlobalReports() {
   const [fProject, setFProject] = useState('');
   const [sort, setSort] = useState<{ key: 'createdAt' | 'updatedAt' | 'projectCode' | 'status'; dir: 1 | -1 }>({ key: 'createdAt', dir: -1 });
   const [page, setPage] = useState(0);
+  const [groupBy, setGroupBy] = useState<'' | 'project' | 'day' | 'kind' | 'status'>('project');
+  const [openGroups, setOpenGroups] = useState<Set<string> | null>(null);
   const [share, setShare] = useState<{ id: string; code: string; name: string } | null>(null);
   const [reload, setReload] = useState(0);
 
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim().toLowerCase()), 250); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { setPage(0); }, [debounced, fKind, fStatus, fProject, sort]);
+  useEffect(() => { setPage(0); }, [debounced, fKind, fStatus, fProject, sort, groupBy]);
+  useEffect(() => { setOpenGroups(null); }, [groupBy]);
 
   useEffect(() => {
     if (!CLOUD) {
@@ -95,6 +98,46 @@ export default function GlobalReports() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const pg = Math.min(page, pages - 1);
   const shownShares = (pid: string) => shares.filter((s) => s.project_id === pid && !s.revoked_at && Date.parse(s.expires_at) > Date.now()).length;
+
+  const groupKey = (r: ReportRow): [string, string] =>
+    groupBy === 'project' ? [r.projectId, [r.projectCode !== '—' ? r.projectCode : '', proj.get(r.projectId)?.name ?? ''].filter(Boolean).join(' · ') || 'No project']
+      : groupBy === 'day' ? [localDay(r.createdAt), fmtDate(localDay(r.createdAt))]
+      : groupBy === 'kind' ? [r.kind, KIND_LABEL[r.kind]]
+      : [r.status, STATUS_LABEL[r.status] ?? r.status];
+  const groups: [string, string, ReportRow[]][] = [];
+  if (groupBy) {
+    const m = new Map<string, [string, string, ReportRow[]]>();
+    for (const r of filtered) { const [k, l] = groupKey(r); if (!m.has(k)) m.set(k, [k, l, []]); m.get(k)![2].push(r); }
+    groups.push(...m.values());
+  }
+  // first group open by default; the rest collapse to one line each
+  const groupOpen = (k: string) => (openGroups ? openGroups.has(k) : groups[0]?.[0] === k);
+  const toggleGroup = (k: string) => setOpenGroups((o) => {
+    const n = new Set(o ?? (groups[0] ? [groups[0][0]] : []));
+    if (n.has(k)) n.delete(k); else n.add(k);
+    return n;
+  });
+  const row = (r: ReportRow) => {
+    const p = proj.get(r.projectId);
+    const n = shownShares(r.projectId);
+    return (
+      <tr key={`${r.kind}:${r.id}`}>
+        <td className="mono">{r.ref}</td>
+        <td className="clip" title={r.title}>{r.title}</td>
+        <td className="nowrap">{r.kind === 'field' ? 'Field' : `Project · ${r.format}`}</td>
+        <td className="nowrap" title={p?.name}>{r.projectCode}</td>
+        <td className="clip" title={names.get(r.createdBy ?? '') ?? ''}>{names.get(r.createdBy ?? '') ?? '—'}</td>
+        <td className="note nowrap">{new Date(r.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td>
+        <td><span className={`pill ${r.status === 'approved' ? 'pill-ok' : r.status === 'submitted' || r.status === 'draft' ? 'pill-warn' : r.status === 'rejected' ? 'pill-bad' : ''}`}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
+        <td className="note nowrap" title={n ? `${n} active link(s) for this project` : undefined}>{n ? `${n} link(s)` : '—'}</td>
+        <td className="note nowrap">{fmtDate(localDay(r.updatedAt))}</td>
+        <td className="row-actions">
+          <Link className="btn btn-sm" href={r.kind === 'field' ? '/field-reports' : `/reports?project=${r.projectId}`} onClick={() => setActiveProject(r.projectId)}>View</Link>
+          {CLOUD && p && canManage(r.projectId) && <button className="btn btn-sm" onClick={() => setShare({ id: p.id, code: p.code ?? p.id, name: p.name })}>Share</button>}
+        </td>
+      </tr>
+    );
+  };
 
   const feed: Ev[] = useMemo(() => {
     const who = (id: string | null | undefined) => (id ? names.get(id) ?? null : null);
@@ -186,12 +229,20 @@ export default function GlobalReports() {
       </section>
 
       <section className="card" id="report-library">
-        <div className="card-head"><h2>Report library</h2><span className="note">{filtered.length} of {rows.length} report(s)</span></div>
+        <div className="card-head"><h2>Report library</h2>
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <span className="note">{filtered.length} of {rows.length} report(s){groupBy ? ` in ${groups.length} group(s)` : ''}</span>
+            {groupBy && <><button className="btn btn-sm" onClick={() => setOpenGroups(new Set(groups.map((g) => g[0])))}>Expand all</button><button className="btn btn-sm" onClick={() => setOpenGroups(new Set())}>Collapse all</button></>}
+          </div>
+        </div>
         <div className="filters">
           <input className="input" type="search" placeholder="Search reference, title, project or person" aria-label="Search reports" value={q} onChange={(e) => setQ(e.target.value)} />
           <select className="input" aria-label="Report type" value={fKind} onChange={(e) => setFKind(e.target.value)}><option value="">All types</option><option value="field">Field reports</option><option value="project">Project reports (PDF)</option></select>
           <select className="input" aria-label="Status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">All statuses</option>{Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <select className="input" aria-label="Project" value={fProject} onChange={(e) => setFProject(e.target.value)}><option value="">All projects</option>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.code ?? p.name} · {p.name}</option>)}</select>
+          <select className="input" aria-label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>
+            <option value="project">Group by project</option><option value="day">Group by date</option><option value="kind">Group by type</option><option value="status">Group by status</option><option value="">No grouping</option>
+          </select>
           {(q || fKind || fStatus || fProject) && <button className="btn btn-sm" onClick={() => { setQ(''); setFKind(''); setFStatus(''); setFProject(''); }}>Clear</button>}
         </div>
         {!filtered.length ? <div className="empty">{rows.length ? 'No reports match these filters.' : 'No reports yet. Field reports and generated project reports appear here.'}</div> : (
@@ -200,31 +251,23 @@ export default function GlobalReports() {
               <thead><tr>
                 <th>Reference</th><th>Title</th><th>Type</th><th>{sortBtn('projectCode', 'Project')}</th><th>Created by</th><th>{sortBtn('createdAt', 'Created')}</th><th>{sortBtn('status', 'Status')}</th><th>Sharing</th><th>{sortBtn('updatedAt', 'Updated')}</th><th>Actions</th>
               </tr></thead>
-              <tbody>{filtered.slice(pg * PAGE, (pg + 1) * PAGE).map((r) => {
-                const p = proj.get(r.projectId);
-                const n = shownShares(r.projectId);
+              {groupBy ? groups.map(([key, label, items]) => {
+                const isOpen = groupOpen(key);
                 return (
-                  <tr key={`${r.kind}:${r.id}`}>
-                    <td className="mono">{r.ref}</td>
-                    <td>{r.title}</td>
-                    <td>{KIND_LABEL[r.kind]}{r.kind === 'project' ? ` · ${r.format}` : ''}</td>
-                    <td title={p?.name}>{r.projectCode}</td>
-                    <td>{names.get(r.createdBy ?? '') ?? '—'}</td>
-                    <td className="note">{new Date(r.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td>
-                    <td><span className={`pill ${r.status === 'approved' ? 'pill-ok' : r.status === 'submitted' || r.status === 'draft' ? 'pill-warn' : r.status === 'rejected' ? 'pill-bad' : ''}`}>{STATUS_LABEL[r.status] ?? r.status}</span></td>
-                    <td className="note">{n ? `${n} active link(s) for project` : '—'}</td>
-                    <td className="note">{fmtDate(localDay(r.updatedAt))}</td>
-                    <td className="row-actions">
-                      <Link className="btn btn-sm" href={r.kind === 'field' ? '/field-reports' : `/reports?project=${r.projectId}`} onClick={() => setActiveProject(r.projectId)}>View</Link>
-                      {CLOUD && p && canManage(r.projectId) && <button className="btn btn-sm" onClick={() => setShare({ id: p.id, code: p.code ?? p.id, name: p.name })}>Share</button>}
-                    </td>
-                  </tr>
+                  <tbody key={key}>
+                    <tr className="group-row"><td colSpan={10}>
+                      <button className="group-toggle" aria-expanded={isOpen} onClick={() => toggleGroup(key)}>
+                        <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span> <b>{label}</b><span className="note"> · {items.length} report(s)</span>
+                      </button>
+                    </td></tr>
+                    {isOpen && items.map(row)}
+                  </tbody>
                 );
-              })}</tbody>
+              }) : <tbody>{filtered.slice(pg * PAGE, (pg + 1) * PAGE).map(row)}</tbody>}
             </table>
           </div>
         )}
-        {pages > 1 && (
+        {!groupBy && pages > 1 && (
           <div className="grid-pager">
             <button className="btn btn-sm" disabled={pg === 0} onClick={() => setPage(pg - 1)}>‹ Previous</button>
             <span className="note">Page {pg + 1} of {pages}</span>
