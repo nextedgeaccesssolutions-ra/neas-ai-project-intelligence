@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ClientView } from '@/lib/cloud/clientView';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
 import ClientProjectView from '@/components/ClientProjectView';
+import AuthCard from '@/components/AuthCard';
 
 const cacheKey = (code: string) => `neas-client-cache:${code}`;
 
@@ -70,6 +71,16 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
     setNeedLogin(true);
   };
 
+  if (needLogin && !view) return (
+    <AuthCard eyebrow="Client project view" title={`Project ${code}`} subtitle="Read-only view of the progress, schedule, reports and photos NEAS has approved for you." note="Lost the passcode or it stopped working? Contact your NEAS project manager for a new one.">
+      <form onSubmit={login} className="auth-form">
+        <label className="field">Passcode<input id="client-passcode" className="input" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} placeholder="XXXX-XXXX-XXXX" value={passcode} onChange={(e) => setPasscode(e.target.value)} /></label>
+        {error && <p className="bad" role="alert">{error}</p>}
+        <button className="btn btn-primary" disabled={busy || passcode.replace(/[^A-Za-z0-9]/g, '').length < 8}>{busy ? 'Checking…' : 'View project'}</button>
+      </form>
+    </AuthCard>
+  );
+
   return (
     <div className="client-shell">
       <header className="client-top">
@@ -81,19 +92,6 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
       </header>
 
       <main className="client-main">
-        {needLogin && !view && (
-          <section className="card client-login">
-            <h1>Project {code}</h1>
-            <p className="lead">Enter the passcode NEAS gave you. This is a read-only view of approved project information.</p>
-            <form onSubmit={login} className="auth-form">
-              <label className="field">Passcode<input id="client-passcode" className="input" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} placeholder="XXXX-XXXX-XXXX" value={passcode} onChange={(e) => setPasscode(e.target.value)} /></label>
-              {error && <p className="bad" role="alert">{error}</p>}
-              <button className="btn btn-primary" disabled={busy || passcode.replace(/[^A-Za-z0-9]/g, '').length < 8}>{busy ? 'Checking…' : 'View project'}</button>
-            </form>
-            <p className="note">Lost the passcode or it stopped working? Contact your NEAS project manager for a new one.</p>
-          </section>
-        )}
-
         {!needLogin && !view && <div className="card note">{error ?? 'Loading…'}</div>}
 
         {view && (

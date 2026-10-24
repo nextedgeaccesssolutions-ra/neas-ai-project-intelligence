@@ -77,7 +77,7 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthCard title="Sign in" subtitle="Employees and project managers. Clients use the project link and passcode they were given.">
+    <AuthCard eyebrow="Staff & project managers" title="Secure team sign-in" subtitle="Sign in with your NEAS account to manage projects, field reports and site evidence. Your work stays available offline on this device after you sign in." note="Clients: open the project link from NEAS and enter your passcode instead.">
       <form onSubmit={submit} className="auth-form">
         <label className="field">E-mail<input id="login-email" className="input" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label className="field">Password<input id="login-password" className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
