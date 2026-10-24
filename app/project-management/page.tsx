@@ -5,6 +5,7 @@ import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
+import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { latestReport, plannedPct, todayLocal, totalWeight } from '@/lib/calc';
@@ -72,6 +73,8 @@ export default function ProjectManagement() {
     const a = activities.find((x) => x.id === editParam);
     if (a) setDraft(fromActivity(a, reports));
   }, [editParam, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const o = useOrgList({ list: 'activities', kind: 'activity', items: activities, id: (a) => a.id, project: (a) => a.projectId, noun: 'activity' });
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -320,13 +323,15 @@ export default function ProjectManagement() {
           <h2>Activities ({activities.length})</h2>
           <span className="note">As of today, {fmtDate(today)}; durations in working days</span>
         </div>
-        {activities.length === 0 ? (
-          <div className="empty">No activities yet. Add one above.</div>
+        {activities.length > 0 && o.toolbar}
+        {o.listed.length === 0 ? (
+          <div className="empty">{o.showHidden ? 'You have not hidden any activities.' : 'No activities yet. Add one above.'}</div>
         ) : (
           <div className="table-wrap">
             <table className="tbl">
               <thead>
                 <tr>
+                  <th className="pick-col">{o.headerCheckbox}</th>
                   <th>Activity</th>
                   <th>Baseline</th>
                   <th>Current plan</th>
@@ -345,12 +350,12 @@ export default function ProjectManagement() {
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {activities.map((a) => {
+              {o.tbodies((a) => {
                   const m = scopeMetrics(a, reports, today, calendarOf(cal), stops);
                   const range = (x?: string | null, y?: string | null) => (x ? `${fmtDate(x)} – ${y ? fmtDate(y) : '…'}` : '—');
                   return (
-                    <tr key={a.id} style={draft.id === a.id ? { background: '#fff8ea' } : undefined} title={m.flags.join('\n') || undefined}>
+                    <tr style={draft.id === a.id ? { background: '#fff8ea' } : undefined} title={m.flags.join('\n') || undefined}>
+                      <td className="pick-col">{o.checkbox(a)}</td>
                       <td>{a.name}{a.quantityTotal ? <div className="note">{a.quantityTotal} {a.quantityUnit}</div> : null}</td>
                       <td className="note">{range(a.baselineStart, a.baselineEnd)}</td>
                       <td>{range(a.start, a.end)}</td>
@@ -373,8 +378,7 @@ export default function ProjectManagement() {
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
+                }, 17)}
             </table>
           </div>
         )}

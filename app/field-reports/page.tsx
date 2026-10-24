@@ -8,6 +8,7 @@ import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import { pullAll } from '@/lib/cloud/cloudSync';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
+import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { actualPct, todayLocal } from '@/lib/calc';
@@ -50,6 +51,8 @@ export default function FieldReports() {
     if (actParam && activities.some((a) => a.id === actParam)) setActivityId(actParam);
     else if (!activities.some((a) => a.id === activityId)) setActivityId(activities[0]?.id ?? '');
   }, [ready, actParam, pid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const o = useOrgList({ list: 'field_reports', kind: 'field_report', items: filter ? reports.filter((r) => r.activityId === filter) : reports, id: (r) => r.id, project: (r) => r.projectId, noun: 'report' });
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -193,15 +196,16 @@ export default function FieldReports() {
             {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
-        {shown.length === 0 ? (
-          <div className="empty">No field reports yet.</div>
+        {o.toolbar}
+        {o.listed.length === 0 ? (
+          <div className="empty">{o.showHidden ? 'You have not hidden any field reports.' : 'No field reports yet.'}</div>
         ) : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Date</th><th>Activity</th><th className="num">Actual</th><th>Notes</th><th>Saved</th>{CLOUD && <th>Review</th>}<th /></tr></thead>
-              <tbody>
-                {shown.map((r) => (
-                  <tr key={r.id}>
+              <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Date</th><th>Activity</th><th className="num">Actual</th><th>Notes</th><th>Saved</th>{CLOUD && <th>Review</th>}<th /></tr></thead>
+              {o.tbodies((r) => (
+                  <tr>
+                    <td className="pick-col">{o.checkbox(r)}</td>
                     <td>{fmtDate(r.date)}</td>
                     <td>{name(r.activityId)}</td>
                     <td className="num">{fmtPct(r.actualPct)}</td>
@@ -223,8 +227,7 @@ export default function FieldReports() {
                     )}
                     <td>{(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
                   </tr>
-                ))}
-              </tbody>
+                ), CLOUD ? 8 : 7)}
             </table>
           </div>
         )}

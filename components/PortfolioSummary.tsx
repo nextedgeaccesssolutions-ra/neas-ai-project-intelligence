@@ -7,8 +7,9 @@ import { useStore } from '@/lib/store';
 import { projectProgress, todayLocal, addDays } from '@/lib/calc';
 import { calendarOf, scopeMetrics } from '@/lib/schedule';
 import { fmtDate, fmtPct } from '@/lib/format';
+import { useOrgList } from '@/components/OrgList';
 
-type Action = { key: string; tone: 'bad' | 'warn' | 'info'; title: string; detail: string; href: string; pid: string; when: string };
+type Action = { key: string; tone: 'bad' | 'warn' | 'info'; title: string; detail: string; href: string; pid: string; when: string; aid?: string };
 
 export default function PortfolioSummary() {
   const { state, setActiveProject } = useStore();
@@ -33,18 +34,18 @@ export default function PortfolioSummary() {
         if (m.status === 'Complete') continue;
         if (today > a.end) {
           overdue++;
-          actions.push({ key: `od-${a.id}`, tone: 'bad', title: `${a.name} is overdue`, detail: `${code} · planned finish ${fmtDate(a.end)} · ${fmtPct(m.actualPct)} done`, href: '/project-management', pid: p.id, when: a.end });
+          actions.push({ key: `od-${a.id}`, aid: a.id, tone: 'bad', title: `${a.name} is overdue`, detail: `${code} · planned finish ${fmtDate(a.end)} · ${fmtPct(m.actualPct)} done`, href: '/project-management', pid: p.id, when: a.end });
         } else if (a.end <= addDays(today, 14)) {
           upcoming++;
-          actions.push({ key: `up-${a.id}`, tone: 'info', title: `${a.name} due ${fmtDate(a.end)}`, detail: `${code} · ${fmtPct(m.actualPct)} done, ${fmtPct(m.plannedPct)} planned`, href: '/project-management', pid: p.id, when: a.end });
+          actions.push({ key: `up-${a.id}`, aid: a.id, tone: 'info', title: `${a.name} due ${fmtDate(a.end)}`, detail: `${code} · ${fmtPct(m.actualPct)} done, ${fmtPct(m.plannedPct)} planned`, href: '/project-management', pid: p.id, when: a.end });
         }
         if (m.openStop) {
           stopped++;
-          actions.push({ key: `st-${a.id}`, tone: 'warn', title: `Work stopped: ${a.name}`, detail: `${code} · since ${fmtDate(m.openStop.stoppedAt)} · restart from the Overview Gantt`, href: '/project-management', pid: p.id, when: m.openStop.stoppedAt.slice(0, 10) });
+          actions.push({ key: `st-${a.id}`, aid: a.id, tone: 'warn', title: `Work stopped: ${a.name}`, detail: `${code} · since ${fmtDate(m.openStop.stoppedAt)} · restart from the Overview Gantt`, href: '/project-management', pid: p.id, when: m.openStop.stoppedAt.slice(0, 10) });
         }
         if (a.requiredPhotos) {
           const have = state.evidence.filter((e) => e.activityId === a.id).length;
-          if (have < a.requiredPhotos) actions.push({ key: `ev-${a.id}`, tone: 'warn', title: `${a.requiredPhotos - have} required photo(s) missing`, detail: `${code} · ${a.name} (${have} of ${a.requiredPhotos})`, href: '/site-evidence', pid: p.id, when: a.end });
+          if (have < a.requiredPhotos) actions.push({ key: `ev-${a.id}`, aid: a.id, tone: 'warn', title: `${a.requiredPhotos - have} required photo(s) missing`, detail: `${code} · ${a.name} (${have} of ${a.requiredPhotos})`, href: '/site-evidence', pid: p.id, when: a.end });
         }
       }
       const waiting = reps.filter((r) => r.status === 'submitted').length;
@@ -60,6 +61,21 @@ export default function PortfolioSummary() {
       avg: progress.length ? progress.reduce((s, x) => s + x, 0) / progress.length : null, scheduled: progress.length,
     };
   }, [state, today]);
+
+  // group or hide action-center items by their activity (the activity itself never changes)
+  const o = useOrgList({ list: 'actions', kind: 'activity', items: data.actions.filter((x) => x.aid), id: (x) => x.aid!, project: (x) => x.pid, noun: 'item' });
+  const other = o.showHidden ? [] : data.actions.filter((x) => !x.aid);
+  const row = (a: Action) => (
+    <li key={a.key} className="action-row">
+      {o.checkbox(a)}
+      <Link href={a.href} onClick={() => setActiveProject(a.pid)}>
+        <span className={`pill ${a.tone === 'bad' ? 'pill-bad' : a.tone === 'warn' ? 'pill-warn' : ''}`}>{a.tone === 'bad' ? 'Overdue' : a.tone === 'warn' ? 'Attention' : 'Upcoming'}</span>
+        <span className="action-text"><b>{a.title}</b><small>{a.detail}</small></span>
+        <span aria-hidden="true">›</span>
+      </Link>
+    </li>
+  );
+  const shownActions = [...o.ungrouped, ...other];
 
   const kpis: { label: string; value: string; sub: string; href: string }[] = [
     { label: 'Active projects', value: String(data.active), sub: `${data.completed} completed · ${data.total} in total`, href: '/projects' },
@@ -86,22 +102,14 @@ export default function PortfolioSummary() {
           <h2>Action center</h2>
           <span className="note">{data.actions.length ? `${data.actions.length} item(s) across your projects` : 'Nothing needs attention right now'}</span>
         </div>
+        {data.actions.length > 0 && o.toolbar}
+        {o.sections((rows) => <ul className="action-list">{rows.map(row)}</ul>)}
         {data.actions.length === 0 ? (
           <div className="empty">No overdue activities, stoppages, missing evidence or reports waiting for review.</div>
-        ) : (
-          <ul className="action-list">
-            {data.actions.slice(0, 12).map((a) => (
-              <li key={a.key}>
-                <Link href={a.href} onClick={() => setActiveProject(a.pid)}>
-                  <span className={`pill ${a.tone === 'bad' ? 'pill-bad' : a.tone === 'warn' ? 'pill-warn' : ''}`}>{a.tone === 'bad' ? 'Overdue' : a.tone === 'warn' ? 'Attention' : 'Upcoming'}</span>
-                  <span className="action-text"><b>{a.title}</b><small>{a.detail}</small></span>
-                  <span aria-hidden="true">›</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+        ) : !shownActions.length ? (o.showHidden ? <div className="empty">You have not hidden any items.</div> : null) : (
+          <ul className="action-list">{shownActions.slice(0, 12).map(row)}</ul>
         )}
-        {data.actions.length > 12 && <p className="note">Showing the 12 most urgent of {data.actions.length}.</p>}
+        {shownActions.length > 12 && <p className="note">Showing the 12 most urgent of {shownActions.length} not in a group.</p>}
       </div>
     </section>
   );

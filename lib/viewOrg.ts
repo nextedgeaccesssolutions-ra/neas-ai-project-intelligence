@@ -7,11 +7,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 
-export type ListKey = 'evidence' | 'reports';
-export type ItemKind = 'attachment' | 'field_report' | 'project_export';
-export interface ViewGroup { id: string; project_id: string; list_key: ListKey; scope: 'personal' | 'project'; owner_id: string; name: string; sort_order: number }
+export type ListKey = 'evidence' | 'reports' | 'projects' | 'activities' | 'actions' | 'field_reports' | 'boq' | 'report_history';
+export type ItemKind = 'attachment' | 'field_report' | 'project_export' | 'project' | 'activity' | 'boq_line';
+export interface ViewGroup { id: string; project_id: string | null; list_key: ListKey; scope: 'personal' | 'project'; owner_id: string; name: string; sort_order: number }
 interface GroupItem { group_id: string; item_kind: ItemKind; item_id: string }
-interface Hidden { item_kind: ItemKind; item_id: string; project_id: string }
+interface Hidden { item_kind: ItemKind; item_id: string; project_id: string | null }
 export const itemKey = (kind: ItemKind, id: string) => `${kind}:${id}`;
 
 const LOCAL = 'neas-view-org';
@@ -64,7 +64,7 @@ export function useViewOrg(list: ListKey, me: string | null) {
   const fail = (msg: string): false => { setError(msg); return false; };
 
   /** Put items into a group (creating it when no id is given). One project per call. */
-  const group = async (projectId: string, kind: ItemKind, ids: string[], target: { id?: string; name?: string; scope?: 'personal' | 'project' }): Promise<string | false> => {
+  const group = async (projectId: string | null, kind: ItemKind, ids: string[], target: { id?: string; name?: string; scope?: 'personal' | 'project' }): Promise<string | false> => {
     if (!ids.length) return false;
     if (!sb) {
       const l = readLocal();

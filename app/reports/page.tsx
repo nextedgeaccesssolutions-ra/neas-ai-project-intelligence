@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import ProjectReportPanel from '@/components/ProjectReportPanel';
+import { useOrgList } from '@/components/OrgList';
 import { fetchFromServer } from '@/components/PhotoThumb';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
@@ -14,7 +15,7 @@ import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
 import { fmtDate } from '@/lib/format';
 import type { ProjectReport } from '@/lib/projectReport';
 
-type Export = { report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string };
+type Export = { id: string; report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string };
 
 export default function Reports() {
   const { ready, project, state, setActiveProject, calendarFor } = useStore();
@@ -28,7 +29,7 @@ export default function Reports() {
   const loadHistory = () => {
     const sb = CLOUD ? supabaseBrowser() : null;
     if (!sb || !pid) return;
-    sb.from('project_report_exports').select('report_ref, generated_at, actual_pct, planned_pct, schedule_status').eq('project_id', pid).order('generated_at', { ascending: false }).limit(20)
+    sb.from('project_report_exports').select('id, report_ref, generated_at, actual_pct, planned_pct, schedule_status').eq('project_id', pid).order('generated_at', { ascending: false }).limit(200)
       .then(({ data }) => setHistory((data as Export[]) ?? []));
     sb.from('project_memberships').select('role, profiles(full_name, email)').eq('project_id', pid).eq('role', 'project_manager').limit(1)
       .then(({ data }) => {
@@ -38,6 +39,8 @@ export default function Reports() {
       });
   };
   useEffect(loadHistory, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const o = useOrgList({ list: 'report_history', kind: 'project_export', items: history, id: (h) => h.id, project: () => pid, noun: 'report' });
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -94,14 +97,15 @@ export default function Reports() {
       {CLOUD && (
         <section className="card">
           <div className="card-head"><h2>Report history</h2><span className="note">Reports generated for this project</span></div>
-          {history.length === 0 ? <div className="empty">No reports generated yet.</div> : (
+          {history.length > 0 && o.toolbar}
+          {o.listed.length === 0 ? <div className="empty">{o.showHidden ? 'You have not hidden any reports.' : 'No reports generated yet.'}</div> : (
             <div className="table-wrap">
               <table className="tbl">
-                <thead><tr><th>Reference</th><th>Generated</th><th className="num">Planned</th><th className="num">Actual</th><th>Schedule</th></tr></thead>
-                <tbody>{history.map((h) => (
-                  <tr key={h.report_ref}><td>{h.report_ref}</td><td>{fmtDate(h.generated_at)} {new Date(h.generated_at).toLocaleTimeString()}</td>
+                <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Reference</th><th>Generated</th><th className="num">Planned</th><th className="num">Actual</th><th>Schedule</th></tr></thead>
+                {o.tbodies((h) => (
+                  <tr><td className="pick-col">{o.checkbox(h)}</td><td>{h.report_ref}</td><td>{fmtDate(h.generated_at)} {new Date(h.generated_at).toLocaleTimeString()}</td>
                     <td className="num">{h.planned_pct == null ? '—' : `${Number(h.planned_pct).toFixed(1)}%`}</td><td className="num">{h.actual_pct == null ? '—' : `${Number(h.actual_pct).toFixed(1)}%`}</td><td>{h.schedule_status || '—'}</td></tr>
-                ))}</tbody>
+                ), 6)}
               </table>
             </div>
           )}

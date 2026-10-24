@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { ViewGroup } from '@/lib/viewOrg';
 
-export default function OrgToolbar({ selected, groups, canShare, showHidden, hiddenCount, anyGrouped, onGroup, onUngroup, onHide, onUnhide, onToggleHidden, onClear, onSelectAll }: {
+export default function OrgToolbar({ selected, groups, canShare, showHidden, hiddenCount, anyGrouped, onGroup, onUngroup, onHide, onUnhide, onToggleHidden, onClear, onSelectAll, allSelected = false, total }: {
   selected: number;
   groups: ViewGroup[];
   canShare: boolean;
@@ -18,6 +18,10 @@ export default function OrgToolbar({ selected, groups, canShare, showHidden, hid
   onToggleHidden: () => void;
   onClear: () => void;
   onSelectAll: () => void;
+  /** every shown item is selected (the checkbox then clears the selection) */
+  allSelected?: boolean;
+  /** how many items are shown */
+  total?: number;
 }) {
   const [form, setForm] = useState(false);
   const [target, setTarget] = useState('');
@@ -34,7 +38,7 @@ export default function OrgToolbar({ selected, groups, canShare, showHidden, hid
   return (
     <div className="org-bar" role="toolbar" aria-label="Organise list">
       <span className="org-count" aria-live="polite">{selected ? `${selected} selected` : showHidden ? 'Hidden items' : 'Select items to group or hide'}</span>
-      {!showHidden && <button className="btn btn-sm" onClick={onSelectAll}>Select all shown</button>}
+      <label className="org-all"><input type="checkbox" className="org-pick" checked={allSelected} onChange={() => (allSelected ? onClear() : onSelectAll())} /> Select all{total != null ? ` (${total})` : ''}</label>
       {selected > 0 && <>
         {!showHidden && <button className="btn btn-sm btn-primary" onClick={() => setForm((f) => !f)} aria-expanded={form}>Group selected</button>}
         {!showHidden && anyGrouped && <button className="btn btn-sm" onClick={onUngroup}>Ungroup</button>}

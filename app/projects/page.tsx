@@ -12,6 +12,7 @@ import { useQueryParam } from '@/lib/useQuery';
 import { projectProgress, todayLocal, boqTotals } from '@/lib/calc';
 import { fmtPct, fmtPHP } from '@/lib/format';
 import type { Project, ProjectStatus } from '@/lib/types';
+import { useOrgList } from '@/components/OrgList';
 
 const STATUSES: ProjectStatus[] = ['draft', 'active', 'on-hold', 'completed'];
 type Draft = { id: string; name: string; client: string; site: string; status: ProjectStatus; contractValue: string; isNew: boolean };
@@ -33,6 +34,9 @@ export default function ProjectRegister() {
     if (p) setDraft({ ...p, contractValue: p.contractValue == null ? '' : String(p.contractValue), isNew: false });
   }, [ready, newParam, editParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const rows = state.projects.filter((p) => !q || `${p.id} ${p.code ?? ''} ${p.name} ${p.client} ${p.site}`.toLowerCase().includes(q.toLowerCase()));
+  const o = useOrgList({ list: 'projects', kind: 'project', items: rows, id: (p) => p.id, project: (p) => p.id, noun: 'project' });
+
   if (!ready) return <Loading />;
 
   const today = todayLocal();
@@ -51,8 +55,6 @@ export default function ProjectRegister() {
     setDraft(null);
     setError(null);
   };
-
-  const rows = state.projects.filter((p) => !q || `${p.id} ${p.name} ${p.client} ${p.site}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <>
@@ -96,19 +98,20 @@ export default function ProjectRegister() {
           <h2>Projects ({rows.length})</h2>
           <input className="input" style={{ maxWidth: 280 }} placeholder="Search projects" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" />
         </div>
-        {rows.length === 0 ? <div className="empty">No projects match.</div> : (
+        {o.toolbar}
+        {o.listed.length === 0 ? <div className="empty">{o.showHidden ? 'You have not hidden any projects.' : 'No projects match.'}</div> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Project</th><th>Client / site</th><th>Status</th><th className="num">Contract value</th><th className="num">BOQ selling price</th><th className="num">Planned</th><th className="num">Actual</th><th>Actions</th></tr></thead>
-              <tbody>
-                {rows.map((p) => {
+              <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Project</th><th>Client / site</th><th>Status</th><th className="num">Contract value</th><th className="num">BOQ selling price</th><th className="num">Planned</th><th className="num">Actual</th><th>Actions</th></tr></thead>
+              {o.tbodies((p) => {
                   const acts = state.activities.filter((a) => a.projectId === p.id);
                   const reps = state.reports.filter((r) => r.projectId === p.id);
                   const prog = projectProgress(acts, reps, today, (id) => state.calendars?.[id]);
                   const boq = boqTotals(state.boq.filter((b) => b.projectId === p.id), costSettingsFor(p.id));
                   const active = p.id === state.activeProjectId;
                   return (
-                    <tr key={p.id} style={active ? { background: '#f6f9fb' } : undefined}>
+                    <tr style={active ? { background: '#f6f9fb' } : undefined}>
+                      <td className="pick-col">{o.checkbox(p)}</td>
                       <td><b>{p.code ?? p.id}</b><div className="note">{p.name}</div></td>
                       <td>{p.client || '—'}<div className="note">{p.site}</div></td>
                       <td><span className={`pill ${p.status === 'active' ? 'pill-ok' : p.status === 'on-hold' ? 'pill-warn' : ''}`}>{p.status}</span></td>
@@ -124,8 +127,7 @@ export default function ProjectRegister() {
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
+                }, 9)}
             </table>
           </div>
         )}

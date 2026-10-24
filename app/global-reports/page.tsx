@@ -284,6 +284,8 @@ export default function GlobalReports() {
           onToggleHidden={() => { setShowHidden((v) => !v); setPicked(new Set()); }}
           onClear={() => setPicked(new Set())}
           onSelectAll={() => setPicked(new Set(filtered.map(keyOf)))}
+          allSelected={filtered.length > 0 && filtered.every((r) => picked.has(keyOf(r)))}
+          total={filtered.length}
         />
         {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
         {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a report or changes who can see it.</p>}

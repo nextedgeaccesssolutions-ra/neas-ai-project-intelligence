@@ -526,6 +526,8 @@ export default function SiteEvidence() {
           onToggleHidden={() => { setShowHidden((v) => !v); setPicked(new Set()); setPage(0); }}
           onClear={() => setPicked(new Set())}
           onSelectAll={() => setPicked(new Set(listed.map((e) => e.id)))}
+          allSelected={listed.length > 0 && listed.every((e) => picked.has(e.id))}
+          total={listed.length}
         />
         {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
         {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a photo or changes who can see it; other people and reports still include it.</p>}

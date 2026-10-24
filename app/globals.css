@@ -490,3 +490,9 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
 .photo.picked { outline: 3px solid var(--gold); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .row-picked td { background: rgba(202, 147, 50, .08); }
+.org-pick { width: 18px; height: 18px; accent-color: var(--gold); cursor: pointer; vertical-align: middle; }
+th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
+.group-row .org-head { margin: 4px 0; }
+.org-all { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; cursor: pointer; }
+.action-row { display: flex; align-items: center; gap: 8px; }
+.action-row > a { flex: 1; min-width: 0; }

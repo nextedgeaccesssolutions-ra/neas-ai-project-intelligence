@@ -11,6 +11,7 @@ import { fmtDate, fmtPHP, fmtPct } from '@/lib/format';
 import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
 import { askPin, isPinRequired, withPin } from '@/components/PinPrompt';
+import { useOrgList } from '@/components/OrgList';
 import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
@@ -168,6 +169,7 @@ function Overview({ d, go }: { d: { profiles: Profile[]; projects: Project[]; me
     const cv = Number(p.contract_value ?? 0);
     return { p, planned: prog.planned, actual: prog.actual, pv: (cv * prog.planned) / 100, ev: (cv * prog.actual) / 100, spi: prog.planned > 0 ? prog.actual / prog.planned : null, acts: acts.length };
   });
+  const o = useOrgList({ list: 'projects', kind: 'project', items: portfolio, id: (r) => r.p.id, project: (r) => r.p.id, noun: 'project' });
   const totals = portfolio.reduce((t, r) => ({ cv: t.cv + Number(r.p.contract_value ?? 0), pv: t.pv + r.pv, ev: t.ev + r.ev }), { cv: 0, pv: 0, ev: 0 });
   return (
     <>
@@ -187,12 +189,13 @@ function Overview({ d, go }: { d: { profiles: Profile[]; projects: Project[]; me
           <span className="note">Earned value (EV)</span><span>{fmtPHP(totals.ev)}</span>
           <span className="note">Portfolio SPI (EV ÷ PV)</span><span className={totals.pv && totals.ev / totals.pv < 0.9 ? 'bad' : 'ok'}>{totals.pv ? (totals.ev / totals.pv).toFixed(2) : '—'}</span>
         </div>
+        {o.toolbar}
         <div className="table-wrap">
           <table className="tbl">
-            <thead><tr><th>Project</th><th>Status</th><th className="num">Contract</th><th className="num">Planned</th><th className="num">Actual</th><th className="num">SPI</th><th className="num">Earned value</th></tr></thead>
-            <tbody>
-              {portfolio.map((r) => (
-                <tr key={r.p.id}>
+            <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Project</th><th>Status</th><th className="num">Contract</th><th className="num">Planned</th><th className="num">Actual</th><th className="num">SPI</th><th className="num">Earned value</th></tr></thead>
+              {o.tbodies((r) => (
+                <tr>
+                  <td className="pick-col">{o.checkbox(r)}</td>
                   <td><b>{r.p.code}</b><div className="note">{r.p.name}</div></td>
                   <td><Pill s={r.p.status} /></td>
                   <td className="num">{fmtPHP(r.p.contract_value)}</td>
@@ -201,8 +204,7 @@ function Overview({ d, go }: { d: { profiles: Profile[]; projects: Project[]; me
                   <td className={`num ${r.spi != null && r.spi < 0.9 ? 'bad' : r.spi != null && r.spi < 1 ? 'warn' : 'ok'}`}>{r.spi != null ? r.spi.toFixed(2) : '—'}</td>
                   <td className="num">{fmtPHP(r.ev)}</td>
                 </tr>
-              ))}
-            </tbody>
+              ), 8)}
           </table>
         </div>
         <p className="note">SPI below 1.00 means behind schedule. Earned value = contract value × approved actual progress. Cost performance (CPI) needs actual cost records, which are not captured yet.</p>
