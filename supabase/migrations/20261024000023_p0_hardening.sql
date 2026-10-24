@@ -8,6 +8,8 @@
 --    Reading follows the attachment's own visibility; overwriting is limited to the uploader
 --    and is refused once the photo's report is approved.
 
+-- From here on a new neas function is closed by default: a migration that adds a function the
+-- browser calls must also `grant execute ... to authenticated` (supabase/tests/97 lists the rule).
 alter default privileges in schema neas revoke execute on functions from public;
 
 do $$
@@ -63,9 +65,9 @@ grant execute on function neas.can_overwrite_object(text, uuid) to authenticated
 
 drop policy if exists neas_files_select on storage.objects;
 create policy neas_files_select on storage.objects for select to authenticated
-  using (bucket_id = 'neas-project-files' and neas.can_read_object(name, owner));
+  using (bucket_id = 'neas-project-files' and neas.can_read_object(name, coalesce(owner, nullif(owner_id, '')::uuid)));
 
 drop policy if exists neas_files_update on storage.objects;
 create policy neas_files_update on storage.objects for update to authenticated
-  using (bucket_id = 'neas-project-files' and neas.can_overwrite_object(name, owner))
-  with check (bucket_id = 'neas-project-files' and neas.can_overwrite_object(name, owner));
+  using (bucket_id = 'neas-project-files' and neas.can_overwrite_object(name, coalesce(owner, nullif(owner_id, '')::uuid)))
+  with check (bucket_id = 'neas-project-files' and neas.can_overwrite_object(name, coalesce(owner, nullif(owner_id, '')::uuid)));
