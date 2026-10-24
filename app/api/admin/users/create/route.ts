@@ -24,7 +24,16 @@ export const POST = handle(async (req) => {
 
   const svc = supabaseService();
   const { data: created, error } = await svc.auth.admin.createUser({ email: e.email, email_confirm: true, user_metadata: { full_name: n.name } });
-  if (error || !created.user) throw new HttpError(409, 'Could not create the account. If this e-mail already has an account, issue a code from the User directory instead.');
+  if (error || !created.user) {
+    const { data: existing } = await svc.from('profiles').select('full_name, status, username').ilike('email', e.email).maybeSingle();
+    if (existing) {
+      const who = existing.full_name || e.email;
+      throw new HttpError(409, existing.status === 'active'
+        ? `${who} already has an account with this e-mail. Open it in User directory and use “Reset PIN / password (one-time code)”.`
+        : `${who} already has an account with this e-mail, currently ${existing.status}. Open it in User directory, press Activate, then use “Reset PIN / password (one-time code)”.`);
+    }
+    throw new HttpError(400, `Supabase did not create the account: ${error?.message ?? 'unknown reason'}.`);
+  }
   const id = created.user.id;
 
   // approval and code go through the admin's own session, so the database checks Super Admin rights and audits them

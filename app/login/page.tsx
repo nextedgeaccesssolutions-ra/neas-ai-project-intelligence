@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
+  const [pinHelp, setPinHelp] = useState(false);
   const online = typeof navigator === 'undefined' || navigator.onLine;
 
   if (!CLOUD) return <AuthCard title="Sign-in not set up" subtitle="This copy runs in device mode. Connect Supabase to enable accounts."><Link className="btn" href="/">Open the app</Link></AuthCard>;
@@ -120,9 +121,15 @@ export default function LoginPage() {
             <button className="btn btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
           <div className="auth-links">
+            <button type="button" className="linklike" onClick={() => setPinHelp((f) => !f)} aria-expanded={pinHelp}>Forgot your PIN?</button>
             <Link className="linklike" href="/activate">Have a one-time code?</Link>
             <button className="linklike" onClick={() => { setMode('email'); setError(null); }}>Administrator e-mail sign-in</button>
           </div>
+          {pinHelp && (
+            <p className="note" role="status">
+              Ask your NEAS administrator to reset your PIN. They give you a one-time code (valid 24 hours). Then open <Link className="linklike" href="/activate">Have a one-time code?</Link>, enter your username and the code, and choose a new 6-digit PIN. NEAS never asks for your PIN by phone or message.
+            </p>
+          )}
         </>
       ) : (<>
       <form onSubmit={submit} className="auth-form">

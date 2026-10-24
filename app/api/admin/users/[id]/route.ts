@@ -39,7 +39,12 @@ export const POST = handle(async (req, { params }) => {
       if (!p?.email) throw new HttpError(404, 'User not found');
       const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
       const { error } = await anon.auth.resetPasswordForEmail(p.email, { redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password` });
-      if (error) throw new HttpError(429, 'Could not send the reset e-mail right now. Try again shortly.');
+      if (error) {
+        const limited = error.status === 429 || /rate|limit|security purposes|seconds/i.test(error.message);
+        throw new HttpError(limited ? 429 : 502, limited
+          ? 'Supabase only sends a few reset e-mails per hour, and that limit is reached. Use “Reset PIN / password (one-time code)” instead: it needs no e-mail.'
+          : `The reset e-mail could not be sent (${error.message}). Use “Reset PIN / password (one-time code)” instead: it needs no e-mail.`);
+      }
       await svc.from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', params.id);
       await svc.from('audit_logs').insert({ actor_id: user.id, action: 'account:password_reset_sent', target_type: 'profiles', target_id: params.id });
       break;

@@ -405,7 +405,10 @@ function UserActionMenu({ u, selfId, onAction, onReview }: { u: Profile; selfId:
           <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={close} />
           <div className="user-actions-drop">
             {u.status === 'pending' && <><button onClick={() => { close(); onReview(u, true); }}>✓ Approve</button><button className="danger" onClick={() => { close(); onReview(u, false); }}>✕ Reject</button></>}
-            {u.status === 'active' && <button onClick={() => act('reset_password', `Send ${u.email} a secure password reset link?`, false)}>🔑 Send password reset</button>}
+            {u.status === 'active' && <button onClick={() => act('issue_code', u.username
+              ? `Reset the PIN for ${u.full_name || u.email} (@${u.username})? You get a one-time code valid for 24 hours to hand them; they choose a new PIN on the activation page. Their current PIN keeps working until then.`
+              : `Issue a one-time code for ${u.full_name || u.email}? They have no username yet, so they can set a new e-mail password with it. To use a PIN, first give them a username (Edit).`, false)}>🔢 Reset PIN / password (one-time code)</button>}
+            {u.status === 'active' && <button onClick={() => act('reset_password', `Send ${u.email} a secure password reset link? (Supabase sends only a few per hour.)`, false)}>🔑 Send password reset e-mail</button>}
             {u.status === 'active' && <button onClick={() => act('revoke_sessions', `Sign ${u.email} out on every device?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>⏏ Sign out everywhere</button>}
             {!self && u.status === 'active' && <button className="danger" onClick={() => act('suspend', `Suspend ${u.email}? They lose access to all projects immediately.`)}>⛔ Suspend</button>}
             {(u.status === 'suspended' || u.status === 'rejected') && <button onClick={() => act('reactivate', `Reactivate ${u.email}?`, false)}>▶ Activate</button>}
@@ -441,10 +444,12 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     else { setSort(col); setSortDir('asc'); }
   };
 
+  const [resetCode, setResetCode] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
   const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
     try {
-      await api(`/api/admin/users/${u.id}`, { action, reason });
+      const r = (await api(`/api/admin/users/${u.id}`, { action, reason, hours: 24 })) as unknown as { code?: string; expiresAt?: string };
+      if (action === 'issue_code' && r.code && r.expiresAt) setResetCode({ code: r.code, expiresAt: r.expiresAt, who: u.full_name || u.email });
       notify('Done. Recorded in the audit log.');
       await reload();
     } catch (e) {
@@ -522,6 +527,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
 
   return (
     <>
+      {resetCode && <CodeReveal code={resetCode.code} expiresAt={resetCode.expiresAt} who={resetCode.who} onClose={() => setResetCode(null)} />}
       <div className="user-stats">
         <div className="user-stat"><div className="user-stat-val">{d.profiles.length}</div><div className="user-stat-label">Total users</div></div>
         <div className="user-stat active-stat"><div className="user-stat-val">{totalActive}</div><div className="user-stat-label">Active</div></div>
@@ -631,7 +637,7 @@ function CodeReveal({ code, expiresAt, who, onClose }: { code: string; expiresAt
       <div><b>One-time code for {who}: </b><code style={{ fontSize: 20, letterSpacing: '.1em' }}>{code}</code>{' '}
         <button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(code).then(() => notify('Copied.'), () => undefined)}>Copy</button>{' '}
         <button className="btn btn-sm" onClick={onClose}>Done</button></div>
-      <div className="note">Shown only now (stored as a hash). Give it to the person directly — in person, by phone or a separate message. It works once, until {new Date(expiresAt).toLocaleString()}. They open <b>{typeof location !== 'undefined' ? location.origin : ''}/activate</b>, enter their e-mail and this code, and choose their own password. After that first online sign-in they can also work offline.</div>
+      <div className="note">Shown only now (stored as a hash). Give it to the person directly — in person, by phone or a separate message. It works once, until {new Date(expiresAt).toLocaleString()}. They open <b>{typeof location !== 'undefined' ? location.origin : ''}/activate</b>, enter their username and this code, and choose a new 6-digit PIN (people without a username use “Activate with e-mail and password instead”). Until then their old PIN or password keeps working. After that first online sign-in they can also work offline.</div>
     </div>
   );
 }
@@ -744,7 +750,8 @@ function UserPanel({ u, d, self, act, review, reload }: {
           {u.status === 'pending' && <><button className="btn btn-sm" onClick={() => review(u, true)}>Approve (e-mail)</button><button className="btn btn-sm btn-danger" onClick={() => review(u, false)}>Reject</button></>}
           {!self && u.status === 'active' && <button className="btn btn-sm btn-danger" onClick={() => act(u, 'suspend', `Suspend ${u.email}? They lose access immediately.`)}>Suspend</button>}
           {(u.status === 'suspended' || u.status === 'rejected') && <button className="btn btn-sm" onClick={() => act(u, 'reactivate', `Reactivate ${u.email}?`, false)}>Activate</button>}
-          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a password reset link?`, false)}>Password reset</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => issue(false)}>Reset PIN / password (code)</button>}
+          {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'reset_password', `Send ${u.email} a password reset link? (Supabase sends only a few per hour.)`, false)}>Reset e-mail</button>}
           {u.status === 'active' && <button className="btn btn-sm" onClick={() => act(u, 'revoke_sessions', `Sign ${u.email} out everywhere?${self ? ' This includes you.' : ''}`, true, 'Revoked by administrator')}>Sign out all</button>}
           {!self && u.status === 'active' && (u.global_role === 'super_admin'
             ? <button className="btn btn-sm" onClick={() => act(u, 'make_staff', `Remove Super Admin from ${u.email}?`)}>Remove Admin</button>
