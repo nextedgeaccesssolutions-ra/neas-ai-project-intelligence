@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req) => {
   assertSameOrigin(req);
   const { sb, user } = await requireSuperAdmin();
+  const { error: pinErr } = await sb.rpc('require_reauth');
+  if (pinErr) throw new HttpError(403, pinErr.message);
   const body = await readJson<{ email: string; fullName: string; projectId?: string; role?: 'project_manager' | 'employee' }>(req, 4096);
   const e = checkEmail(body.email);
   if (!e.ok) throw new HttpError(400, e.error);

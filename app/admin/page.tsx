@@ -270,7 +270,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   const removeMember = async (m: Member) => {
     if (!(await askConfirm(`Remove ${names.get(m.user_id)} from this project? They lose access immediately.`))) return;
-    const { error } = await sb().from('project_memberships').delete().eq('project_id', m.project_id).eq('user_id', m.user_id);
+    const { error } = await withPin(() => sb().from('project_memberships').delete().eq('project_id', m.project_id).eq('user_id', m.user_id));
     if (error) return notify(error.message);
     await reload();
   };
@@ -705,7 +705,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
   };
   const remove = async (projectId: string) => {
     if (!(await askConfirm(`Remove ${u.email} from ${d.projects.find((p) => p.id === projectId)?.code}? Their access ends immediately, including queued offline changes for that project.`))) return;
-    const { error } = await sb().from('project_memberships').delete().eq('project_id', projectId).eq('user_id', u.id);
+    const { error } = await withPin(() => sb().from('project_memberships').delete().eq('project_id', projectId).eq('user_id', u.id));
     if (error) return notify(error.message);
     await reload();
   };
@@ -972,7 +972,7 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
     await reload();
   };
   const setVis = async (k: string, v: boolean | number) => {
-    const { error } = await sb().from('approved_client_content').upsert({ project_id: pid, ...(content ?? {}), [k]: v });
+    const { error } = await withPin(() => sb().from('approved_client_content').upsert({ project_id: pid, ...(content ?? {}), [k]: v }));
     if (error) return notify(error.message);
     await reload();
   };

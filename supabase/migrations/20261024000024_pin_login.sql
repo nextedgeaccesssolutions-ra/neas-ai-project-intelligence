@@ -27,7 +27,7 @@ grant all on neas.pin_login_attempts to service_role;
 -- Before a sign-in: is this username (or this network) locked? Returns the account's sign-in
 -- address only when it may be tried. Server only.
 create or replace function neas.pin_login_begin(p_username text, p_ip_hash text)
-returns table (allowed boolean, email text, error text)
+returns table (allowed boolean, email text, user_id uuid, error text)
 language plpgsql security definer set search_path = neas, extensions as $$
 declare
   u text := lower(trim(p_username));
@@ -35,20 +35,22 @@ declare
   generic constant text := 'Username or PIN is not correct, or the account is not active.';
 begin
   if (select count(*) from neas.pin_login_attempts a where a.ip_hash = p_ip_hash and not a.ok and a.at > now() - interval '15 minutes') >= 20 then
-    return query select false, null::text, 'Too many attempts from this network. Try again in 15 minutes.'::text;
+    return query select false, null::text, null::uuid, 'Too many attempts from this network. Try again in 15 minutes.'::text;
     return;
   end if;
   select * into prof from neas.profiles p where p.username = u;
-  if found and prof.pin_locked_at is not null then
-    return query select false, null::text, 'This account is locked after repeated wrong PINs. Ask your NEAS administrator to unlock it.'::text;
+  -- a 24-hour lock (10 wrong PINs in a day) ends by itself after 24 hours, or earlier when a Super Admin unlocks it;
+  -- unknown usernames get the same lock from the same counts, so the answers never reveal which usernames exist
+  if (found and prof.pin_locked_at > now() - interval '24 hours')
+     or (select count(*) from neas.pin_login_attempts a where a.username = u and not a.ok and a.at > now() - interval '24 hours') >= 10 then
+    return query select false, null::text, null::uuid, 'This account is locked for 24 hours after repeated wrong PINs. Ask your NEAS administrator to unlock it sooner.'::text;
     return;
   end if;
   if (select count(*) from neas.pin_login_attempts a where a.username = u and not a.ok and a.at > now() - interval '15 minutes') >= 5 then
-    return query select false, null::text, 'Too many wrong PINs. Try again in 15 minutes.'::text;
+    return query select false, null::text, null::uuid, 'Too many wrong PINs. Try again in 15 minutes.'::text;
     return;
   end if;
-  -- unknown or inactive usernames are tried like any other, so the answer never reveals which exist
-  return query select true, case when prof.status = 'active' then prof.email end, generic;
+  return query select true, case when prof.status = 'active' then prof.email end, case when prof.status = 'active' then prof.id end, generic;
 end $$;
 
 -- After a sign-in attempt: record it and lock when the limits are reached.
@@ -71,9 +73,11 @@ begin
   values ('system', 'auth:pin_login_failed', 'profiles', pid::text, jsonb_build_object('username_known', pid is not null));
   select count(*) filter (where at > now() - interval '15 minutes'), count(*) into f15, f24
   from neas.pin_login_attempts where username = u and not ok and at > now() - interval '24 hours';
-  if pid is not null and f24 >= 10 then
-    update neas.profiles set pin_locked_at = coalesce(pin_locked_at, now()) where id = pid;
-    insert into neas.audit_logs (actor_kind, action, target_type, target_id) values ('system', 'auth:pin_locked', 'profiles', pid::text);
+  if f24 >= 10 then
+    if pid is not null then
+      update neas.profiles set pin_locked_at = now() where id = pid and (pin_locked_at is null or pin_locked_at <= now() - interval '24 hours');
+      insert into neas.audit_logs (actor_kind, action, target_type, target_id) values ('system', 'auth:pin_locked', 'profiles', pid::text);
+    end if;
     return 'locked_admin';
   end if;
   return case when f15 >= 5 then 'locked_15' else 'failed' end;
@@ -126,7 +130,9 @@ create trigger guard_reauth_client_creds before insert or update on neas.client_
 drop trigger if exists guard_reauth_report_shares on neas.report_shares;
 create trigger guard_reauth_report_shares before insert on neas.report_shares for each row execute function neas.guard_reauth_row();
 drop trigger if exists guard_reauth_memberships on neas.project_memberships;
-create trigger guard_reauth_memberships before update of role, can_approve_reports on neas.project_memberships for each row execute function neas.guard_reauth_row();
+create trigger guard_reauth_memberships before insert or update or delete on neas.project_memberships for each row execute function neas.guard_reauth_row();
+drop trigger if exists guard_reauth_client_content on neas.approved_client_content;
+create trigger guard_reauth_client_content before insert or update on neas.approved_client_content for each row execute function neas.guard_reauth_row();
 
 -- Super Admin: set a person's username; unlock a PIN lockout.
 create or replace function neas.admin_set_username(p_user uuid, p_username text)
@@ -153,6 +159,7 @@ returns void language plpgsql security definer set search_path = neas, extension
 declare u text;
 begin
   if not neas.is_super_admin() then raise exception 'Not authorized' using errcode = '42501'; end if;
+  perform neas.require_reauth();
   update neas.profiles set pin_locked_at = null where id = p_user returning username into u;
   -- forget earlier failures so the person gets a fresh set of tries
   delete from neas.pin_login_attempts where username = u and not ok;

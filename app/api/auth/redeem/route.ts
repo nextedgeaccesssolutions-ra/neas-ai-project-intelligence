@@ -1,5 +1,6 @@
 import { assertSameOrigin, handle, HttpError, ipHash, readJson, supabaseService } from '@/lib/cloud/server';
 import { checkEmail, checkPassword, checkPin, checkUsername, normaliseUsername } from '@/lib/cloud/validate';
+import { pinPassword } from '@/lib/cloud/pin';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,12 +37,9 @@ export const POST = handle(async (req) => {
   const generic = usingPin ? 'Username or code is not valid, or the code has expired.' : 'E-mail or code is not valid, or the code has expired.';
   if (!row?.ok || !row.user_id) throw new HttpError(row?.error?.startsWith('Too many') ? 429 : 401, row?.error?.startsWith('Too many') ? row.error : generic);
 
-  const { error: upd } = await svc.auth.admin.updateUserById(row.user_id, { password: usingPin ? body.pin! : body.password!, email_confirm: true });
-  if (upd) {
-    throw new HttpError(500, usingPin && /length|characters|weak/i.test(upd.message)
-      ? 'Your code was accepted but the server does not allow 6-digit PINs yet (Supabase minimum password length). Ask your administrator.'
-      : 'Your code was accepted but it could not be saved. Ask your administrator for a new code.');
-  }
+  // a PIN is stored as a long password derived on the server (lib/cloud/pin.ts), never as the 6 digits
+  const { error: upd } = await svc.auth.admin.updateUserById(row.user_id, { password: usingPin ? pinPassword(row.user_id, body.pin!) : body.password!, email_confirm: true });
+  if (upd) throw new HttpError(500, 'Your code was accepted but it could not be saved. Ask your administrator for a new code.');
   if (usingPin) await svc.from('profiles').update({ pin_locked_at: null }).eq('id', row.user_id);
   return Response.json({ ok: true });
 });

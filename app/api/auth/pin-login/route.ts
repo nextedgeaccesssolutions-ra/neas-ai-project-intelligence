@@ -1,44 +1,47 @@
 import { assertSameOrigin, handle, HttpError, ipHash, readJson, supabaseAsUser, supabaseService } from '@/lib/cloud/server';
 import { checkUsername, normaliseUsername } from '@/lib/cloud/validate';
 import { notifyAdmin } from '@/lib/cloud/notify';
+import { padTiming, pinPassword } from '@/lib/cloud/pin';
 
 export const dynamic = 'force-dynamic';
 
 const GENERIC = 'Username or PIN is not correct, or the account is not active.';
 
-// Username + 6-digit PIN sign-in. The PIN is the account's Supabase password; the database decides
-// whether the username may be tried (lockout) and records every attempt. The session cookies are set
-// on this response, so the PIN never travels anywhere but here.
+// Username + 6-digit PIN sign-in. The database decides whether the username may be tried (lockout)
+// and records every attempt; the Supabase password is derived from the PIN on the server
+// (lib/cloud/pin.ts), so this route is the only place a PIN can be tried. Session cookies are set on
+// this response. Every answer takes about the same time.
 export const POST = handle(async (req) => {
+  const started = Date.now();
   assertSameOrigin(req);
   const b = await readJson<{ username?: string; pin?: string }>(req, 1024);
   const username = normaliseUsername(b.username ?? '');
   const pin = String(b.pin ?? '');
-  if (!checkUsername(username) || !/^\d{6}$/.test(pin)) throw new HttpError(401, GENERIC);
+  if (!checkUsername(username) || !/^\d{6}$/.test(pin)) throw await padTiming(started, new HttpError(401, GENERIC));
   const ip = ipHash(req);
   const svc = supabaseService();
 
   const { data: begin, error: beginErr } = await svc.rpc('pin_login_begin', { p_username: username, p_ip_hash: ip });
   if (beginErr) throw new HttpError(503, 'Sign-in is unavailable right now. Try again shortly.');
-  const g = (Array.isArray(begin) ? begin[0] : begin) as { allowed: boolean; email: string | null; error: string } | undefined;
-  if (!g?.allowed) throw new HttpError(429, g?.error ?? 'Too many attempts. Try again later.');
+  const g = (Array.isArray(begin) ? begin[0] : begin) as { allowed: boolean; email: string | null; user_id: string | null; error: string } | undefined;
+  if (!g?.allowed) throw await padTiming(started, new HttpError(429, g?.error ?? 'Too many attempts. Try again later.'));
 
   let ok = false;
-  if (g.email) {
-    const { error } = await supabaseAsUser().auth.signInWithPassword({ email: g.email, password: pin });
+  if (g.email && g.user_id) {
+    const { error } = await supabaseAsUser().auth.signInWithPassword({ email: g.email, password: pinPassword(g.user_id, pin) });
     ok = !error;
   }
   const { data: outcome } = await svc.rpc('pin_login_finish', { p_username: username, p_ip_hash: ip, p_ok: ok });
-  if (ok) return Response.json({ ok: true });
+  if (ok) return padTiming(started, Response.json({ ok: true }));
   if (outcome === 'locked_15' || outcome === 'locked_admin') {
     void notifyAdmin(
       outcome === 'locked_admin' ? `NEAS: account locked (${username})` : `NEAS: repeated wrong PINs (${username})`,
       outcome === 'locked_admin'
-        ? `The username "${username}" had 10 wrong PINs in 24 hours and is now locked. If this was the person, unlock it in Control panel → User directory. If not, treat it as an attack and contact them.`
+        ? `The username "${username}" had 10 wrong PINs in 24 hours and is locked for 24 hours. If this was the person, unlock it sooner in Control panel → User directory. If not, treat it as an attack and contact them.`
         : `The username "${username}" had 5 wrong PINs in 15 minutes and is paused for 15 minutes.`,
       `pin-lock:${username}:${outcome}:${new Date().toISOString().slice(0, 13)}`,
     );
-    throw new HttpError(429, outcome === 'locked_admin' ? 'This account is locked after repeated wrong PINs. Ask your NEAS administrator to unlock it.' : 'Too many wrong PINs. Try again in 15 minutes.');
+    throw await padTiming(started, new HttpError(429, outcome === 'locked_admin' ? 'This account is locked for 24 hours after repeated wrong PINs. Ask your NEAS administrator to unlock it sooner.' : 'Too many wrong PINs. Try again in 15 minutes.'));
   }
-  throw new HttpError(401, GENERIC);
+  throw await padTiming(started, new HttpError(401, GENERIC));
 });

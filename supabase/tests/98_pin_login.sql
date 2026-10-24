@@ -47,6 +47,22 @@ reset role;
 set role service_role;
 select test.check('pin: after a Super Admin unlocks it the person can try again', (select allowed from neas.pin_login_begin('tech.bravo', 'ip-pin-5')));
 select test.check('pin: a successful sign-in is recorded', neas.pin_login_finish('tech.bravo', 'ip-pin-5', true) = 'ok');
+-- unknown usernames lock exactly like real ones, so the messages never reveal which exist
+select neas.pin_login_finish('ghost.user', 'ip-pin-6', false) from generate_series(1, 9);
+select test.check('pin: an unknown username reaches the same 24-hour lock as a real one', neas.pin_login_finish('ghost.user', 'ip-pin-6', false) = 'locked_admin');
+select test.check('pin: an unknown locked username gets the same message as a real locked one',
+  (select error from neas.pin_login_begin('ghost.user', 'ip-pin-7')) like 'This account is locked for 24 hours%');
+reset role;
+-- the 24-hour lock ends by itself
+update neas.profiles set pin_locked_at = now() - interval '25 hours' where username = 'tech.bravo';
+delete from neas.pin_login_attempts where username = 'tech.bravo';
+set role service_role;
+select test.check('pin: a 24-hour lock ends by itself', (select allowed from neas.pin_login_begin('tech.bravo', 'ip-pin-8')));
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', false);
+select test.expect_error('pin: people cannot mark their own PIN re-check', $$update neas.profiles set reauth_at = now() + interval '1 year' where id = auth.uid()$$);
+select test.expect_error('pin: people cannot call the re-check marker', $$select neas.mark_reauth(auth.uid())$$);
 reset role;
 
 -- PIN re-check for sensitive changes
@@ -59,6 +75,11 @@ select test.expect_error('pin: creating a client passcode needs a recent PIN re-
   $$select neas.admin_create_client_passcode('10000000-0000-0000-0000-00000000000a')$$);
 select test.expect_error('pin: creating a share link needs a recent PIN re-check',
   $$select neas.create_report_share('10000000-0000-0000-0000-00000000000a', 'link', 7)$$);
+select test.expect_error('pin: adding someone to a project needs a recent PIN re-check',
+  $$insert into neas.project_memberships (project_id, user_id, role) values ('10000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000b1', 'project_manager')$$);
+select test.expect_error('pin: changing what clients see needs a recent PIN re-check',
+  $$insert into neas.approved_client_content (project_id, show_photos) values ('10000000-0000-0000-0000-00000000000b', true) on conflict (project_id) do update set show_photos = true$$);
+select test.expect_error('pin: unlocking a PIN needs a recent PIN re-check', $$select neas.admin_unlock_pin('00000000-0000-0000-0000-0000000000d1')$$);
 update neas.profiles set full_name = 'Super Admin' where id = auth.uid();
 select test.check('pin: ordinary edits do not need a re-check', (select full_name = 'Super Admin' from neas.profiles where id = auth.uid()));
 reset role;

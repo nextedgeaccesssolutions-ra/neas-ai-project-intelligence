@@ -14,6 +14,11 @@ export const POST = handle(async (req, { params }) => {
   const body = await readJson<{ action: Action; reason?: string; hours?: number; fullName?: string; jobTitle?: string; username?: string }>(req, 4096);
   const svc = supabaseService();
   const reason = body.reason?.slice(0, 500) ?? null;
+  // account-takeover-sensitive actions the database triggers do not see need the PIN re-check too
+  if (body.action === 'issue_code' || body.action === 'revoke_sessions' || body.action === 'reset_password') {
+    const { error: pinErr } = await sb.rpc('require_reauth');
+    if (pinErr) throw new HttpError(403, pinErr.message);
+  }
 
   switch (body.action) {
     case 'suspend': {
