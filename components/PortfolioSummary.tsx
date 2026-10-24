@@ -63,7 +63,10 @@ export default function PortfolioSummary() {
   }, [state, today]);
 
   // group or hide action-center items by their activity (the activity itself never changes)
-  const o = useOrgList({ list: 'actions', kind: 'activity', items: data.actions.filter((x) => x.aid), id: (x) => x.aid!, project: (x) => x.pid, noun: 'item' });
+  // one entry per activity (an activity can raise several alerts); its alerts are shown together
+  const byActivity = new Map<string, Action[]>();
+  for (const x of data.actions) if (x.aid) byActivity.set(x.aid, [...(byActivity.get(x.aid) ?? []), x]);
+  const o = useOrgList({ list: 'actions', kind: 'activity', items: [...byActivity.values()].map((xs) => xs[0]), id: (x) => x.aid!, project: (x) => x.pid, noun: 'activity' });
   const other = o.showHidden ? [] : data.actions.filter((x) => !x.aid);
   const row = (a: Action) => (
     <li key={a.key} className="action-row">
@@ -75,7 +78,8 @@ export default function PortfolioSummary() {
       </Link>
     </li>
   );
-  const shownActions = [...o.ungrouped, ...other];
+  const expand = (xs: Action[]) => xs.flatMap((x) => (x.aid ? byActivity.get(x.aid) ?? [x] : [x]));
+  const shownActions = [...expand(o.ungrouped), ...other];
 
   const kpis: { label: string; value: string; sub: string; href: string }[] = [
     { label: 'Active projects', value: String(data.active), sub: `${data.completed} completed · ${data.total} in total`, href: '/projects' },
@@ -103,7 +107,7 @@ export default function PortfolioSummary() {
           <span className="note">{data.actions.length ? `${data.actions.length} item(s) across your projects` : 'Nothing needs attention right now'}</span>
         </div>
         {data.actions.length > 0 && o.toolbar}
-        {o.sections((rows) => <ul className="action-list">{rows.map(row)}</ul>)}
+        {o.sections((rows) => <ul className="action-list">{expand(rows).map(row)}</ul>)}
         {data.actions.length === 0 ? (
           <div className="empty">No overdue activities, stoppages, missing evidence or reports waiting for review.</div>
         ) : !shownActions.length ? (o.showHidden ? <div className="empty">You have not hidden any items.</div> : null) : (

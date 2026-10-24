@@ -78,7 +78,7 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
         total={listed.length}
       />
       {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
-      {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes anything or changes who can see it.</p>}
+      {showHidden && <p className="note">Hidden only from your own view, and on every page that lists the same {noun}s. Hiding never deletes anything or changes who can see it.</p>}
       {groups.length > 1 && (
         <div className="form-actions" style={{ marginTop: 0 }}>
           <button className="btn btn-sm" onClick={() => open.setAll(groups.map((x) => x.g.id))}>Expand all groups</button>

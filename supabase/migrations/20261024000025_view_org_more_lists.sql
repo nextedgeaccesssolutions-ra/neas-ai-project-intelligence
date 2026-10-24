@@ -13,6 +13,10 @@ alter table neas.hidden_items add constraint hidden_items_item_kind_check
   check (item_kind in ('attachment', 'field_report', 'project_export', 'project', 'activity', 'boq_line'));
 
 -- groups of projects span projects, so they belong to no project and are always personal
+-- (the name index treats a missing project as one value, so names stay unique per person)
+drop index if exists neas.view_groups_unique_name;
+create unique index if not exists view_groups_unique_name on neas.view_groups
+  (coalesce(project_id, '00000000-0000-0000-0000-000000000000'::uuid), list_key, scope, (case when scope = 'personal' then owner_id end), lower(btrim(name)));
 alter table neas.view_groups alter column project_id drop not null;
 alter table neas.view_group_items alter column project_id drop not null;
 alter table neas.view_groups drop constraint if exists view_groups_project_scope;
