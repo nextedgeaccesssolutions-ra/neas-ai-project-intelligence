@@ -6,7 +6,9 @@ import { useStore } from '@/lib/store';
 import DialogHost, { IS_ARTIFACT } from '@/components/Dialogs';
 import { useSyncStatus } from '@/lib/sheetsSync';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, canView, cloudSignOut, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
+import { canManage, canView, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
+import { requestPersistentStorage, unsentSummary, type PersistState } from '@/lib/offline/persist';
+import { askConfirm } from '@/components/Dialogs';
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
 const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
@@ -130,6 +132,9 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
       navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     }
   }, []);
+  // keep the offline queue and photos from being cleared by the browser
+  const [persist, setPersist] = useState<PersistState>('unsupported');
+  useEffect(() => { if (CLOUD) void requestPersistentStorage().then(setPersist); }, []);
 
   const saved = state.savedAt ? new Date(state.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
@@ -208,7 +213,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             <>
               <Link href="/account" style={{ color: '#fff', textDecoration: 'none' }}><b>{cloud.profile.full_name || cloud.profile.email}</b></Link>
               <br />
-              {isAdmin ? 'Super Admin' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => cloudSignOut(resetDemo).then(() => window.location.replace('/login'))}>Sign out</button>
+              {isAdmin ? 'Super Admin' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.replace('/login'); })}>Sign out</button>
             </>
           ) : (
             <>
@@ -257,6 +262,12 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
           </div>
         </header>
         <main className="content" id="main-content" tabIndex={-1}>
+          {CLOUD && persist !== 'persisted' && unsentSummary(cloud) && (
+            <div className="banner" role="status">
+              {unsentSummary(cloud)} This browser has not agreed to keep them permanently, so they could be cleared if the phone runs low on space or the site is not opened for several days.
+              {' '}{online ? 'They will sync shortly.' : 'Connect to the internet to sync them.'} Installing the app (Add to Home Screen) makes this safer.
+            </div>
+          )}
           {blocked ? (
             <section className="card">
               <h2 style={{ marginTop: 0 }}>Not available for your account</h2>
@@ -269,4 +280,12 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
       </div>
     </div>
   );
+}
+
+/** Sign out, warning first when this device still holds changes the server has not received. */
+export async function signOutChecked(clearCache: () => void): Promise<boolean> {
+  const msg = unsentSummary(cloudStatusNow());
+  if (msg && !(await askConfirm(`${msg} They stay on this device after you sign out, but nobody else sees them until you sign in here again and they sync. If this browser's data is cleared, they are lost. Sign out anyway?`))) return false;
+  await cloudSignOut(clearCache);
+  return true;
 }

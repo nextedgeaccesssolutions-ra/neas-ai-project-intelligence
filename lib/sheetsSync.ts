@@ -6,6 +6,7 @@
 // The mirror is idempotent (whole tabs are rewritten), so a repeated sync never duplicates rows.
 import { useSyncExternalStore } from 'react';
 import type { AppState } from './types';
+import { CLOUD } from './cloud/env';
 import { SHEET_ID, TAB_NAMES, gridToRows, rowsToGrid, rowsToState, stateToRows, TABS, type Cell, type Column, type Row, type TabName } from './sheetSchema';
 
 export type SyncState = 'checking' | 'unavailable' | 'paused' | 'idle' | 'pending' | 'syncing' | 'synced' | 'error';
@@ -143,6 +144,8 @@ function appsScriptTransport(url: string, token: string): Transport {
 
 let detected: Transport | null = null;
 async function transport(): Promise<Transport | null> {
+  // cloud builds: the browser never reads or writes the master sheet; the server mirrors it (sheetsMirror)
+  if (CLOUD || !SHEET_ID) return null;
   if (detected) return detected;
   const mcp = await getMcp();
   if (mcp) detected = connectorTransport(mcp);
@@ -268,6 +271,7 @@ export async function syncNow(st: AppState, userName: string) {
 
 /** Read every tab back from the sheet and convert it to app state. */
 export async function pullFromSheet(base: AppState): Promise<{ state: AppState; counts: Record<string, number> }> {
+  if (CLOUD) throw new Error('Loading from the Google Sheet is disabled in the cloud app: the database is the system of record.');
   const t = await transport();
   if (!t) throw new Error('No Google Sheets connection here.');
   set({ state: 'syncing', message: 'Loading from Google Sheet…' });

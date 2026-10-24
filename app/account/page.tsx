@@ -1,14 +1,15 @@
 'use client';
 import Link from 'next/link';
 import AuthCard from '@/components/AuthCard';
-import { cloudSignOut, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { useCloudStatus } from '@/lib/cloud/cloudSync';
+import { signOutChecked } from '@/components/Shell';
 import { useStore } from '@/lib/store';
 
 export default function AccountPage() {
   const c = useCloudStatus();
   const { resetDemo } = useStore();
   const p = c.profile;
-  const signOut = () => cloudSignOut(resetDemo).then(() => (window.location.href = '/login'));
+  const signOut = () => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.href = '/login'; });
   if (c.auth === 'checking') return <AuthCard title="My account" subtitle="Loading…" />;
   if (c.auth === 'signed_out' || c.auth === 'expired')
     return <AuthCard title="Signed out" subtitle={c.auth === 'expired' ? 'Your offline access period ended. Connect to the internet and sign in again.' : 'Sign in to continue.'}><Link className="btn btn-primary" href="/login">Sign in</Link></AuthCard>;

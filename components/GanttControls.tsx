@@ -102,7 +102,7 @@ export default function GanttControls({ pid, activities, reports, stops, asOf, c
     const rem = num(remaining);
     if (!at || toIso(at) < open.stoppedAt) return setMsg({ ok: false, text: 'The restart must be after the stop.' });
     if (!supervisor.trim()) return setMsg({ ok: false, text: 'Name the supervisor confirming the restart.' });
-    if (!safety) return setMsg({ ok: false, text: 'Confirm that the required safety checks, permits and clearances are complete.' });
+    if (!safety) return setMsg({ ok: false, text: 'Confirm that the site supervisor has confirmed it is safe to restart.' });
     if (rem == null || !Number.isFinite(rem) || rem < 0) return setMsg({ ok: false, text: 'Estimate the remaining working days.' });
     restartWork(open.id, { restartedAt: toIso(at), restartSupervisor: supervisor.trim(), restartRemarks: remarks.trim(), safetyCleared: true, remainingDays: rem });
     upsertActivity({ ...a, remainingDays: rem });
@@ -193,8 +193,8 @@ export default function GanttControls({ pid, activities, reports, stops, asOf, c
               {mode === 'stop' && <label className="note"><input type="checkbox" checked={affects} onChange={(e) => setAffects(e.target.checked)} /> This stoppage affects the approved schedule</label>}
               {mode === 'restart' && (
                 <label className="note" style={{ display: 'block' }}>
-                  <input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Required safety checks, permits and clearances are complete and confirmed on site.
-                  The app records this confirmation; it does not authorize work at height or lift a safety hold.
+                  <input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> The site supervisor named above has confirmed it is safe to restart this work.
+                  <br /><b>This is not a permit-to-work.</b> It only records who confirmed the restart. Work at height still needs the site&apos;s own permit and rescue plan; the app does not check permits, certificates or equipment.
                 </label>
               )}
               <p className="note">Add photos or documents in <Link href={`/site-evidence?activity=${a.id}`}>Site evidence</Link>. Stop and restart records cannot be edited or deleted.</p>

@@ -7,7 +7,7 @@ import { askConfirm, IS_ARTIFACT, notify } from '@/components/Dialogs';
 import { CLOUD } from '@/lib/cloud/env';
 import SheetsSyncStatus from '@/components/SheetsSyncStatus';
 import { APPS_SCRIPT_CODE, checkScriptUrl, currentSettings, pullFromSheet, saveSettings, syncNow, useSyncStatus, type SyncSettings } from '@/lib/sheetsSync';
-import { SHEET_URL, TAB_NAMES, TABS, gridToRows, rowsToState, stateToRows, type Column, type Row, type TabName } from '@/lib/sheetSchema';
+import { SHEET_ID, SHEET_URL, TAB_NAMES, TABS, gridToRows, rowsToState, stateToRows, type Column, type Row, type TabName } from '@/lib/sheetSchema';
 import { readWorkbook, saveFile, type ExportDoc } from '@/lib/fileio';
 import type { AppState } from '@/lib/types';
 
@@ -33,8 +33,13 @@ function workbookDoc(st: AppState): ExportDoc {
   };
 }
 
+const SHEET_ID_SET = !!SHEET_ID;
+
 export default function SheetsSetup() {
   const { ready, state, replaceAll, resetDemo } = useStore();
+  // cloud: only Super Admins get the sheet's address, from the server
+  const [sheetLink, setSheetLink] = useState<string | null>(null);
+  useEffect(() => { if (CLOUD) fetch('/api/integrations/sheets/link').then((r) => (r.ok ? r.json() : null)).then((j) => setSheetLink(j?.url ?? null)).catch(() => undefined); }, []);
   const sync = useSyncStatus();
   const [cfg, setCfg] = useState<SyncSettings>({ auto: true, scriptUrl: '', token: '' });
   const [busy, setBusy] = useState(false);
@@ -132,7 +137,8 @@ export default function SheetsSetup() {
         </div>
         <div className="form-actions" style={{ marginTop: 0 }}>
           <DataIO doc={() => workbookDoc(state)} label="records" />
-          <a className="btn btn-sm btn-primary" href={SHEET_URL} target="_blank" rel="noreferrer">Open Google Sheet ↗</a>
+          {CLOUD ? sheetLink && <a className="btn btn-sm btn-primary" href={sheetLink} target="_blank" rel="noreferrer">Open Google Sheet ↗</a>
+            : SHEET_URL && SHEET_ID_SET && <a className="btn btn-sm btn-primary" href={SHEET_URL} target="_blank" rel="noreferrer">Open Google Sheet ↗</a>}
         </div>
       </div>
 

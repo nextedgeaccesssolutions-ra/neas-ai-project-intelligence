@@ -288,6 +288,7 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 94_location_approval.sql
 \ir 95_report_sharing.sql
 \ir 96_view_organization.sql
+\ir 97_p0_hardening.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

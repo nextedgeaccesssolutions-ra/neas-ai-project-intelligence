@@ -3,7 +3,9 @@ import type { Activity, AppState, BoqCategory, BoqLine, CostSettings, Evidence, 
 import { BOQ_CATEGORIES, DEFAULT_COST_SETTINGS } from './types';
 import { durationDays, latestReport, lineAmount, plannedPct, todayLocal } from './calc';
 
-export const SHEET_ID = '19e14iR4X8ZLDARO2auYe0Cm4jPoZGUlGvC9O2f9EIAQ';
+// Device-mode builds only (artifact/demo): the spreadsheet the browser itself syncs with.
+// Cloud builds leave it empty; the server mirrors to the sheet and hands its link to Super Admins.
+export const SHEET_ID = process.env.NEXT_PUBLIC_DEVICE_SHEET_ID ?? '';
 export const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
 
 export type Cell = string | number | boolean;
