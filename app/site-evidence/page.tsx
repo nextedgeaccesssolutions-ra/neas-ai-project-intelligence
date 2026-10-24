@@ -1,4 +1,7 @@
 'use client';
+import OrgToolbar, { GroupHeader } from '@/components/OrgToolbar';
+import { itemKey, useCollapsed, useViewOrg, type ViewGroup } from '@/lib/viewOrg';
+import { useCloudStatus } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
@@ -73,6 +76,14 @@ export default function SiteEvidence() {
   const [layout, setLayoutState] = useState<'2x4' | '2x6'>(() => { try { return localStorage.getItem('neas-evidence-layout') === '2x6' ? '2x6' : '2x4'; } catch { return '2x4'; } });
   const setLayout = (l: '2x4' | '2x6') => { setLayoutState(l); setPage(0); try { localStorage.setItem('neas-evidence-layout', l); } catch { /* per-device convenience only */ } };
   const [page, setPage] = useState(0);
+  const cloud = useCloudStatus();
+  const org = useViewOrg('evidence', cloud.profile?.id ?? null);
+  const sectionsOpen = useCollapsed('neas-evidence-groups-open');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
+  const [renaming, setRenamingState] = useState<ViewGroup | null>(null);
+  const [renameTo, setRenameTo] = useState('');
+  const setRenaming = (g: ViewGroup | null) => { setRenamingState(g); setRenameTo(g?.name ?? ''); };
   const [viewLoc, setViewLoc] = useState<LocationInfo | null>(null);
   const [requestFor, setRequestFor] = useState<Evidence | null>(null);
   const locReq = useLocationRequests(CLOUD ? pid : '');
@@ -223,16 +234,24 @@ export default function SiteEvidence() {
     return IO.evidenceDoc(state, images);
   };
 
+  // personal hide and saved groups: view only, the photos themselves never change
+  const listed = shown.filter((e) => (showHidden ? org.hiddenSet.has(itemKey('attachment', e.id)) : !org.hiddenSet.has(itemKey('attachment', e.id))));
+  const projGroups = org.groups.filter((g) => g.project_id === pid);
+  const sections = showHidden ? [] : projGroups.map((g) => ({ g, items: listed.filter((e) => org.groupOf.get(itemKey('attachment', e.id))?.id === g.id) })).filter((x) => x.items.length);
+  const ungrouped = showHidden ? listed : listed.filter((e) => !org.groupOf.get(itemKey('attachment', e.id)) || !projGroups.some((g) => g.id === org.groupOf.get(itemKey('attachment', e.id))!.id));
+  const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const pickedIds = [...picked].filter((id) => listed.some((e) => e.id === id));
+  const done = (ok: boolean, msg: string) => { if (ok) { notify(msg); setPicked(new Set()); } };
   const filtersOn = fActivity || fKind || fGps || fPair || ql;
   const perPage = layout === '2x6' ? 12 : 8;
   // required evidence: shown only for the activity being filtered, never filled with other photos
   const reqAct = fActivity ? activities.find((a) => a.id === fActivity) : undefined;
   const reqHave = reqAct ? evidence.filter((e) => e.activityId === reqAct.id).length : 0;
-  const reqMissing = reqAct?.requiredPhotos && !fKind && !fGps && !fPair && !ql ? Math.max(0, reqAct.requiredPhotos - reqHave) : 0;
-  const slots = shown.length + reqMissing;
+  const reqMissing = reqAct?.requiredPhotos && !showHidden && !fKind && !fGps && !fPair && !ql ? Math.max(0, reqAct.requiredPhotos - reqHave) : 0;
+  const slots = ungrouped.length + reqMissing;
   const pages = Math.max(1, Math.ceil(slots / perPage));
   const pg = Math.min(page, pages - 1);
-  const pageItems = shown.slice(pg * perPage, (pg + 1) * perPage);
+  const pageItems = ungrouped.slice(pg * perPage, (pg + 1) * perPage);
   const pageMissing = Math.max(0, Math.min(perPage - pageItems.length, slots - pg * perPage - pageItems.length));
   const withReq = activities.filter((a) => a.requiredPhotos);
   const locationOf = (e: Evidence): LocationInfo => ({
@@ -248,6 +267,83 @@ export default function SiteEvidence() {
       <button className="btn btn-sm" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button>
     </div>
   );
+
+  const card = (e: Evidence) => {
+    const isEditing = editing === e.id;
+    const edits = e.editCount ?? 0;
+    const canEdit = !CLOUD || reviewer || edits < 1;
+    const needsApproval = CLOUD && !reviewer && edits >= 1;
+    const partner = partnerOf(e);
+    const from = pairFrom ? byId.get(pairFrom) : undefined;
+    const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
+    return (
+      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }}>
+      <input type="checkbox" className="pick" checked={picked.has(e.id)} onChange={() => togglePick(e.id)} aria-label={`Select ${e.ref || e.kind} ${e.caption}`} />
+        <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
+        <figcaption className="meta">
+          {isEditing ? (
+            <>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as EvidenceKind)}>
+                  {KINDS.map((k) => <option key={k}>{k}</option>)}
+                </select>
+                <select className="input" style={{ width: 'auto', flex: 1 }} value={editActivity} onChange={(ev) => setEditActivity(ev.target.value)}>
+                  {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Description" />
+              <input className="input" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+              <input className="input" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+              <p className="note" style={{ margin: 0 }}>Capture time and GPS are kept as recorded.</p>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={() => {
+                  const patch: Partial<Evidence> = { kind: editKind, activityId: editActivity, caption: editCaption, workArea: editArea.trim(), locationDetail: editLoc.trim(), editCount: edits + 1 };
+                  if (editKind !== e.kind && partner && (!pairable(editKind) || editKind === partner.kind)) { patch.pairId = null; updateEvidence(partner.id, { pairId: null }); }
+                  updateEvidence(e.id, patch); setEditing(null); notify('Photo updated.');
+                }}>Save</button>
+                <button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <span><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span> <b>{e.ref || '—'}</b></span>
+              <span>{name(e.activityId)}{e.workArea ? ` · ${e.workArea}` : ''}</span>
+              {e.locationDetail && <span className="note">{e.locationDetail}</span>}
+              <span>{e.caption || <span className="note">No description</span>}</span>
+              <span className="note">Captured {new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+              <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                📍 {gpsLabel(e)}
+                {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
+                {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setViewLoc(locationOf(e))}>View location</button>}
+                {(() => { const r = locReq.list.find((x) => x.attachment_id === e.id && (x.status === 'pending' || x.status === 'clarification')); return r ? <span className="pill pill-warn">{REQUEST_LABEL[r.status]}</span> : null; })()}
+                {CLOUD && !locReq.list.some((x) => x.attachment_id === e.id && x.status === 'pending') && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setRequestFor(e)}>Request manual location</button>}
+                {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => navigator.clipboard?.writeText(`${e.gps!.lat}, ${e.gps!.lng}`).then(() => notify('Coordinates copied.'), () => notify(`${e.gps!.lat}, ${e.gps!.lng}`))}>Copy</button>}
+              </span>
+              {pairable(e.kind) && (
+                <span className="note">
+                  {partner ? <>🔗 Paired with <b>{partner.ref || partner.kind}</b></> : <span className="pill pill-warn">No matching {e.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo</span>}
+                </span>
+              )}
+              {CLOUD && reviewer && (
+                <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
+                  <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
+                </label>
+              )}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
+                {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
+                {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
+                {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: evidence.filter((x) => x.isCover).length + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
+                {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
+                {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
+                {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
+              </div>
+            </>
+          )}
+        </figcaption>
+      </figure>
+    );
+  };
 
   return (
     <>
@@ -380,7 +476,7 @@ export default function SiteEvidence() {
 
       <section className="card" id="evidence-card">
         <div className="card-head">
-          <h2>Evidence gallery ({shown.length}{filtersOn ? ` of ${evidence.length}` : ''})</h2>
+          <h2>Evidence gallery ({listed.length}{filtersOn || showHidden ? ` of ${evidence.length}` : ''})</h2>
           <label className="note" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>Layout
             <select className="input" style={{ width: 'auto' }} value={layout} onChange={(e) => setLayout(e.target.value as '2x4' | '2x6')}>
               <option value="2x4">2 × 4 (8 per page)</option>
@@ -416,84 +512,51 @@ export default function SiteEvidence() {
             <button className="btn btn-sm" onClick={() => setPairFrom(null)}>Cancel</button>
           </div>
         )}
-        {slots === 0 ? <div className="empty">{evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div> : (
+        <OrgToolbar
+          selected={pickedIds.length}
+          groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)}
+          canShare={CLOUD && reviewer}
+          showHidden={showHidden}
+          hiddenCount={evidence.filter((e) => org.hiddenSet.has(itemKey('attachment', e.id))).length}
+          anyGrouped={pickedIds.some((id) => org.groupOf.has(itemKey('attachment', id)))}
+          onGroup={async (t) => { const ok = !!(await org.group(pid, 'attachment', pickedIds, t)); done(ok, `Grouped ${pickedIds.length} photo(s). The photos themselves did not change.`); return ok; }}
+          onUngroup={async () => done(await org.ungroup('attachment', pickedIds), 'Ungrouped. The photos are back in the main list.')}
+          onHide={async () => done(await org.hide(() => pid, 'attachment', pickedIds), `Hidden from your view: ${pickedIds.length} photo(s). Find them under Hidden items.`)}
+          onUnhide={async () => done(await org.unhide(() => pid, 'attachment', pickedIds), 'Back in your list.')}
+          onToggleHidden={() => { setShowHidden((v) => !v); setPicked(new Set()); setPage(0); }}
+          onClear={() => setPicked(new Set())}
+          onSelectAll={() => setPicked(new Set(listed.map((e) => e.id)))}
+        />
+        {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
+        {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a photo or changes who can see it; other people and reports still include it.</p>}
+        {sections.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <button className="btn btn-sm" onClick={() => sectionsOpen.setAll(sections.map((x) => x.g.id))}>Expand all groups</button>
+            <button className="btn btn-sm" onClick={() => sectionsOpen.setAll([])}>Collapse all groups</button>
+          </div>
+        )}
+        {sections.map(({ g, items }) => {
+          const editable = g.scope === 'personal' || reviewer;
+          return (
+            <div key={g.id}>
+              <GroupHeader label={g.name} count={items.length} open={sectionsOpen.isOpen(g.id)} onToggle={() => sectionsOpen.toggle(g.id)} badge={g.scope === 'project' ? 'Shared with project' : 'Only you'}
+                onRename={editable ? () => setRenaming(g) : undefined}
+                onRemove={editable ? () => askConfirm(`Remove the group "${g.name}"? Its ${items.length} photo(s) go back to the main list. No photo is deleted.`, { danger: false }).then(async (ok) => { if (ok && await org.remove(g)) notify('Group removed. The photos are back in the main list.'); }) : undefined} />
+              {sectionsOpen.isOpen(g.id) && <div className={`evidence-grid layout-${layout}`}>{items.map(card)}</div>}
+            </div>
+          );
+        })}
+        {renaming && (
+          <form className="org-form" onSubmit={async (ev) => { ev.preventDefault(); if (await org.rename(renaming, renameTo)) { notify('Group renamed.'); setRenaming(null); } }}>
+            <label className="field">New name for “{renaming.name}”<input className="input" autoFocus maxLength={80} required value={renameTo} onChange={(ev) => setRenameTo(ev.target.value)} /></label>
+            <div className="form-actions"><button className="btn btn-sm btn-primary">Rename</button><button type="button" className="btn btn-sm" onClick={() => setRenaming(null)}>Cancel</button></div>
+          </form>
+        )}
+        {sections.length > 0 && slots > 0 && <h3 className="share-sub">Not in a group ({ungrouped.length})</h3>}
+        {slots === 0 ? (sections.length ? null : <div className="empty">{showHidden ? 'You have not hidden any photos.' : evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div>) : (
           <>{pager}
           <div className={`evidence-grid layout-${layout}`}>
-            {pageItems.map((e) => {
-              const isEditing = editing === e.id;
-              const edits = e.editCount ?? 0;
-              const canEdit = !CLOUD || reviewer || edits < 1;
-              const needsApproval = CLOUD && !reviewer && edits >= 1;
-              const partner = partnerOf(e);
-              const from = pairFrom ? byId.get(pairFrom) : undefined;
-              const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
-              return (
-                <figure key={e.id} className="photo" style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }}>
-                  <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
-                  <figcaption className="meta">
-                    {isEditing ? (
-                      <>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <select className="input" style={{ width: 'auto' }} value={editKind} onChange={(ev) => setEditKind(ev.target.value as EvidenceKind)}>
-                            {KINDS.map((k) => <option key={k}>{k}</option>)}
-                          </select>
-                          <select className="input" style={{ width: 'auto', flex: 1 }} value={editActivity} onChange={(ev) => setEditActivity(ev.target.value)}>
-                            {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                          </select>
-                        </div>
-                        <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Description" />
-                        <input className="input" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
-                        <input className="input" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
-                        <p className="note" style={{ margin: 0 }}>Capture time and GPS are kept as recorded.</p>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn-sm btn-primary" onClick={() => {
-                            const patch: Partial<Evidence> = { kind: editKind, activityId: editActivity, caption: editCaption, workArea: editArea.trim(), locationDetail: editLoc.trim(), editCount: edits + 1 };
-                            if (editKind !== e.kind && partner && (!pairable(editKind) || editKind === partner.kind)) { patch.pairId = null; updateEvidence(partner.id, { pairId: null }); }
-                            updateEvidence(e.id, patch); setEditing(null); notify('Photo updated.');
-                          }}>Save</button>
-                          <button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <span><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span> <b>{e.ref || '—'}</b></span>
-                        <span>{name(e.activityId)}{e.workArea ? ` · ${e.workArea}` : ''}</span>
-                        {e.locationDetail && <span className="note">{e.locationDetail}</span>}
-                        <span>{e.caption || <span className="note">No description</span>}</span>
-                        <span className="note">Captured {new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
-                        <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                          📍 {gpsLabel(e)}
-                          {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
-                          {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setViewLoc(locationOf(e))}>View location</button>}
-                          {(() => { const r = locReq.list.find((x) => x.attachment_id === e.id && (x.status === 'pending' || x.status === 'clarification')); return r ? <span className="pill pill-warn">{REQUEST_LABEL[r.status]}</span> : null; })()}
-                          {CLOUD && !locReq.list.some((x) => x.attachment_id === e.id && x.status === 'pending') && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setRequestFor(e)}>Request manual location</button>}
-                          {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => navigator.clipboard?.writeText(`${e.gps!.lat}, ${e.gps!.lng}`).then(() => notify('Coordinates copied.'), () => notify(`${e.gps!.lat}, ${e.gps!.lng}`))}>Copy</button>}
-                        </span>
-                        {pairable(e.kind) && (
-                          <span className="note">
-                            {partner ? <>🔗 Paired with <b>{partner.ref || partner.kind}</b></> : <span className="pill pill-warn">No matching {e.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo</span>}
-                          </span>
-                        )}
-                        {CLOUD && reviewer && (
-                          <label className="note" style={{ display: 'inline-flex', gap: 4 }}>
-                            <input type="checkbox" checked={!!clientVisible[e.id]} onChange={(ev) => toggleClientVisible(e.id, ev.target.checked)} /> client
-                          </label>
-                        )}
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
-                          {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
-                          {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
-                          {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: evidence.filter((x) => x.isCover).length + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
-                          {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
-                          {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
-                          {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
-                        </div>
-                      </>
-                    )}
-                  </figcaption>
-                </figure>
-              );
-            })}
+            {pageItems.map(card)}
             {Array.from({ length: pageMissing }, (_, i) => (
               <div key={`missing-${i}`} className="slot-empty">
                 <div className="slot-box">

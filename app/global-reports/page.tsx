@@ -10,6 +10,9 @@ import { canManage, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { todayLocal, addDays } from '@/lib/calc';
 import { fmtDate } from '@/lib/format';
 import ShareDialog from '@/components/ShareDialog';
+import OrgToolbar from '@/components/OrgToolbar';
+import { notify } from '@/components/Dialogs';
+import { itemKey, useViewOrg, type ItemKind } from '@/lib/viewOrg';
 import { countBy, dayRange, KIND_LABEL, kpis, localDay, perDay, perMonth, STATUS_LABEL, type ReportRow, type ShareRow } from '@/lib/reportStats';
 
 type Ev = { at: string; text: string; ref: string; who: string | null };
@@ -22,7 +25,10 @@ const RANGES = [7, 30, 90] as const;
 
 export default function GlobalReports() {
   const { ready, state, setActiveProject } = useStore();
-  useCloudStatus();
+  const cloud = useCloudStatus();
+  const org = useViewOrg('reports', cloud.profile?.id ?? null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
   const today = todayLocal();
   const [field, setField] = useState<DbField[] | null>(null);
   const [exportsRows, setExports] = useState<DbExport[]>([]);
@@ -40,7 +46,7 @@ export default function GlobalReports() {
   const [fProject, setFProject] = useState('');
   const [sort, setSort] = useState<{ key: 'createdAt' | 'updatedAt' | 'projectCode' | 'status'; dir: 1 | -1 }>({ key: 'createdAt', dir: -1 });
   const [page, setPage] = useState(0);
-  const [groupBy, setGroupBy] = useState<'' | 'project' | 'day' | 'kind' | 'status'>('project');
+  const [groupBy, setGroupBy] = useState<'' | 'saved' | 'project' | 'day' | 'kind' | 'status'>('project');
   const [openGroups, setOpenGroups] = useState<Set<string> | null>(null);
   const [share, setShare] = useState<{ id: string; code: string; name: string } | null>(null);
   const [reload, setReload] = useState(0);
@@ -91,16 +97,23 @@ export default function GlobalReports() {
   const days = dayRange(span.from, span.to);
   const shareEvents = events.filter((e) => { const d = localDay(e.at); return d >= span.from && d <= span.to; });
 
+  const kindOf = (r: ReportRow): ItemKind => (r.kind === 'field' ? 'field_report' : 'project_export');
+  const keyOf = (r: ReportRow) => itemKey(kindOf(r), r.id);
   const filtered = rows
+    .filter((r) => (showHidden ? org.hiddenSet.has(keyOf(r)) : !org.hiddenSet.has(keyOf(r))))
     .filter((r) => (!fKind || r.kind === fKind) && (!fStatus || r.status === fStatus) && (!fProject || r.projectId === fProject))
     .filter((r) => !debounced || `${r.ref} ${r.title} ${r.projectCode} ${proj.get(r.projectId)?.name ?? ''} ${names.get(r.createdBy ?? '') ?? ''}`.toLowerCase().includes(debounced))
     .sort((a, b) => sort.dir * String(a[sort.key]).localeCompare(String(b[sort.key])));
+  const pickedRows = filtered.filter((r) => picked.has(keyOf(r)));
+  const pickedProjects = [...new Set(pickedRows.map((r) => r.projectId))];
+  const pickedProject = pickedProjects.length === 1 ? pickedProjects[0] : null;
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const pg = Math.min(page, pages - 1);
   const shownShares = (pid: string) => shares.filter((s) => s.project_id === pid && !s.revoked_at && Date.parse(s.expires_at) > Date.now()).length;
 
   const groupKey = (r: ReportRow): [string, string] =>
-    groupBy === 'project' ? [r.projectId, [r.projectCode !== '—' ? r.projectCode : '', proj.get(r.projectId)?.name ?? ''].filter(Boolean).join(' · ') || 'No project']
+    groupBy === 'saved' ? (() => { const g = org.groupOf.get(keyOf(r)); return g ? [g.id, `${g.name} · ${r.projectCode}${g.scope === 'project' ? ' (shared)' : ''}`] : ['~none', 'Not in a saved group']; })()
+      : groupBy === 'project' ? [r.projectId, [r.projectCode !== '—' ? r.projectCode : '', proj.get(r.projectId)?.name ?? ''].filter(Boolean).join(' · ') || 'No project']
       : groupBy === 'day' ? [localDay(r.createdAt), fmtDate(localDay(r.createdAt))]
       : groupBy === 'kind' ? [r.kind, KIND_LABEL[r.kind]]
       : [r.status, STATUS_LABEL[r.status] ?? r.status];
@@ -121,7 +134,8 @@ export default function GlobalReports() {
     const p = proj.get(r.projectId);
     const n = shownShares(r.projectId);
     return (
-      <tr key={`${r.kind}:${r.id}`}>
+      <tr key={`${r.kind}:${r.id}`} className={picked.has(keyOf(r)) ? 'row-picked' : undefined}>
+        <td><input type="checkbox" checked={picked.has(keyOf(r))} onChange={() => setPicked((p) => { const n = new Set(p); const k = keyOf(r); if (n.has(k)) n.delete(k); else n.add(k); return n; })} aria-label={`Select ${r.ref}`} /></td>
         <td className="mono">{r.ref}</td>
         <td className="clip" title={r.title}>{r.title}</td>
         <td className="nowrap">{r.kind === 'field' ? 'Field' : `Project · ${r.format}`}</td>
@@ -241,21 +255,49 @@ export default function GlobalReports() {
           <select className="input" aria-label="Status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}><option value="">All statuses</option>{Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <select className="input" aria-label="Project" value={fProject} onChange={(e) => setFProject(e.target.value)}><option value="">All projects</option>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.code ?? p.name} · {p.name}</option>)}</select>
           <select className="input" aria-label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>
-            <option value="project">Group by project</option><option value="day">Group by date</option><option value="kind">Group by type</option><option value="status">Group by status</option><option value="">No grouping</option>
+            <option value="saved">Saved groups</option><option value="project">Group by project</option><option value="day">Group by date</option><option value="kind">Group by type</option><option value="status">Group by status</option><option value="">No grouping</option>
           </select>
           {(q || fKind || fStatus || fProject) && <button className="btn btn-sm" onClick={() => { setQ(''); setFKind(''); setFStatus(''); setFProject(''); }}>Clear</button>}
         </div>
-        {!filtered.length ? <div className="empty">{rows.length ? 'No reports match these filters.' : 'No reports yet. Field reports and generated project reports appear here.'}</div> : (
+        <OrgToolbar
+          selected={pickedRows.length}
+          groups={pickedProject ? org.groups.filter((g) => g.project_id === pickedProject && (g.scope === 'personal' || canManage(pickedProject))) : []}
+          canShare={CLOUD && !!pickedProject && canManage(pickedProject)}
+          showHidden={showHidden}
+          hiddenCount={rows.filter((r) => org.hiddenSet.has(keyOf(r))).length}
+          anyGrouped={pickedRows.some((r) => org.groupOf.has(keyOf(r)))}
+          onGroup={async (t) => {
+            if (!pickedProject) { notify('Select reports from one project to group them.'); return false; }
+            let ok = true;
+            for (const k of ['field_report', 'project_export'] as ItemKind[]) {
+              const ids = pickedRows.filter((r) => kindOf(r) === k).map((r) => r.id);
+              if (!ids.length) continue;
+              const gid = await org.group(pickedProject, k, ids, t);
+              if (gid) t = { id: gid }; else ok = false;
+            }
+            if (ok) { notify(`Grouped ${pickedRows.length} report(s). The reports themselves did not change.`); setPicked(new Set()); setGroupBy('saved'); }
+            return ok;
+          }}
+          onUngroup={async () => { let ok = true; for (const k of ['field_report', 'project_export'] as ItemKind[]) { const ids = pickedRows.filter((r) => kindOf(r) === k).map((r) => r.id); if (ids.length) ok = (await org.ungroup(k, ids)) && ok; } if (ok) { notify('Ungrouped.'); setPicked(new Set()); } }}
+          onHide={async () => { let ok = true; for (const k of ['field_report', 'project_export'] as ItemKind[]) { const ids = pickedRows.filter((r) => kindOf(r) === k).map((r) => r.id); if (ids.length) ok = (await org.hide((id) => rows.find((r) => r.id === id)!.projectId, k, ids)) && ok; } if (ok) { notify(`Hidden from your view: ${pickedRows.length} report(s). Find them under Hidden items.`); setPicked(new Set()); } }}
+          onUnhide={async () => { let ok = true; for (const k of ['field_report', 'project_export'] as ItemKind[]) { const ids = pickedRows.filter((r) => kindOf(r) === k).map((r) => r.id); if (ids.length) ok = (await org.unhide((id) => rows.find((r) => r.id === id)!.projectId, k, ids)) && ok; } if (ok) { notify('Back in your list.'); setPicked(new Set()); } }}
+          onToggleHidden={() => { setShowHidden((v) => !v); setPicked(new Set()); }}
+          onClear={() => setPicked(new Set())}
+          onSelectAll={() => setPicked(new Set(filtered.map(keyOf)))}
+        />
+        {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
+        {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a report or changes who can see it.</p>}
+        {!filtered.length ? <div className="empty">{showHidden ? 'You have not hidden any reports.' : rows.length ? 'No reports match these filters.' : 'No reports yet. Field reports and generated project reports appear here.'}</div> : (
           <div className="table-wrap">
             <table className="tbl report-tbl">
               <thead><tr>
-                <th>Reference</th><th>Title</th><th>Type</th><th>{sortBtn('projectCode', 'Project')}</th><th>Created by</th><th>{sortBtn('createdAt', 'Created')}</th><th>{sortBtn('status', 'Status')}</th><th>Sharing</th><th>{sortBtn('updatedAt', 'Updated')}</th><th>Actions</th>
+                <th><span className="sr-only">Select</span></th><th>Reference</th><th>Title</th><th>Type</th><th>{sortBtn('projectCode', 'Project')}</th><th>Created by</th><th>{sortBtn('createdAt', 'Created')}</th><th>{sortBtn('status', 'Status')}</th><th>Sharing</th><th>{sortBtn('updatedAt', 'Updated')}</th><th>Actions</th>
               </tr></thead>
               {groupBy ? groups.map(([key, label, items]) => {
                 const isOpen = groupOpen(key);
                 return (
                   <tbody key={key}>
-                    <tr className="group-row"><td colSpan={10}>
+                    <tr className="group-row"><td colSpan={11}>
                       <button className="group-toggle" aria-expanded={isOpen} onClick={() => toggleGroup(key)}>
                         <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span> <b>{label}</b><span className="note"> · {items.length} report(s)</span>
                       </button>

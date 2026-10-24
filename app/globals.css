@@ -478,3 +478,15 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
 .report-tbl td.clip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-tbl .nowrap { white-space: nowrap; }
 .report-tbl .row-actions { white-space: nowrap; }
+.org-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); margin-bottom: 10px; position: sticky; top: 64px; z-index: 5; }
+.org-count { font-weight: 600; margin-right: auto; }
+.org-form { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.org-form .field { flex: 1 1 180px; min-width: 0; }
+.org-head { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); margin: 10px 0 6px; }
+.org-head .group-toggle { flex: 1; }
+.org-head .row-actions { padding-right: 8px; }
+.pick { position: absolute; top: 8px; left: 8px; z-index: 2; width: 22px; height: 22px; accent-color: var(--gold); }
+.photo { position: relative; }
+.photo.picked { outline: 3px solid var(--gold); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.row-picked td { background: rgba(202, 147, 50, .08); }
