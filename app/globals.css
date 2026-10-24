@@ -471,3 +471,6 @@ code.block { display: block; white-space: pre; overflow-x: auto; background: #0b
   .auth-hero { padding: 22px; }
   .auth-hero h1 { font-size: 30px; }
 }
+.group-row td { background: var(--bg); padding: 0; }
+.group-toggle { width: 100%; text-align: left; background: none; border: 0; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
+.group-toggle:hover { background: rgba(202, 147, 50, .08); }

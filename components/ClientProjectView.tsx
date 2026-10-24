@@ -64,10 +64,7 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
         <section className="card">
           <div className="card-head"><h2>Progress reports</h2></div>
           {!view.reports.length ? <div className="empty">No approved reports yet.</div> : (
-            <table className="tbl">
-              <thead><tr><th>Date</th><th>Activity</th><th className="num">Progress</th><th>Summary</th></tr></thead>
-              <tbody>{view.reports.map((r, i) => <tr key={i}><td>{fmtDate(r.report_date)}</td><td>{r.activity ?? '—'}</td><td className="num">{r.actual_pct != null ? fmtPct(Number(r.actual_pct)) : '—'}</td><td>{r.notes}</td></tr>)}</tbody>
-            </table>
+            <ReportGroups reports={view.reports} />
           )}
         </section>
       )}
@@ -128,6 +125,47 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
         }}
       />
       {footer}
+    </>
+  );
+}
+
+type Rep = NonNullable<ClientView['reports']>[number];
+
+/** Approved reports grouped by date: the latest day is open, older days collapse to one line each. */
+function ReportGroups({ reports }: { reports: Rep[] }) {
+  const days = [...new Set(reports.map((r) => r.report_date))].sort((a, b) => b.localeCompare(a));
+  const [open, setOpen] = useState<Set<string>>(() => new Set(days.slice(0, 1)));
+  const toggle = (d: string) => setOpen((o) => { const n = new Set(o); if (n.has(d)) n.delete(d); else n.add(d); return n; });
+  return (
+    <>
+      <div className="grid-pager">
+        <span className="note">{reports.length} report(s) on {days.length} day(s)</span>
+        <button className="btn btn-sm" onClick={() => setOpen(new Set(days))}>Expand all</button>
+        <button className="btn btn-sm" onClick={() => setOpen(new Set())}>Collapse all</button>
+      </div>
+      <div className="table-wrap">
+        <table className="tbl group-tbl">
+          <thead><tr><th>Date</th><th>Activity</th><th className="num">Progress</th><th>Summary</th></tr></thead>
+          {days.map((d) => {
+            const rows = reports.filter((r) => r.report_date === d);
+            const acts = new Set(rows.map((r) => r.activity ?? '—'));
+            const isOpen = open.has(d);
+            return (
+              <tbody key={d}>
+                <tr className="group-row">
+                  <td colSpan={4}>
+                    <button className="group-toggle" aria-expanded={isOpen} onClick={() => toggle(d)}>
+                      <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span> <b>{fmtDate(d)}</b>
+                      <span className="note"> · {rows.length} report(s) · {acts.size} activit{acts.size === 1 ? 'y' : 'ies'}</span>
+                    </button>
+                  </td>
+                </tr>
+                {isOpen && rows.map((r, i) => <tr key={i}><td></td><td>{r.activity ?? '—'}</td><td className="num">{r.actual_pct != null ? fmtPct(Number(r.actual_pct)) : '—'}</td><td>{r.notes}</td></tr>)}
+              </tbody>
+            );
+          })}
+        </table>
+      </div>
     </>
   );
 }
