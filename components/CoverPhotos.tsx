@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import PhotoThumb from '@/components/PhotoThumb';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
+import { COVER_CATEGORIES } from '@/lib/types';
 import { coverPhotos, coverReference, reorderCover, COVER_TILE_CM } from '@/lib/coverPhotos';
 import type { Evidence, Project } from '@/lib/types';
 
@@ -19,6 +20,8 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
   const [loc, setLoc] = useState<LocationInfo | null>(null);
   const [pick, setPick] = useState('');
   const [upCaption, setUpCaption] = useState('');
+  // inline edit of a cover photo's heading details (category, description, work area, location)
+  const [edit, setEdit] = useState<{ id: string; coverCategory: string; caption: string; workArea: string; locationDetail: string } | null>(null);
   const cover = coverPhotos(evidence);
   const candidates = evidence.filter((e) => !e.isCover).sort((a, b) => Number(b.kind === 'Reference') - Number(a.kind === 'Reference') || b.takenAt.localeCompare(a.takenAt));
 
@@ -72,7 +75,27 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
               <figure key={e.id} className="cover-tile" style={{ width: cover.length === 1 ? 'min(100%, 560px)' : `min(100%, calc(${COVER_TILE_CM}cm + 120px))` }}>
                 <div className="cover-square"><PhotoThumb id={e.id} storagePath={e.storagePath} alt={ref.title} /></div>
                 <figcaption className="cover-ref">
-                  <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}
+                  {edit?.id === e.id ? (
+                    <form style={{ display: 'grid', gap: 6 }} onSubmit={(ev) => {
+                      ev.preventDefault();
+                      updateEvidence(e.id, { ...(canManage ? { coverCategory: (edit.coverCategory || null) as Evidence['coverCategory'] } : {}), caption: edit.caption.trim(), workArea: edit.workArea.trim(), locationDetail: edit.locationDetail.trim() });
+                      setEdit(null);
+                    }}>
+                      {canManage && <label className="field">Category
+                        <select className="input" value={edit.coverCategory} onChange={(x) => setEdit({ ...edit, coverCategory: x.target.value })}>
+                          <option value="">(none — use the description)</option>
+                          {COVER_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </label>}
+                      <label className="field">Description<input className="input" maxLength={300} value={edit.caption} onChange={(x) => setEdit({ ...edit, caption: x.target.value })} /></label>
+                      <label className="field">Work area<input className="input" maxLength={200} value={edit.workArea} onChange={(x) => setEdit({ ...edit, workArea: x.target.value })} placeholder="e.g. North facade" /></label>
+                      <label className="field">Building / floor / location<input className="input" maxLength={200} value={edit.locationDetail} onChange={(x) => setEdit({ ...edit, locationDetail: x.target.value })} placeholder="e.g. Tower 1 · L12" /></label>
+                      <div className="form-actions" style={{ marginTop: 0 }}><button className="btn btn-sm btn-primary">Save</button><button type="button" className="btn btn-sm" onClick={() => setEdit(null)}>Cancel</button></div>
+                    </form>
+                  ) : <>
+                    <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}{' '}
+                    <button className="btn btn-sm" onClick={() => setEdit({ id: e.id, coverCategory: e.coverCategory ?? '', caption: e.caption ?? '', workArea: e.workArea ?? '', locationDetail: e.locationDetail ?? '' })}>Edit details</button>
+                  </>}
                   <dl>{ref.lines.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
                   <span className="note">{sync ?? 'Saved'}</span>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
