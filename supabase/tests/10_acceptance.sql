@@ -300,6 +300,7 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 99e_client_accounts.sql
 \ir 99f_client_draft_projects.sql
 \ir 99g_client_login_reset.sql
+\ir 99h_report_templates.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off

@@ -1,0 +1,24 @@
+-- Per-project report templates and reports filled in from them.
+reset role;
+insert into neas.project_memberships (project_id, user_id, role) values ('10000000-0000-0000-0000-000000000098', '00000000-0000-0000-0000-0000000000d1', 'employee') on conflict do nothing;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', false);
+select test.expect_error('templates: staff cannot create a template', $$select neas.save_report_template(null, '10000000-0000-0000-0000-000000000098', 'Mine', '{"sections": []}')$$);
+select test.check('templates: staff see the library', (select count(*) >= 1 from neas.report_templates where project_id is null));
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select test.expect_error('templates: a template needs a sections list', $$select neas.save_report_template(null, '10000000-0000-0000-0000-000000000098', 'Bad', '{"title": "x"}')$$);
+create temp table tt as select neas.save_report_template(null, '10000000-0000-0000-0000-000000000098', 'Mast inspection', (select definition from neas.report_templates where project_id is null limit 1)) as id;
+select test.expect_error('templates: names are unique per project', $$select neas.save_report_template(null, '10000000-0000-0000-0000-000000000098', 'mast inspection', '{"sections": []}')$$);
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', false);
+insert into neas.template_reports (project_id, template_id, title, definition) select '10000000-0000-0000-0000-000000000098', id, 'Q2 report', '{"sections": []}' from tt;
+select test.check('templates: a project member starts a report as a draft', (select status = 'draft' and updated_by = auth.uid() from neas.template_reports where title = 'Q2 report'));
+select test.expect_error('templates: staff cannot finalise a report', $$update neas.template_reports set status = 'final' where title = 'Q2 report'$$);
+select test.expect_error('templates: a report cannot move to another project', $$update neas.template_reports set project_id = '10000000-0000-0000-0000-000000000099' where title = 'Q2 report'$$);
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b1', false);
+select test.check('templates: people outside the project do not see its reports', (select count(*) = 0 from neas.template_reports where title = 'Q2 report'));
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+update neas.template_reports set status = 'final' where title = 'Q2 report';
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', false);
+select test.expect_error('templates: a final report is locked for staff', $$update neas.template_reports set title = 'Changed' where title = 'Q2 report'$$);
+reset role;
+drop table tt;

@@ -6,7 +6,7 @@ import { useStore } from '@/lib/store';
 import DialogHost, { IS_ARTIFACT } from '@/components/Dialogs';
 import { useSyncStatus } from '@/lib/sheetsSync';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, canView, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
+import { canManage, canView, isClientViews, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
 import { requestPersistentStorage, unsentSummary, type PersistState } from '@/lib/offline/persist';
 import { askConfirm } from '@/components/Dialogs';
 
@@ -60,6 +60,7 @@ export const NAV = [
   { href: '/site-evidence', label: 'Site evidence', icon: 'camera', group: 'Field operations' },
   { href: '/global-reports', label: 'Global reports', icon: 'chart', group: 'Reports' },
   { href: '/reports', label: 'Project reports', icon: 'doc', group: 'Reports' },
+  { href: '/templates', label: 'Report templates', icon: 'doc', group: 'Reports' },
   { href: '/google-sheets', label: 'Google Sheets sync', icon: 'sheet', group: 'Reports' },
   { href: '/estimating', label: 'Estimating & BOQ', icon: 'list', group: 'Commercial' },
   { href: '/quotation', label: 'Quotation preview', icon: 'quote', group: 'Commercial' },
@@ -148,7 +149,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
     return <div className="auth-wrap"><div className="auth-card note">{cloud.auth === 'checking' ? 'Checking your access…' : 'Redirecting to sign in…'}</div></div>;
   }
   const isAdmin = CLOUD && cloud.profile?.global_role === 'super_admin';
-  const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile)));
+  const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile) && !(n.href === '/templates' && isClientViews(cloud.profile?.allowed_views))));
   const blocked = CLOUD && !pathname.startsWith('/admin') && !canView(viewOfPath(pathname), cloud.profile);
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
