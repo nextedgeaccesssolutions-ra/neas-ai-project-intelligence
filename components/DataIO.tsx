@@ -100,7 +100,8 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
         window.location.href = '/templates?imported=1';
       } catch (e) {
         setBusy(null);
-        notify((e as Error).message);
+        const m = (e as Error).message;
+        notify(/dynamically imported module|Failed to fetch/i.test(m) ? 'Reading Word or PowerPoint files needs a connection the first time. Try again when you are online.' : m);
       }
       return;
     }

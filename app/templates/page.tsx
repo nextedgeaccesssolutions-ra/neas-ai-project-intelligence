@@ -64,7 +64,8 @@ export default function TemplatesPage() {
   useEffect(() => { void load(); }, [load]);
   // a Word / PowerPoint file chosen in another page's Import arrives here, ready to review
   useEffect(() => {
-    if (!pid || !/[?&]imported=1/.test(window.location.search)) return;
+    // wait for the project and the person's roles (they load after a page reload) before deciding
+    if (!pid || !cloud.profile || !/[?&]imported=1/.test(window.location.search)) return;
     try {
       const raw = sessionStorage.getItem('neas-imported-template');
       sessionStorage.removeItem('neas-imported-template');
@@ -75,7 +76,7 @@ export default function TemplatesPage() {
       setEditing({ id: '', project_id: pid, name, definition, updated_at: '' });
       notify(`Read ${definition.sections.length} section(s) from ${name}. Check them, then press Save template.`);
     } catch { /* nothing to pick up */ }
-  }, [pid]);
+  }, [pid, cloud.profile, cloud.memberships]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const on = () => void load();
     window.addEventListener('online', on);
