@@ -35,6 +35,19 @@ export default function OfflineQueue() {
     notify('Discarded.');
   };
 
+  const stuck = ops.filter((o) => o.status === 'conflict' || o.status === 'rejected');
+  const conflicts = ops.filter((o) => o.status === 'conflict');
+  const discardAll = async () => {
+    if (!(await askConfirm(`Discard all ${stuck.length} conflicting or refused changes on this device? They have not reached the server; the server copies stay as they are. This cannot be undone.`))) return;
+    for (const o of stuck) await discardOp(o.op_id);
+    notify(`Discarded ${stuck.length} change(s).`);
+  };
+  const serverAll = async () => {
+    if (!(await askConfirm(`Use the server version for all ${conflicts.length} conflicts? Your offline edits to those records are dropped.`))) return;
+    for (const o of conflicts) { applyServerRecord(o); await resolveConflict(o.op_id, 'server'); }
+    notify(`Kept the server version for ${conflicts.length} record(s).`);
+  };
+
   return (
     <>
       <div className="page-head">
@@ -53,6 +66,12 @@ export default function OfflineQueue() {
       </section>
       {c.error && <div className="banner">{c.error}</div>}
       <section className="card">
+        {stuck.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0, justifyContent: 'flex-end' }}>
+            {conflicts.length > 0 && <button className="btn btn-sm" onClick={serverAll}>Use server version for all ({conflicts.length})</button>}
+            <button className="btn btn-sm btn-danger" onClick={discardAll}>Discard all conflicts &amp; errors ({stuck.length})</button>
+          </div>
+        )}
         {!ops.length ? <div className="empty">Everything is synchronized.</div> : (
           <div className="table-wrap">
             <table className="tbl">
