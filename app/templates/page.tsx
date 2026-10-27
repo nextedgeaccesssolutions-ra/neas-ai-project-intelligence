@@ -12,8 +12,9 @@ import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync'
 import { getPhoto } from '@/lib/photos';
 import { saveFile } from '@/lib/fileio';
 import { fmtDate } from '@/lib/format';
+import { cacheProject, cachedProject, dropPending, flushPending, keepOnDevice, pendingFor, type PendingSave } from '@/lib/templateReportDrafts';
 import {
-  blankReport, KIND_LABEL, newSectionId, normaliseTemplate, templateReportDocx,
+  blankReport, chartCounts, KIND_LABEL, newSectionId, normaliseTemplate, templateReportDocx, templateReportPdf,
   type SectionData, type SectionKind, type TemplateDefinition, type TemplateReportData, type TemplateSection,
 } from '@/lib/reportTemplates';
 
@@ -32,16 +33,38 @@ export default function TemplatesPage() {
   const [pick, setPick] = useState('');
   const manager = !!pid && canManage(pid);
 
+  const [pending, setPending] = useState<PendingSave[]>([]);
+  const [offlineCopy, setOfflineCopy] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!sb || !pid) return;
+    if (navigator.onLine) {
+      const sent = await flushPending(sb).catch(() => null);
+      if (sent?.sent) notify(`${sent.sent} report save(s) from this device reached the server.`);
+    }
     const [t, r] = await Promise.all([
       sb.from('report_templates').select('id, project_id, name, definition, updated_at').or(`project_id.eq.${pid},project_id.is.null`).order('name'),
       sb.from('template_reports').select('id, template_id, title, definition, data, status, updated_at').eq('project_id', pid).order('updated_at', { ascending: false }),
-    ]);
-    setTemplates((t.data as TemplateRow[]) ?? []);
-    setReports((r.data as ReportRow[]) ?? []);
+    ]).catch(() => [{ data: null, error: true }, { data: null, error: true }] as const);
+    if (t.data && r.data) {
+      setTemplates(t.data as TemplateRow[]);
+      setReports(r.data as ReportRow[]);
+      cacheProject(pid, { templates: t.data, reports: r.data });
+      setOfflineCopy(null);
+    } else {
+      // offline: the copy saved on this device the last time the page was online
+      const c = cachedProject(pid);
+      setTemplates((c?.templates as TemplateRow[]) ?? []);
+      setReports((c?.reports as ReportRow[]) ?? []);
+      setOfflineCopy(c?.at ?? '');
+    }
+    setPending(pendingFor(pid));
   }, [sb, pid]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const on = () => void load();
+    window.addEventListener('online', on);
+    return () => window.removeEventListener('online', on);
+  }, [load]);
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -60,8 +83,16 @@ export default function TemplatesPage() {
   };
   const startReport = async (t: TemplateRow) => {
     const def = normaliseTemplate(t.definition);
+    const title = `${def.title} – ${new Date().toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })}`;
+    if (!navigator.onLine) {
+      const row: ReportRow = { id: crypto.randomUUID(), template_id: t.id, title, definition: def, data: blankReport(def), status: 'draft', updated_at: new Date().toISOString() };
+      keepOnDevice({ id: row.id, project_id: pid, template_id: t.id, title, definition: def, data: row.data, base: null, savedAt: row.updated_at });
+      setPending(pendingFor(pid));
+      setOpen(row);
+      return;
+    }
     const { data, error } = await sb.from('template_reports')
-      .insert({ project_id: pid, template_id: t.id, title: `${def.title} – ${new Date().toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })}`, definition: def, data: blankReport(def) })
+      .insert({ project_id: pid, template_id: t.id, title, definition: def, data: blankReport(def) })
       .select('id, template_id, title, definition, data, status, updated_at').single();
     if (error) return notify(`Report not started: ${error.message}`);
     await load();
@@ -86,7 +117,7 @@ export default function TemplatesPage() {
       <ProjectBar />
 
       {open ? (
-        <ReportForm report={open} evidence={evidence} manager={manager} projectName={`${project.code ?? ''} · ${project.name}`} onClose={async () => { setOpen(null); await load(); }} />
+        <ReportForm report={open} evidence={evidence} manager={manager} projectId={pid} projectName={`${project.code ?? ''} · ${project.name}`} onClose={async () => { setOpen(null); await load(); }} />
       ) : editing ? (
         <TemplateEditor row={editing} onClose={async () => { setEditing(null); await load(); }} />
       ) : (
@@ -113,6 +144,22 @@ export default function TemplatesPage() {
             )}
           </section>
 
+          {offlineCopy !== null && <div className="banner">Offline: showing the copy saved on this device{offlineCopy ? ` (${new Date(offlineCopy).toLocaleString()})` : ''}. Changes are kept here and sent when you are back online.</div>}
+          {pending.length > 0 && (
+            <section className="card">
+              <div className="card-head"><h2>Saved on this device ({pending.length})</h2><span className="note">Sent automatically when online</span></div>
+              {pending.map((p) => (
+                <div key={p.id} className="form-actions" style={{ marginTop: 4 }}>
+                  <b>{p.title}</b>
+                  <span className={`pill ${p.conflict ? 'pill-bad' : 'pill-warn'}`}>{p.conflict ? 'Someone changed this report meanwhile' : 'Waiting to sync'}</span>
+                  <span className="note">{new Date(p.savedAt).toLocaleString()}</span>
+                  <button className="btn btn-sm" onClick={() => setOpen({ id: p.id, template_id: p.template_id, title: p.title, definition: p.definition, data: p.data as TemplateReportData, status: 'draft', updated_at: p.base ?? p.savedAt })}>Open device copy</button>
+                  {p.conflict && <button className="btn btn-sm" onClick={async () => { keepOnDevice({ ...p, conflict: false, base: '' }); await load(); }}>Keep device copy (replace server)</button>}
+                  <button className="btn btn-sm btn-danger" onClick={async () => { if (await askConfirm(`Discard the device copy of “${p.title}”? Changes not sent are lost.`)) { dropPending(p.id); setPending(pendingFor(pid)); } }}>Discard device copy</button>
+                </div>
+              ))}
+            </section>
+          )}
           <section className="card">
             <div className="card-head"><h2>Reports ({reports.length})</h2></div>
             {reports.length === 0 ? <div className="empty">No reports yet. Start one from a template above.</div> : (
@@ -199,6 +246,26 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
             <button className="btn btn-sm" disabled={i === t.sections.length - 1} onClick={() => move(i, 1)} aria-label="Move down">↓</button>
             <button className="btn btn-sm btn-danger" onClick={() => setT({ ...t, sections: t.sections.filter((_, k) => k !== i) })}>Remove section</button>
           </div>
+          {s.kind === 'chart' && (() => {
+            const tables = t.sections.filter((x) => x.kind === 'table');
+            const src = tables.find((x) => x.id === s.source);
+            return (
+              <div className="form-grid">
+                <label className="field">Count values from table
+                  <select className="input" value={s.source ?? ''} onChange={(e) => setSection(i, { source: e.target.value || undefined, column: undefined })}>
+                    <option value="">Choose a table…</option>
+                    {tables.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+                  </select>
+                </label>
+                {src && <label className="field">Column
+                  <select className="input" value={s.column ?? ''} onChange={(e) => setSection(i, { column: e.target.value || undefined })}>
+                    <option value="">Choose a column…</option>
+                    {(src.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>}
+              </div>
+            );
+          })()}
           {s.kind === 'status' && <label className="field">Status tiles (one per line)<textarea className="input" rows={3} value={(s.items ?? []).join('\n')} onChange={(e) => setSection(i, { items: [...new Set(lines(e.target.value))] })} /></label>}
           {s.kind === 'table' && <>
             <label className="field">Columns (one per line)<textarea className="input" rows={3} value={(s.columns ?? []).join('\n')} onChange={(e) => setSection(i, { columns: lines(e.target.value) })} /></label>
@@ -216,24 +283,69 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
 }
 
 // ---------------------------------------------------------------- filling in a report
-function ReportForm({ report, evidence, manager, projectName, onClose }: {
-  report: ReportRow; evidence: { id: string; caption: string; ref?: string; kind: string; storagePath?: string }[]; manager: boolean; projectName: string; onClose: () => void;
+function ReportForm({ report, evidence, manager, projectName, projectId, onClose }: {
+  report: ReportRow; evidence: { id: string; caption: string; ref?: string; kind: string; storagePath?: string }[]; manager: boolean; projectName: string; projectId: string; onClose: () => void;
 }) {
   const def = normaliseTemplate(report.definition);
   const [title, setTitle] = useState(report.title);
   const [d, setD] = useState<TemplateReportData>(() => ({ ...blankReport(def), ...report.data, sections: { ...blankReport(def).sections, ...(report.data?.sections ?? {}) } }));
   const [busy, setBusy] = useState<string | null>(null);
+  const [base, setBase] = useState<string | null>(report.updated_at);
   const final = report.status === 'final';
   const locked = final && !manager;
   const setSec = (id: string, patch: SectionData) => setD((x) => ({ ...x, sections: { ...x.sections, [id]: { ...x.sections[id], ...patch } } }));
 
+  const keepHere = () => {
+    const prev = pendingFor(projectId).find((x) => x.id === report.id);
+    const ok = keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base: prev ? prev.base : base, savedAt: new Date().toISOString() });
+    notify(ok ? 'Saved on this device. It is sent to the server when you are back online.' : 'This device has no room left to keep the report. Free up space or reconnect.');
+    return ok;
+  };
   const save = async (status?: 'draft' | 'final') => {
+    const startedOffline = pendingFor(projectId).some((x) => x.id === report.id && x.base === null);
+    if (!navigator.onLine || startedOffline) {
+      if (status) { notify('Marking a report final needs a connection.'); return false; }
+      if (startedOffline && navigator.onLine) {
+        // a report started offline is created on the server first
+        keepHere();
+        const r = await flushPending(supabaseBrowser()!).catch(() => null);
+        if (r?.sent) notify('Report sent to the server.');
+        return true;
+      }
+      return keepHere();
+    }
     setBusy('Saving…');
-    const { error } = await supabaseBrowser()!.from('template_reports').update({ title, data: d, ...(status ? { status } : {}) }).eq('id', report.id);
+    const q = supabaseBrowser()!.from('template_reports').update({ title, data: d, ...(status ? { status } : {}) }).eq('id', report.id);
+    const { data, error } = await (base ? q.eq('updated_at', base) : q).select('updated_at');
     setBusy(null);
-    if (error) { notify(`Not saved: ${error.message}`); return false; }
+    if (error) {
+      // no connection after all: keep the work on this device
+      if (/fetch|network|Failed to fetch/i.test(error.message)) return keepHere();
+      notify(`Not saved: ${error.message}`); return false;
+    }
+    if (!data || !data.length) { notify('Someone else saved this report after you opened it. Your version is kept on this device; open the report list to choose which to keep.'); keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base, savedAt: new Date().toISOString(), conflict: true }); return false; }
+    setBase((data[0] as { updated_at: string }).updated_at);
+    dropPending(report.id);
     notify(status === 'final' ? 'Report marked final.' : status === 'draft' ? 'Report reopened.' : 'Report saved.');
     return true;
+  };
+  const loadBlob = async (id: string) => {
+    const ev = evidence.find((e) => e.id === id);
+    return (await getPhoto(id).catch(() => undefined)) ?? (ev?.storagePath && navigator.onLine ? await fetchFromServer(id, ev.storagePath) : null);
+  };
+  const fileBase = () => title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'NEAS_Report';
+  const exportPdf = async () => {
+    setBusy('Building PDF…');
+    try {
+      const { loadLogo } = await import('@/lib/projectReportPdf');
+      const { toImage } = await import('@/lib/evidenceExport');
+      const blob = await templateReportPdf(def, d, {
+        projectName, reportTitle: title, logo: await loadLogo().catch(() => null),
+        photo: async (id) => { const b = await loadBlob(id); return b ? toImage(b) : null; },
+      });
+      await saveFile(`${fileBase()}.pdf`, blob);
+    } catch (e) { notify(`PDF export failed: ${(e as Error).message}`); }
+    setBusy(null);
   };
   const exportWord = async () => {
     setBusy('Building Word file…');
@@ -242,8 +354,7 @@ function ReportForm({ report, evidence, manager, projectName, onClose }: {
       const blob = await templateReportDocx(def, d, {
         projectName, reportTitle: title, logo,
         photo: async (id) => {
-          const ev = evidence.find((e) => e.id === id);
-          const b = (await getPhoto(id).catch(() => undefined)) ?? (ev?.storagePath ? await fetchFromServer(id, ev.storagePath) : null);
+          const b = await loadBlob(id);
           if (!b) return null;
           const bmp = await createImageBitmap(b);
           const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; c.getContext('2d')!.drawImage(bmp, 0, 0);
@@ -251,7 +362,7 @@ function ReportForm({ report, evidence, manager, projectName, onClose }: {
           return jpg ? { data: new Uint8Array(await jpg.arrayBuffer()), w: bmp.width, h: bmp.height } : null;
         },
       });
-      await saveFile(`${title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'NEAS_Report'}.docx`, blob);
+      await saveFile(`${fileBase()}.docx`, blob);
     } catch (e) { notify(`Word export failed: ${(e as Error).message}`); }
     setBusy(null);
   };
@@ -303,6 +414,22 @@ function ReportForm({ report, evidence, manager, projectName, onClose }: {
                 </table>
                 <button type="button" className="btn btn-sm" onClick={() => setSec(s.id, { rows: [...(sd.rows ?? []), (s.columns ?? []).map(() => '')] })}>Add a row</button>
               </div>}
+              {s.kind === 'chart' && (() => {
+                const counts = chartCounts(def, d, s);
+                const max = Math.max(1, ...counts.map((c) => c.count));
+                return counts.length ? (
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {counts.map((c) => (
+                      <div key={c.label} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 30%) 1fr auto', gap: 8, alignItems: 'center' }}>
+                        <span className="note">{c.label}</span>
+                        <div style={{ height: 14, width: `${(c.count / max) * 100}%`, background: 'var(--gold)', borderRadius: 3 }} />
+                        <b>{c.count}</b>
+                      </div>
+                    ))}
+                    <span className="note">Counts the “{s.column}” column of “{def.sections.find((x) => x.id === s.source)?.title}”. It updates as that table is filled in.</span>
+                  </div>
+                ) : <p className="note">{s.source ? `Fill in the “${s.column}” column of “${def.sections.find((x) => x.id === s.source)?.title ?? 'the table'}” to see this chart.` : 'Ask the project manager to choose what this chart counts (Edit template).'}</p>;
+              })()}
               {s.kind === 'photos' && <>
                 {(sd.photos ?? []).map((ph, k) => (
                   <div key={ph.evidenceId} className="form-actions" style={{ marginTop: 4 }}>
@@ -325,6 +452,7 @@ function ReportForm({ report, evidence, manager, projectName, onClose }: {
       </fieldset>
       <div className="form-actions">
         {!locked && <button className="btn btn-primary" disabled={!!busy} onClick={() => void save()}>{busy === 'Saving…' ? busy : 'Save'}</button>}
+        <button className="btn" disabled={!!busy} onClick={exportPdf}>{busy === 'Building PDF…' ? busy : 'Export PDF'}</button>
         <button className="btn" disabled={!!busy} onClick={exportWord}>{busy === 'Building Word file…' ? busy : 'Export Word (.docx)'}</button>
         {manager && !final && <button className="btn" disabled={!!busy} onClick={async () => { if (await save('final')) onClose(); }}>Mark final</button>}
         {manager && final && <button className="btn" disabled={!!busy} onClick={async () => { if (await save('draft')) onClose(); }}>Reopen</button>}

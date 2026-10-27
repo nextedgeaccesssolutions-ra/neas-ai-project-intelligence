@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blankReport, normaliseTemplate, SEED_TEMPLATE } from '../lib/reportTemplates';
+import { blankReport, chartCounts, normaliseTemplate, SEED_TEMPLATE } from '../lib/reportTemplates';
 
 describe('report templates', () => {
   it('the Triconti seed has the report sections in order', () => {
@@ -18,5 +18,15 @@ describe('report templates', () => {
     expect(t.title).toBe('Report');
     expect(t.cover).toEqual([]);
     expect(t.sections.map((s) => s.id)).toEqual(['b']);
+  });
+  it('a chart counts the values of a table column, most frequent first', () => {
+    const t = normaliseTemplate({ ...SEED_TEMPLATE, sections: [...SEED_TEMPLATE.sections, { id: 'c1', title: 'Compliance', kind: 'chart', source: 'findings', column: 'Status' }] });
+    const d = blankReport(t);
+    d.sections.findings.rows = d.sections.findings.rows!.map((r, i) => [r[0], '', '', i < 8 ? 'Compliant' : i < 10 ? 'Monitor' : ''] as string[]);
+    expect(chartCounts(t, d, t.sections.find((s) => s.id === 'c1')!)).toEqual([{ label: 'Compliant', count: 8 }, { label: 'Monitor', count: 2 }]);
+  });
+  it('a chart without a valid source is empty', () => {
+    const t = normaliseTemplate({ ...SEED_TEMPLATE, sections: [{ id: 'c1', title: 'C', kind: 'chart', source: 'nope', column: 'Status' }] });
+    expect(chartCounts(t, blankReport(t), t.sections[0])).toEqual([]);
   });
 });
