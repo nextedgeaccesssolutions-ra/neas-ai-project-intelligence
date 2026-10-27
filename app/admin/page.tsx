@@ -1176,6 +1176,16 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
     notify(error ? `Not resolved: ${error.message}` : data === 'already_applied' ? 'Resolved: the record was already deleted.' : data === 'applied_by_admin' ? 'Delete applied and recorded in the audit log.' : 'Marked resolved; recorded in the audit log.');
     await reload();
   };
+  // clear every listed problem at once, keeping the server versions (deletes are not applied)
+  const resolveAll = async () => {
+    if (!(await askConfirm(`Mark all ${d.ops.length} sync problem(s) as resolved, keeping the server versions? Nothing on the server changes; each is recorded in the audit log.`, { danger: false }))) return;
+    setBusy('all');
+    let ok = 0, failed = 0;
+    for (const o of d.ops) { const { error } = await sb().rpc('resolve_sync_operation', { p_op: o.op_id, p_action: 'dismiss', p_note: 'bulk' }); if (error) failed++; else ok++; }
+    setBusy(null);
+    notify(`Resolved ${ok} problem(s).${failed ? ` ${failed} could not be resolved.` : ''}`);
+    await reload();
+  };
   const runSheets = async () => {
     try {
       const r = await api('/api/integrations/sheets', {});
@@ -1188,7 +1198,7 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span></div>
+        <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span>{d.ops.length > 0 && <button className="btn btn-sm" disabled={!!busy} onClick={() => void resolveAll()}>{busy === 'all' ? 'Resolving…' : `Resolve all (${d.ops.length}) — keep server versions`}</button>}</div>
         {!d.ops.length ? <div className="empty">No sync problems.</div> : (
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>When</th><th>Person</th><th>Project</th><th>Record type</th><th>Change</th><th>Status</th><th>Reason</th><th>On the server now</th><th>Resolve</th></tr></thead>

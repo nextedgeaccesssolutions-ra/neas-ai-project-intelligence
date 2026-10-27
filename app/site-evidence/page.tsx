@@ -617,6 +617,14 @@ export default function SiteEvidence() {
           onSelectAll={() => setPicked(new Set(listed.map((e) => e.id)))}
           allSelected={listed.length > 0 && listed.every((e) => picked.has(e.id))}
           total={listed.length}
+          onDelete={async () => {
+            // same rule as each photo's own Delete button
+            const ok = pickedIds.map((id) => byId.get(id)).filter((e): e is Evidence => !!e && (!CLOUD || reviewer || (e.editCount ?? 0) < 1));
+            if (!ok.length) return notify('You cannot delete these photos. Ask a project manager.');
+            if (!(await askConfirm(`Delete ${ok.length} photo(s)?${ok.length < pickedIds.length ? ` ${pickedIds.length - ok.length} you may not delete are skipped.` : ''} Photos that have not synced yet are lost.`, { danger: true }))) return;
+            for (const e of ok) { const p = partnerOf(e); if (p && !ok.includes(p)) updateEvidence(p.id, { pairId: null }); deleteEvidence(e.id); }
+            done(true, `Deleted ${ok.length} photo(s).`);
+          }}
         />
         {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
         {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a photo or changes who can see it; other people and reports still include it.</p>}

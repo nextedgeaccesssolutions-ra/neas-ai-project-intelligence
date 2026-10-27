@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { ViewGroup } from '@/lib/viewOrg';
 
-export default function OrgToolbar({ selected, groups, canShare, showHidden, hiddenCount, anyGrouped, onGroup, onUngroup, onHide, onUnhide, onToggleHidden, onClear, onSelectAll, allSelected = false, total }: {
+export default function OrgToolbar({ selected, groups, canShare, showHidden, hiddenCount, anyGrouped, onGroup, onUngroup, onHide, onUnhide, onToggleHidden, onClear, onSelectAll, allSelected = false, total, onDelete }: {
   selected: number;
   groups: ViewGroup[];
   canShare: boolean;
@@ -22,6 +22,8 @@ export default function OrgToolbar({ selected, groups, canShare, showHidden, hid
   allSelected?: boolean;
   /** how many items are shown */
   total?: number;
+  /** permanently delete the selected items (shown only when given) */
+  onDelete?: () => void;
 }) {
   const [form, setForm] = useState(false);
   const [target, setTarget] = useState('');
@@ -43,6 +45,7 @@ export default function OrgToolbar({ selected, groups, canShare, showHidden, hid
         {!showHidden && <button className="btn btn-sm btn-primary" onClick={() => setForm((f) => !f)} aria-expanded={form}>Group selected</button>}
         {!showHidden && anyGrouped && <button className="btn btn-sm" onClick={onUngroup}>Ungroup</button>}
         {showHidden ? <button className="btn btn-sm btn-primary" onClick={onUnhide}>Unhide</button> : <button className="btn btn-sm" onClick={onHide}>Hide</button>}
+        {onDelete && <button className="btn btn-sm btn-danger" onClick={onDelete}>Delete selected ({selected})</button>}
         <button className="btn btn-sm" onClick={onClear}>Clear selection</button>
       </>}
       <button className={`btn btn-sm ${showHidden ? 'btn-primary' : ''}`} onClick={onToggleHidden} aria-pressed={showHidden}>
