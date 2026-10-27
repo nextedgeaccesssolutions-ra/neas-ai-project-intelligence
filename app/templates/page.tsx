@@ -199,7 +199,7 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
             <button className="btn btn-sm" disabled={i === t.sections.length - 1} onClick={() => move(i, 1)} aria-label="Move down">↓</button>
             <button className="btn btn-sm btn-danger" onClick={() => setT({ ...t, sections: t.sections.filter((_, k) => k !== i) })}>Remove section</button>
           </div>
-          {s.kind === 'status' && <label className="field">Status tiles (one per line)<textarea className="input" rows={3} value={(s.items ?? []).join('\n')} onChange={(e) => setSection(i, { items: lines(e.target.value) })} /></label>}
+          {s.kind === 'status' && <label className="field">Status tiles (one per line)<textarea className="input" rows={3} value={(s.items ?? []).join('\n')} onChange={(e) => setSection(i, { items: [...new Set(lines(e.target.value))] })} /></label>}
           {s.kind === 'table' && <>
             <label className="field">Columns (one per line)<textarea className="input" rows={3} value={(s.columns ?? []).join('\n')} onChange={(e) => setSection(i, { columns: lines(e.target.value) })} /></label>
             <label className="field">Standard rows: one row per line, cells separated by “ | ”<textarea className="input" rows={5} value={(s.rows ?? []).map((r) => r.join(' | ')).join('\n')} onChange={(e) => setSection(i, { rows: e.target.value.split('\n').filter((l) => l.trim()).map((l) => l.split('|').map((c) => c.trim())) })} /></label>
@@ -287,11 +287,11 @@ function ReportForm({ report, evidence, manager, projectName, onClose }: {
                 <button type="button" className="btn btn-sm" onClick={() => setSec(s.id, { bullets: [...(sd.bullets ?? []), ''] })}>Add a point</button>
               </>}
               {s.kind === 'status' && <div className="form-grid">
-                {(s.items ?? []).map((it) => <label key={it} className="field">{it}<input className="input" maxLength={60} value={sd.status?.[it] ?? ''} onChange={(e) => setSec(s.id, { status: { ...(sd.status ?? {}), [it]: e.target.value } })} placeholder="e.g. GOOD" /></label>)}
+                {[...new Set(s.items ?? [])].map((it, n) => <label key={`${n}-${it}`} className="field">{it}<input className="input" maxLength={60} value={sd.status?.[it] ?? ''} onChange={(e) => setSec(s.id, { status: { ...(sd.status ?? {}), [it]: e.target.value } })} placeholder="e.g. GOOD" /></label>)}
               </div>}
               {s.kind === 'table' && <div className="table-wrap">
                 <table className="tbl">
-                  <thead><tr>{(s.columns ?? []).map((c) => <th key={c}>{c}</th>)}<th /></tr></thead>
+                  <thead><tr>{(s.columns ?? []).map((c, n) => <th key={n}>{c}</th>)}<th /></tr></thead>
                   <tbody>
                     {(sd.rows ?? []).map((r, k) => (
                       <tr key={k}>

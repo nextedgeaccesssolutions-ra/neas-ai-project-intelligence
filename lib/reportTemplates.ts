@@ -45,7 +45,7 @@ export function normaliseTemplate(raw: unknown): TemplateDefinition {
 export function blankReport(t: TemplateDefinition): TemplateReportData {
   const sections: Record<string, SectionData> = {};
   for (const s of t.sections) {
-    if (s.kind === 'table') sections[s.id] = { rows: (s.rows?.length ? s.rows : [[]]).map((r) => (s.columns ?? []).map((_, i) => r[i] ?? '')) };
+    if (s.kind === 'table') sections[s.id] = { rows: (s.columns ?? []).length ? (s.rows?.length ? s.rows : [[]]).map((r) => (s.columns ?? []).map((_, i) => r[i] ?? '')) : [] };
     else if (s.kind === 'status') sections[s.id] = { status: Object.fromEntries((s.items ?? []).map((i) => [i, ''])) };
     else if (s.kind === 'bullets') sections[s.id] = { bullets: [''] };
     else if (s.kind === 'photos') sections[s.id] = { photos: [] };
@@ -106,15 +106,16 @@ export async function templateReportDocx(t: TemplateDefinition, d: TemplateRepor
         children: [p((sd.status?.[i] ?? '').toUpperCase() || '—', { bold: true, size: 24, color: NAVY, align: AlignmentType.CENTER }), p(i.toUpperCase(), { size: 16, color: '5D6F7B', align: AlignmentType.CENTER })],
       })) })] }));
     }
-    if (s.kind === 'table') body.push(table(s.columns ?? [], (sd.rows ?? []).filter((r) => r.some((c) => c.trim()))));
+    if (s.kind === 'table' && (s.columns ?? []).length) body.push(table(s.columns ?? [], (sd.rows ?? []).filter((r) => r.some((c) => c.trim()))));
     if (s.kind === 'photos') {
       const photos = sd.photos ?? [];
       for (let i = 0; i < photos.length; i += 2) {
         const pair = photos.slice(i, i + 2);
+        // a photo without a usable size is listed by caption only
         const cells = await Promise.all(pair.map(async (ph, k) => {
           const img = await opts.photo(ph.evidenceId).catch(() => null);
           return new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [
-            img ? new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: img.data, transformation: (() => { const k = Math.min(290 / img.w, 218 / img.h); return { width: Math.round(img.w * k), height: Math.round(img.h * k) }; })() })] }) : p('Photo not available', { size: 18, color: '5D6F7B' }),
+            img && img.w > 0 && img.h > 0 ? new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: img.data, transformation: (() => { const k = Math.min(290 / img.w, 218 / img.h); return { width: Math.round(img.w * k), height: Math.round(img.h * k) }; })() })] }) : p('Photo not available', { size: 18, color: '5D6F7B' }),
             p(`Photo ${i + k + 1} - ${ph.caption}`, { size: 18, align: AlignmentType.CENTER }),
           ] });
         }));

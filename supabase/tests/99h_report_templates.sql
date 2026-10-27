@@ -22,3 +22,20 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1
 select test.expect_error('templates: a final report is locked for staff', $$update neas.template_reports set title = 'Changed' where title = 'Q2 report'$$);
 reset role;
 drop table tt;
+-- review fixes: client accounts and other staff
+reset role;
+insert into neas.project_memberships (project_id, user_id, role) values ('10000000-0000-0000-0000-000000000098', '00000000-0000-0000-0000-0000000000b1', 'employee') on conflict do nothing;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+insert into neas.template_reports (project_id, title, definition) values ('10000000-0000-0000-0000-000000000098', 'Admin draft', '{"sections": []}');
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b1', false);
+update neas.template_reports set title = 'Hijacked' where title = 'Admin draft';
+reset role;
+select test.check('templates: staff cannot change someone else''s report', (select count(*) = 0 from neas.template_reports where title = 'Hijacked'));
+update neas.profiles set allowed_views = array['overview'] where id = '00000000-0000-0000-0000-0000000000b1';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b1', false);
+select test.check('templates: client accounts see no reports or templates', (select count(*) = 0 from neas.template_reports) and (select count(*) = 0 from neas.report_templates));
+select test.expect_error('templates: client accounts cannot start a report', $$insert into neas.template_reports (project_id, title, definition) values ('10000000-0000-0000-0000-000000000098', 'Client try', '{"sections": []}')$$);
+reset role;
+update neas.profiles set allowed_views = null where id = '00000000-0000-0000-0000-0000000000b1';

@@ -29,6 +29,15 @@ create table if not exists neas.template_reports (
 );
 create index if not exists template_reports_project on neas.template_reports (project_id, updated_at desc);
 
+-- NEAS staff on the project: a member whose account is not a client account (Overview-only modules)
+create or replace function neas.is_project_staff(p_project uuid) returns boolean
+language sql stable security definer set search_path = neas, extensions as $$
+  select neas.is_member(p_project) and exists (
+    select 1 from neas.profiles p where p.id = auth.uid() and p.allowed_views is distinct from array['overview']::text[]);
+$$;
+revoke all on function neas.is_project_staff(uuid) from public, anon;
+grant execute on function neas.is_project_staff(uuid) to authenticated, service_role;
+
 alter table neas.report_templates enable row level security;
 alter table neas.template_reports enable row level security;
 revoke all on neas.report_templates, neas.template_reports from anon, authenticated;
@@ -38,18 +47,20 @@ grant all on neas.report_templates, neas.template_reports to service_role;
 
 drop policy if exists report_templates_read on neas.report_templates;
 create policy report_templates_read on neas.report_templates for select to authenticated
-  using (neas.is_super_admin() or (project_id is null and neas.is_active_user()) or neas.is_member(project_id));
+  using (neas.is_super_admin() or neas.is_project_staff(project_id)
+         or (project_id is null and neas.is_active_user() and exists (select 1 from neas.profiles p where p.id = auth.uid() and p.allowed_views is distinct from array['overview']::text[])));
 
 drop policy if exists template_reports_read on neas.template_reports;
 create policy template_reports_read on neas.template_reports for select to authenticated
-  using (neas.is_super_admin() or neas.is_member(project_id));
+  using (neas.is_super_admin() or neas.is_project_staff(project_id));
 drop policy if exists template_reports_insert on neas.template_reports;
 create policy template_reports_insert on neas.template_reports for insert to authenticated
-  with check ((neas.is_super_admin() or neas.is_member(project_id)) and created_by = auth.uid() and status = 'draft');
+  with check ((neas.is_super_admin() or neas.is_project_staff(project_id)) and created_by = auth.uid() and status = 'draft');
 drop policy if exists template_reports_update on neas.template_reports;
 create policy template_reports_update on neas.template_reports for update to authenticated
-  using (neas.is_super_admin() or neas.is_member(project_id))
-  with check (neas.is_super_admin() or neas.is_member(project_id));
+  -- the person who started the report, or the project manager / a Super Admin
+  using (neas.is_super_admin() or neas.is_manager(project_id) or (created_by = auth.uid() and neas.is_project_staff(project_id)))
+  with check (neas.is_super_admin() or neas.is_manager(project_id) or (created_by = auth.uid() and neas.is_project_staff(project_id)));
 drop policy if exists template_reports_delete on neas.template_reports;
 create policy template_reports_delete on neas.template_reports for delete to authenticated
   using (neas.is_super_admin() or neas.is_manager(project_id) or (created_by = auth.uid() and status = 'draft'));
