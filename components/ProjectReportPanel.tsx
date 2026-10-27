@@ -38,7 +38,7 @@ export default function ProjectReportPanel({ input, load, onGenerated, onSend, n
       if (!check.ok) throw new Error(`Report check failed: ${check.missing.length} of ${expected.length} map link(s) are missing from the PDF, so it was not offered.`);
       const missing = [...images.values()].filter((x) => !x).length;
       await onGenerated?.(report);
-      setMsg({ ok: true, text: `${report.reference}: cover with ${Math.min(2, report.cover.length)} of ${report.cover.length} cover photo(s), location register, schedule, ${report.evidence.length} evidence photo(s), observations and summary; ${check.found} clickable map link(s) checked.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
+      setMsg({ ok: true, text: `${report.reference}: cover with ${report.coverPhoto.single ? Math.min(1, report.cover.length) : Math.min(2, report.cover.length)} cover photo(s)${!report.coverPhoto.single || report.coverPhoto.register ? ', photo location register' : ''}, schedule, ${report.evidence.length} evidence photo(s), observations and summary; ${check.found} clickable map link(s) checked.${missing ? ` ${missing} photo(s) could not be loaded and are marked “Photo not available”.` : ''}` });
       return { blob, report };
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message || 'Could not build the report.' });

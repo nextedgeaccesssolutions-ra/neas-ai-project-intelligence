@@ -134,10 +134,12 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   if (single && r.cover.length) {
     // one cover photo, centred, sized as a share of the page width and fitted to the space left on page 1
     const c = r.cover[0];
+    // too little room under long cover details: the photo starts a page of its own instead of spilling off
+    if (H() - 34 - (y + 12) - (c.mapUrl ? 32 : 20) < 140) y = newPage('Cover photo') - 12;
     const img = images.get(c.item.id);
     const below = c.mapUrl ? 32 : 20;
     const boxW = (W() - M * 2) * (r.coverPhoto.sizePct / 100);
-    const boxH = Math.max(60, H() - 34 - (y + 12) - below);
+    const boxH = H() - 34 - (y + 12) - below;
     if (img) {
       const f = fit(img, boxW, boxH);
       const ix = (W() - f.w) / 2, iy = y + 12;

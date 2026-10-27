@@ -1,4 +1,5 @@
 'use client';
+import { canView as canViewModule } from '@/lib/cloud/cloudSync';
 // Portfolio KPIs and a prioritised action list across every project this user can see.
 // Everything is counted from the loaded records; nothing is estimated or invented.
 import Link from 'next/link';
@@ -51,7 +52,7 @@ export default function PortfolioSummary() {
       const waiting = reps.filter((r) => r.status === 'submitted').length;
       if (waiting) {
         awaiting += waiting;
-        actions.push({ key: `rv-${p.id}`, tone: 'warn', title: `${waiting} field report(s) awaiting review`, detail: `${code} · ${p.name}`, href: '/field-reports', pid: p.id, when: '' });
+        actions.push({ key: `rv-${p.id}`, tone: 'warn', title: `${waiting} field report(s) awaiting review`, detail: `${code} · ${p.name}`, href: canViewModule('field_reports') ? '/field-reports' : '/', pid: p.id, when: '' });
       }
     }
     const order = { bad: 0, warn: 1, info: 2 };
@@ -85,7 +86,7 @@ export default function PortfolioSummary() {
     { label: 'Active projects', value: String(data.active), sub: `${data.completed} completed · ${data.total} in total`, href: '/projects' },
     { label: 'Average actual progress', value: data.avg == null ? '—' : fmtPct(data.avg), sub: data.scheduled ? `Across ${data.scheduled} active project(s) with a schedule` : 'No active project has a schedule yet', href: '/projects' },
     { label: 'Overdue activities', value: String(data.overdue), sub: 'Active projects · past planned finish', href: '/project-management' },
-    { label: 'Reports awaiting review', value: String(data.awaiting), sub: 'Submitted field reports', href: '/field-reports' },
+    { label: 'Reports awaiting review', value: String(data.awaiting), sub: 'Submitted field reports', href: canViewModule('field_reports') ? '/field-reports' : '/' },
     { label: 'Work stoppages open', value: String(data.stopped), sub: 'Stopped and not yet restarted', href: '/project-management' },
     { label: 'Finishing in 14 days', value: String(data.upcoming), sub: 'Activities due soon', href: '/project-management' },
   ];

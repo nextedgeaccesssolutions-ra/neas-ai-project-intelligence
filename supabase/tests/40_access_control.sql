@@ -76,7 +76,7 @@ select test.check('views: changes are in the audit log', (select count(*) = 2 fr
 reset role;
 select set_config('request.jwt.claim.sub', '', false);
 insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) values ('00000000-0000-0000-0000-0000000000f7', 'limited@neas.test', '{}', now());
-update neas.profiles set status = 'active', approved_at = now(), allowed_views = array['overview'] where id = '00000000-0000-0000-0000-0000000000f7';
+update neas.profiles set status = 'active', approved_at = now(), allowed_views = array['overview', 'projects'] where id = '00000000-0000-0000-0000-0000000000f7';
 set role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000f7', false);
 select test.check('views: field reports stays available when not in the module list',

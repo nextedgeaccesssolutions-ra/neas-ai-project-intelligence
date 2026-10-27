@@ -10,7 +10,7 @@ import GanttControls from '@/components/GanttControls';
 import { useCanManage } from '@/components/RoleGate';
 import ShareDialog from '@/components/ShareDialog';
 import { CLOUD } from '@/lib/cloud/env';
-import { isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { canView, isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import { notify } from '@/components/Dialogs';
 import { useProjectData, useStore } from '@/lib/store';
@@ -121,7 +121,7 @@ export default function Overview() {
           <div className="kpi-label">Activities / reports</div>
           <div className="kpi-val">{activities.length} / {reports.length}</div>
           <div className="kpi-sub">
-            <Link href="/field-reports">Saved records</Link> · <Link href="/site-evidence">{evidence.length} photos</Link>
+            {canView('field_reports') ? <Link href="/field-reports">Saved records</Link> : 'Saved records'} · {canView('site_evidence') ? <Link href="/site-evidence">{evidence.length} photos</Link> : `${evidence.length} photos`}
           </div>
         </div>
       </section>
@@ -184,7 +184,7 @@ export default function Overview() {
                       <td><div className="bar"><span style={{ width: `${act}%` }} /></div></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm" href={`/project-management?edit=${a.id}`}>Edit</Link>{' '}
-                        <Link className="btn btn-sm" href={`/field-reports?activity=${a.id}`}>Report</Link>
+                        {canView('field_reports') && <Link className="btn btn-sm" href={`/field-reports?activity=${a.id}`}>Report</Link>}
                       </td>
                     </tr>
                   );
