@@ -862,16 +862,33 @@ function Approvals({ d, reload }: { d: D; reload: () => Promise<void> }) {
 }
 
 function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
-  const [f, setF] = useState({ fullName: '', email: '', projectId: '', role: 'employee' });
+  const [f, setF] = useState({ fullName: '', email: '', projectId: '', role: 'employee', pin: '', username: '' });
+  const fClient = f.role === 'client';
   const send = async () => {
     const n = checkName(f.fullName);
     if (!n.ok) return notify(n.error);
     const e = checkEmail(f.email);
     if (!e.ok) return notify(e.error);
+    if (fClient && !f.projectId) return notify('Choose the project this client may see.');
+    if ((fClient || f.pin) && !/^\d{6}$/.test(f.pin)) return notify('The passcode is 6 digits. Type one or press Generate.');
+    // with a passcode (always for clients) the login is made now and the details are e-mailed by you; without one, a single-use link is sent
+    if (f.pin) {
+      const username = f.username.trim().toLowerCase() || e.email.split('@')[0].toLowerCase().replace(/[^a-z0-9.-]+/g, '.').replace(/^[^a-z0-9]+/, '').slice(0, 32).padEnd(3, '0');
+      try {
+        await api('/api/admin/users/create', { fullName: n.name, username, email: fClient ? undefined : e.email, projectId: f.projectId || undefined, role: f.role, pin: f.pin });
+        setMadeLogin({ who: n.name, username, pin: f.pin, client: fClient, email: e.email });
+        notify('Login ready. The username and passcode are shown at the top of this page.');
+        setF({ fullName: '', email: '', projectId: f.projectId, role: f.role, pin: '', username: '' });
+        await reload();
+      } catch (x) {
+        notify((x as Error).message);
+      }
+      return;
+    }
     try {
       const r = await api('/api/admin/invitations', { ...f, fullName: n.name, email: e.email, projectId: f.projectId || undefined });
       notify(r.message ?? 'Invitation sent.');
-      setF({ fullName: '', email: '', projectId: f.projectId, role: f.role });
+      setF({ fullName: '', email: '', projectId: f.projectId, role: f.role, pin: '', username: '' });
       await reload();
     } catch (x) {
       notify((x as Error).message);
@@ -879,15 +896,16 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   const [g, setG] = useState({ fullName: '', username: '', email: '', projectId: '', role: 'employee', hours: 72, pin: '' });
   const [issued, setIssued] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
-  const [madeLogin, setMadeLogin] = useState<{ who: string; username: string; pin: string; client: boolean } | null>(null);
+  const [madeLogin, setMadeLogin] = useState<{ who: string; username: string; pin: string; client: boolean; email?: string } | null>(null);
   const isClient = g.role === 'client';
-  const generatePin = () => {
+  const newPin = () => {
     // 6 random digits, never all the same or a simple run
     for (;;) {
       const p = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
-      if (new Set(p).size > 1 && !'0123456789'.includes(p) && !'9876543210'.includes(p)) return setG((x) => ({ ...x, pin: p }));
+      if (new Set(p).size > 1 && !'0123456789'.includes(p) && !'9876543210'.includes(p)) return p;
     }
   };
+  const generatePin = () => { const p = newPin(); setG((x) => ({ ...x, pin: p })); };
   const addWithCode = async () => {
     const n = checkName(g.fullName);
     if (!n.ok) return notify(n.error);
@@ -920,6 +938,7 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <div className="banner" role="status" style={{ display: 'grid', gap: 6 }}>
             <div><b>{madeLogin.client ? 'Client login' : 'Account'} ready for {madeLogin.who}.</b> Username <code>{madeLogin.username}</code>, passcode <code style={{ letterSpacing: '.1em' }}>{madeLogin.pin}</code>{' '}
               <button className="btn btn-sm" onClick={() => setMadeLogin(null)}>Done</button></div>
+            {madeLogin.email && <div><a className="btn btn-sm" href={`mailto:${madeLogin.email}?subject=${encodeURIComponent('Your NEAS sign-in')}&body=${encodeURIComponent(`Hello ${madeLogin.who},\n\nSign in at ${window.location.origin}/login\nUsername: ${madeLogin.username}\nPasscode: ${madeLogin.pin}\n`)}`}>E-mail these details to {madeLogin.email}</a></div>}
             <div className="note">Shown only now (stored as a hash). Hand it over directly. They sign in on the normal sign-in page{madeLogin.client ? ' and see only what you approved for clients on that project' : ''}. After their first online sign-in on a device, that device also works offline.</div>
           </div>
         )}
@@ -945,9 +964,16 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <label className="field">Full name<input className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></label>
           <label className="field">E-mail<input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
           <label className="field">Project<select className="input" value={f.projectId} onChange={(e) => setF({ ...f, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
-          <label className="field">Role<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option></select></label>
+          <label className="field">Role<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
+          <label className="field">Passcode (6 digits){fClient ? '' : ' — or leave empty for a one-time code'}
+            <span style={{ display: 'flex', gap: 8 }}>
+              <input className="input" inputMode="numeric" maxLength={6} value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} style={{ letterSpacing: '0.3em' }} />
+              <button type="button" className="btn" onClick={() => { const p = newPin(); setF((x) => ({ ...x, pin: p })); }}>Generate</button>
+            </span>
+          </label>
+          {f.pin && <label className="field">Username<input className="input" autoCapitalize="none" spellCheck={false} placeholder={f.email.split('@')[0] || 'e.g. jancho.client'} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></label>}
         </div>
-        <div className="form-actions"><button className="btn btn-primary" onClick={send}>Send invitation</button></div>
+        <div className="form-actions"><button className="btn btn-primary" onClick={send}>{f.pin ? (fClient ? 'Create client login' : 'Create account') : 'Send invitation'}</button></div>
       </section>
       <section className="card">
         <div className="card-head"><h2>Invitations</h2></div>

@@ -98,6 +98,8 @@ export default function SiteEvidence() {
   }, []);
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
+  const [moveArea, setMoveArea] = useState('');
+  const [moveLoc, setMoveLoc] = useState('');
   const [editKind, setEditKind] = useState<EvidenceKind>('Before');
   const [editCaption, setEditCaption] = useState('');
   const [editActivity, setEditActivity] = useState('');
@@ -289,6 +291,18 @@ export default function SiteEvidence() {
     if (!g || !(g.scope === 'personal' || reviewer)) { notify('You cannot add photos to that group.'); return; }
     done(!!(await org.group(pid, 'attachment', keep, { id: g.id })), `Moved ${keep.length} photo(s) to “${g.name}”. The photos themselves did not change.`);
   };
+  // change the work area / location of the selected photos (e.g. a photo filed under the wrong floor); a blank field keeps each photo's own value
+  const moveLocation = async () => {
+    const area = moveArea.trim(), loc = moveLoc.trim();
+    if (!area && !loc) return notify('Type the new work area or location.');
+    if (!(await askConfirm(`Move ${pickedIds.length} photo(s) to ${[area, loc].filter(Boolean).join(' · ')}? A BEFORE/AFTER pair stays paired.`, { danger: false }))) return;
+    for (const id of pickedIds) {
+      const e = byId.get(id);
+      if (e) updateEvidence(id, { ...(area ? { workArea: area } : {}), ...(loc ? { locationDetail: loc } : {}) });
+    }
+    done(true, `Moved ${pickedIds.length} photo(s) to ${[area, loc].filter(Boolean).join(' · ')}.`);
+    setMoveArea(''); setMoveLoc('');
+  };
   const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickedIds = [...picked].filter((id) => listed.some((e) => e.id === id));
   const done = (ok: boolean, msg: string) => { if (ok) { notify(msg); setPicked(new Set()); } };
@@ -342,8 +356,8 @@ export default function SiteEvidence() {
                 </select>
               </div>
               <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Description" />
-              <input className="input" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
-              <input className="input" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+              <input className="input" list="ev-areas" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+              <input className="input" list="ev-locs" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
               <p className="note" style={{ margin: 0 }}>Capture time and GPS are kept as recorded.</p>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn btn-sm btn-primary" onClick={() => {
@@ -568,6 +582,16 @@ export default function SiteEvidence() {
             <button className="btn btn-sm btn-primary" disabled={!autoPairs.length} onClick={runAutoPair} title="Matches unpaired BEFORE and AFTER photos with the same activity, work area and location">Auto-pair by details ({autoPairs.length})</button>
           </div>
         )}
+        {(!CLOUD || reviewer) && pickedIds.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10, alignItems: 'center' }}>
+            <span className="note">Move {pickedIds.length} selected photo(s) to another location:</span>
+            <input className="input" style={{ width: 160 }} list="ev-areas" value={moveArea} onChange={(ev) => setMoveArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+            <input className="input" style={{ width: 220 }} list="ev-locs" value={moveLoc} onChange={(ev) => setMoveLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+            <button className="btn btn-sm btn-primary" onClick={() => void moveLocation()}>Move</button>
+          </div>
+        )}
+        <datalist id="ev-areas">{[...new Set(evidence.map((e) => (e.workArea ?? '').trim()).filter(Boolean))].sort().map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="ev-locs">{[...new Set(evidence.map((e) => (e.locationDetail ?? '').trim()).filter(Boolean))].sort().map((v) => <option key={v} value={v} />)}</datalist>
         {pairFrom && byId.get(pairFrom) && (
           <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             Pairing {byId.get(pairFrom)!.ref || byId.get(pairFrom)!.kind}: choose the matching {byId.get(pairFrom)!.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo.
