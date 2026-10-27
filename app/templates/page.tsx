@@ -12,7 +12,7 @@ import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync'
 import { getPhoto } from '@/lib/photos';
 import { saveFile } from '@/lib/fileio';
 import { fmtDate } from '@/lib/format';
-import { cacheProject, cachedProject, dropPending, flushPending, keepOnDevice, pendingFor, type PendingSave } from '@/lib/templateReportDrafts';
+import { cacheProject, cachedProject, dropPending, flushPending, keepOnDevice, pendingFor, serverStamp, type PendingSave } from '@/lib/templateReportDrafts';
 import {
   blankReport, chartCounts, KIND_LABEL, newSectionId, normaliseTemplate, templateReportDocx, templateReportPdf,
   type SectionData, type SectionKind, type TemplateDefinition, type TemplateReportData, type TemplateSection,
@@ -40,6 +40,7 @@ export default function TemplatesPage() {
     if (navigator.onLine) {
       const sent = await flushPending(sb).catch(() => null);
       if (sent?.sent) notify(`${sent.sent} report save(s) from this device reached the server.`);
+      if (sent?.refused || sent?.conflicts) notify('Some report saves on this device need your attention (see “Saved on this device”).');
     }
     const [t, r] = await Promise.all([
       sb.from('report_templates').select('id, project_id, name, definition, updated_at').or(`project_id.eq.${pid},project_id.is.null`).order('name'),
@@ -85,8 +86,8 @@ export default function TemplatesPage() {
     const def = normaliseTemplate(t.definition);
     const title = `${def.title} – ${new Date().toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })}`;
     if (!navigator.onLine) {
-      const row: ReportRow = { id: crypto.randomUUID(), template_id: t.id, title, definition: def, data: blankReport(def), status: 'draft', updated_at: new Date().toISOString() };
-      keepOnDevice({ id: row.id, project_id: pid, template_id: t.id, title, definition: def, data: row.data, base: null, savedAt: row.updated_at });
+      const row: ReportRow = { id: crypto.randomUUID(), template_id: t.id, title, definition: def, data: blankReport(def), status: 'draft', updated_at: '' };
+      if (!keepOnDevice({ id: row.id, project_id: pid, template_id: t.id, title, definition: def, data: row.data, base: null, savedAt: new Date().toISOString() })) return notify('This device has no room left to keep a new report. Free up space or reconnect.');
       setPending(pendingFor(pid));
       setOpen(row);
       return;
@@ -151,10 +152,12 @@ export default function TemplatesPage() {
               {pending.map((p) => (
                 <div key={p.id} className="form-actions" style={{ marginTop: 4 }}>
                   <b>{p.title}</b>
-                  <span className={`pill ${p.conflict ? 'pill-bad' : 'pill-warn'}`}>{p.conflict ? 'Someone changed this report meanwhile' : 'Waiting to sync'}</span>
+                  <span className={`pill ${p.conflict || p.error ? 'pill-bad' : 'pill-warn'}`}>{p.conflict ? 'Someone changed this report meanwhile' : p.error ? 'Not accepted' : 'Waiting to sync'}</span>
+                  {p.error && <span className="note">{p.error}</span>}
                   <span className="note">{new Date(p.savedAt).toLocaleString()}</span>
-                  <button className="btn btn-sm" onClick={() => setOpen({ id: p.id, template_id: p.template_id, title: p.title, definition: p.definition, data: p.data as TemplateReportData, status: 'draft', updated_at: p.base ?? p.savedAt })}>Open device copy</button>
-                  {p.conflict && <button className="btn btn-sm" onClick={async () => { keepOnDevice({ ...p, conflict: false, base: '' }); await load(); }}>Keep device copy (replace server)</button>}
+                  <button className="btn btn-sm" onClick={() => setOpen({ id: p.id, template_id: p.template_id, title: p.title, definition: p.definition, data: p.data as TemplateReportData, status: 'draft', updated_at: p.base ?? '' })}>Open device copy</button>
+                  {p.conflict && <button className="btn btn-sm" onClick={async () => { if (await askConfirm('Replace the server copy with the copy on this device? Changes others saved meanwhile are overwritten.')) { keepOnDevice({ ...p, conflict: false, error: undefined, base: '' }); await load(); } }}>Keep device copy (replace server)</button>}
+                  {p.error && <button className="btn btn-sm" onClick={async () => { keepOnDevice({ ...p, error: undefined }); await load(); }}>Send again</button>}
                   <button className="btn btn-sm btn-danger" onClick={async () => { if (await askConfirm(`Discard the device copy of “${p.title}”? Changes not sent are lost.`)) { dropPending(p.id); setPending(pendingFor(pid)); } }}>Discard device copy</button>
                 </div>
               ))}
@@ -297,19 +300,23 @@ function ReportForm({ report, evidence, manager, projectName, projectId, onClose
 
   const keepHere = () => {
     const prev = pendingFor(projectId).find((x) => x.id === report.id);
-    const ok = keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base: prev ? prev.base : base, savedAt: new Date().toISOString() });
+    const ok = keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base: prev ? prev.base : base || null, savedAt: new Date().toISOString() });
     notify(ok ? 'Saved on this device. It is sent to the server when you are back online.' : 'This device has no room left to keep the report. Free up space or reconnect.');
     return ok;
   };
   const save = async (status?: 'draft' | 'final') => {
-    const startedOffline = pendingFor(projectId).some((x) => x.id === report.id && x.base === null);
+    const startedOffline = !base && pendingFor(projectId).some((x) => x.id === report.id && x.base === null);
     if (!navigator.onLine || startedOffline) {
       if (status) { notify('Marking a report final needs a connection.'); return false; }
       if (startedOffline && navigator.onLine) {
         // a report started offline is created on the server first
-        keepHere();
+        if (!keepHere()) return false;
         const r = await flushPending(supabaseBrowser()!).catch(() => null);
-        if (r?.sent) notify('Report sent to the server.');
+        if (r?.sent) {
+          notify('Report sent to the server.');
+          // from now on, saves start from the server's copy
+          setBase(await serverStamp(supabaseBrowser()!, report.id));
+        }
         return true;
       }
       return keepHere();
@@ -323,7 +330,12 @@ function ReportForm({ report, evidence, manager, projectName, projectId, onClose
       if (/fetch|network|Failed to fetch/i.test(error.message)) return keepHere();
       notify(`Not saved: ${error.message}`); return false;
     }
-    if (!data || !data.length) { notify('Someone else saved this report after you opened it. Your version is kept on this device; open the report list to choose which to keep.'); keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base, savedAt: new Date().toISOString(), conflict: true }); return false; }
+    if (!data || !data.length) {
+      const kept = keepOnDevice({ id: report.id, project_id: projectId, template_id: report.template_id, title, definition: def, data: d, base, savedAt: new Date().toISOString(), conflict: true });
+      notify(kept ? 'Someone else saved this report after you opened it. Your version is kept on this device; open the report list to choose which to keep.'
+        : 'Someone else saved this report after you opened it, and this device has no room to keep your version. Copy your changes before leaving this page.');
+      return false;
+    }
     setBase((data[0] as { updated_at: string }).updated_at);
     dropPending(report.id);
     notify(status === 'final' ? 'Report marked final.' : status === 'draft' ? 'Report reopened.' : 'Report saved.');
