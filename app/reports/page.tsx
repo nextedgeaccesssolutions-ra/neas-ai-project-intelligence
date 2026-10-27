@@ -129,7 +129,7 @@ export default function Reports() {
           }
           await call({ step: 'finish' });
           loadHistory();
-          setShareLink({ ref: r.reference, url: `${location.origin}/client/${encodeURIComponent(project.code ?? '')}` });
+          if (project.code) setShareLink({ ref: r.reference, url: `${location.origin}/client/${encodeURIComponent(project.code)}` });
           return `${r.reference} was sent. The project's client sees it under “Reports for your review” and can approve it or request changes. Share the link below.`;
         } : undefined}
         input={(asOf, from) => ({ ...reportInput(asOf, from), coverSettings })}

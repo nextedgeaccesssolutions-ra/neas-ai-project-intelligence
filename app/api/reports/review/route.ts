@@ -4,6 +4,8 @@ import { FILES_BUCKET } from '@/lib/cloud/env';
 import { UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
+// reading back and fingerprinting a large photo report can take a while
+export const maxDuration = 60;
 
 const MAX_BYTES = 80 * 1024 * 1024;
 
@@ -22,8 +24,9 @@ export const POST = handle(async (req) => {
   if (!UUID_RE.test(exportId)) throw new HttpError(400, 'Invalid report');
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new HttpError(400, 'Invalid file fingerprint');
 
-  const { data: exp } = await sb.from('project_report_exports').select('project_id, report_ref').eq('id', exportId).maybeSingle();
+  const { data: exp } = await sb.from('project_report_exports').select('project_id, report_ref, approval_status').eq('id', exportId).maybeSingle();
   if (!exp) throw new HttpError(404, 'Report not found');
+  if (exp.approval_status === 'approved') throw new HttpError(400, 'This report is already approved by the client. Generate a new report for further changes.');
   // only managers / Super Admin may send (the database repeats this check when the report is switched)
   const { data: allowed } = await sb.rpc('is_manager', { p_project: exp.project_id });
   const { data: admin } = await sb.rpc('is_super_admin');
