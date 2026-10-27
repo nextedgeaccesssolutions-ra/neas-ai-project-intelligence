@@ -520,3 +520,7 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
   .main .content, .client-shell { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
   .bottom-bar a > span[aria-hidden] { font-size: 20px; line-height: 22px; }
 }
+
+/* activity list with a selection box in front of each event */
+.feed.feed-pick li { display: grid; grid-template-columns: 22px 170px 1fr; align-items: center; gap: 8px; }
+@media (max-width: 600px) { .feed.feed-pick li { grid-template-columns: 22px 1fr; } .feed.feed-pick li > span { grid-column: 2; } }

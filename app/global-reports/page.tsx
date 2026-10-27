@@ -323,13 +323,7 @@ export default function GlobalReports() {
 
       <section className="card" id="report-activity">
         <div className="card-head"><h2>Activity</h2><span className="note">Latest 40 events you can see</span></div>
-        {!feed.length ? <div className="empty">No report activity yet.</div> : (
-          <ul className="feed">
-            {feed.map((e, i) => (
-              <li key={i}><time className="note" dateTime={e.at}>{new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time><span><b>{e.text}</b> <span className="note">{e.ref}{e.who ? ` · ${e.who}` : ''}</span></span></li>
-            ))}
-          </ul>
-        )}
+        {!feed.length ? <div className="empty">No report activity yet.</div> : <ActivityFeed key={cloud.profile?.id ?? 'device'} feed={feed} userId={cloud.profile?.id ?? 'device'} />}
         <p className="note">A link opening is not proof that a particular person read the report. E-mail &quot;accepted&quot; means Gmail took the message; inbox delivery is not confirmed.</p>
       </section>
       {share && <ShareDialog projectId={share.id} projectCode={share.code} projectName={share.name} onClose={() => { setShare(null); setReload((n) => n + 1); }} />}
@@ -364,5 +358,77 @@ function BarChart({ title, data, horizontal, dense, empty = 'No reports in this 
         </details>
       )}
     </figure>
+  );
+}
+
+type FeedItem = { at: string; text: string; ref: string; who?: string | null };
+const ACT_GROUPS = [['', 'No grouping'], ['day', 'Day'], ['event', 'Event'], ['project', 'Project']] as const;
+
+/** Activity list with select, hide (remembered for this person on this device) and grouping by day, event or project. */
+function ActivityFeed({ feed, userId }: { feed: FeedItem[]; userId: string }) {
+  const store = `neas-activity-hidden:${userId}`;
+  // the same event text at the same moment can appear twice: the occurrence number keeps each key unique
+  const keys = new Map<FeedItem, string>();
+  const seen = new Map<string, number>();
+  for (const e of feed) { const base = `${e.at}|${e.text}|${e.ref}|${e.who ?? ''}`; const n = seen.get(base) ?? 0; seen.set(base, n + 1); keys.set(e, n ? `${base}#${n}` : base); }
+  const keyOf = (e: FeedItem) => keys.get(e) ?? `${e.at}|${e.text}|${e.ref}`;
+  const [hidden, setHidden] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem(store) ?? '[]') as string[]); } catch { return new Set(); } });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
+  const [groupBy, setGroupBy] = useState<'' | 'day' | 'event' | 'project'>('');
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const save = (h: Set<string>) => { setHidden(h); try { localStorage.setItem(store, JSON.stringify([...h])); } catch { /* storage blocked */ } };
+  const list = feed.filter((e) => hidden.has(keyOf(e)) === showHidden);
+  const groupOf = (e: FeedItem) => groupBy === 'day' ? new Date(e.at).toLocaleDateString(undefined, { dateStyle: 'medium' })
+    : groupBy === 'event' ? e.text.split(' · ')[0] : groupBy === 'project' ? ((p) => (p && p !== '—' ? p : 'No project'))(e.ref.split(' · ')[0]) : '';
+  const groups = [...new Set(list.map(groupOf))];
+  // only rows shown now count as selected (a reload or a collapsed group never acts on rows out of view)
+  const shownKeys = new Set(list.filter((e) => !groupBy || !closed.has(groupOf(e))).map(keyOf));
+  const sel = [...picked].filter((k) => shownKeys.has(k));
+  const all = list.length > 0 && list.every((e) => picked.has(keyOf(e)));
+  const move = (hide: boolean) => {
+    const h = new Set(hidden);
+    for (const k of sel) { if (hide) h.add(k); else h.delete(k); }
+    save(h); notify(hide ? `Hidden from your view: ${sel.length} event(s). Find them under Hidden items.` : 'Back in your list.'); setPicked(new Set());
+  };
+  const row = (e: FeedItem) => {
+    const k = keyOf(e);
+    return (
+      <li key={k}>
+        <input type="checkbox" className="org-pick" checked={picked.has(k)} onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; })} aria-label={`Select ${e.text} ${e.ref}`} />
+        <time className="note" dateTime={e.at}>{new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time>
+        <span><b>{e.text}</b> <span className="note">{e.ref}{e.who ? ` · ${e.who}` : ''}</span></span>
+      </li>
+    );
+  };
+  return (
+    <>
+      <div className="org-bar" role="toolbar" aria-label="Organise activity">
+        <span className="org-count" aria-live="polite">{sel.length ? `${sel.length} selected` : showHidden ? 'Hidden items' : 'Select items to group or hide'}</span>
+        <label className="org-all"><input type="checkbox" className="org-pick" checked={all} onChange={() => setPicked(all ? new Set() : new Set(list.map(keyOf)))} /> Select all ({list.length})</label>
+        {sel.length > 0 && (showHidden ? <button className="btn btn-sm btn-primary" onClick={() => move(false)}>Unhide</button> : <button className="btn btn-sm" onClick={() => move(true)}>Hide</button>)}
+        {sel.length > 0 && <button className="btn btn-sm" onClick={() => setPicked(new Set())}>Clear selection</button>}
+        <label className="note">Group by <select className="input input-sm" style={{ width: 'auto' }} value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>{ACT_GROUPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+        <button className={`btn btn-sm ${showHidden ? 'btn-primary' : ''}`} aria-pressed={showHidden} onClick={() => { setShowHidden((v) => !v); setPicked(new Set()); }}>
+          {showHidden ? 'Back to list' : `Hidden items (${feed.filter((e) => hidden.has(keyOf(e))).length})`}
+        </button>
+      </div>
+      {!list.length ? <div className="empty">{showHidden ? 'No hidden events.' : 'All events are hidden. Open Hidden items to bring them back.'}</div>
+        : !groupBy ? <ul className="feed feed-pick">{list.map(row)}</ul>
+        : groups.map((g) => {
+          const items = list.filter((e) => groupOf(e) === g);
+          const open = !closed.has(g);
+          return (
+            <div key={g}>
+              <div className="org-head">
+                <button className="group-toggle" aria-expanded={open} onClick={() => setClosed((c) => { const n = new Set(c); if (n.has(g)) n.delete(g); else n.add(g); return n; })}>
+                  <span aria-hidden="true">{open ? '▾' : '▸'}</span> <b>{g}</b> <span className="note">· {items.length} event(s)</span>
+                </button>
+              </div>
+              {open && <ul className="feed feed-pick">{items.map(row)}</ul>}
+            </div>
+          );
+        })}
+    </>
   );
 }
