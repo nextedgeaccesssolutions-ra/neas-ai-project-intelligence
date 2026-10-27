@@ -5,11 +5,13 @@ import { buildProjectReport, type ProjectReport, type ProjectReportInput } from 
 import type { LoadImage } from '@/lib/projectReportPdf';
 import { saveFile } from '@/lib/fileio';
 
-export default function ProjectReportPanel({ input, load, onGenerated, note }: {
+export default function ProjectReportPanel({ input, load, onGenerated, onSend, note }: {
   /** builds the report input at generation time (reporting cut-off, current records) */
   input: (asOf: string, from: string | null) => ProjectReportInput;
   load: LoadImage;
   onGenerated?: (r: ProjectReport) => void | Promise<void>;
+  /** send exactly the previewed file to the project's clients for review */
+  onSend?: (blob: Blob, r: ProjectReport) => Promise<string>;
   note?: string;
 }) {
   const today = new Date().toLocaleDateString('en-CA');
@@ -17,7 +19,7 @@ export default function ProjectReportPanel({ input, load, onGenerated, note }: {
   const [from, setFrom] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [preview, setPreview] = useState<{ url: string; blob: Blob; name: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; blob: Blob; name: string; report: ProjectReport } | null>(null);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
 
   const make = async (): Promise<{ blob: Blob; report: ProjectReport } | null> => {
@@ -48,7 +50,14 @@ export default function ProjectReportPanel({ input, load, onGenerated, note }: {
 
   const doPreview = async () => {
     const r = await make();
-    if (r) setPreview({ url: URL.createObjectURL(r.blob), blob: r.blob, name: `${r.report.fileName}.pdf` });
+    if (r) setPreview({ url: URL.createObjectURL(r.blob), blob: r.blob, name: `${r.report.fileName}.pdf`, report: r.report });
+  };
+  const doSend = async () => {
+    if (!preview || !onSend) return;
+    setBusy('Sending to client…');
+    try { setMsg({ ok: true, text: await onSend(preview.blob, preview.report) }); }
+    catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    finally { setBusy(null); }
   };
   const doDownload = async () => {
     const r = preview ?? await make().then((x) => (x ? { blob: x.blob, name: `${x.report.fileName}.pdf`, url: '' } : null));
@@ -77,6 +86,7 @@ export default function ProjectReportPanel({ input, load, onGenerated, note }: {
         <div style={{ marginTop: 12 }}>
           <div className="form-actions" style={{ marginTop: 0 }}>
             <span className="note">Preview of {preview.name}</span>
+            {onSend && <button className="btn btn-sm btn-primary" onClick={doSend} disabled={!!busy} title="The client sees exactly this file and can approve it or request changes">Send this report to the client for review</button>}
             <button className="btn btn-sm" onClick={() => setPreview(null)}>Close preview</button>
           </div>
           <iframe title="Project report preview" src={preview.url} style={{ width: '100%', height: '80vh', border: '1px solid var(--line)', borderRadius: 10 }} />

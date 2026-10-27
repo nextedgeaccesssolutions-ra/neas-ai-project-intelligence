@@ -15,7 +15,9 @@ import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
 import { fmtDate } from '@/lib/format';
 import type { ProjectReport } from '@/lib/projectReport';
 
-type Export = { id: string; report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string };
+type Export = { id: string; report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string; approval_status: string; sent_for_review_at: string | null };
+type Review = { export_id: string; reviewer_name: string; decision: string; comment: string; created_at: string };
+const REVIEW: Record<string, [string, string]> = { pending: ['Waiting for client', 'pill-warn'], approved: ['Approved by client', 'pill-ok'], changes_requested: ['Changes requested', 'pill-bad'] };
 
 export default function Reports() {
   const { ready, project, state, setActiveProject, calendarFor } = useStore();
@@ -24,13 +26,17 @@ export default function Reports() {
   const [manager, setManager] = useState<string | null>(null);
   const [history, setHistory] = useState<Export[]>([]);
   const [logNote, setLogNote] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [exportIds, setExportIds] = useState<Record<string, string>>({});
 
   useEffect(() => { if (want && want !== state.activeProjectId && state.projects.some((p) => p.id === want)) setActiveProject(want); }, [want, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadHistory = () => {
     const sb = CLOUD ? supabaseBrowser() : null;
     if (!sb || !pid) return;
-    sb.from('project_report_exports').select('id, report_ref, generated_at, actual_pct, planned_pct, schedule_status').eq('project_id', pid).order('generated_at', { ascending: false }).limit(200)
+    sb.from('project_report_exports').select('id, report_ref, generated_at, actual_pct, planned_pct, schedule_status, approval_status, sent_for_review_at').eq('project_id', pid).order('generated_at', { ascending: false }).limit(200)
       .then(({ data }) => setHistory((data as Export[]) ?? []));
+    sb.from('client_report_reviews').select('export_id, reviewer_name, decision, comment, created_at').eq('project_id', pid).order('created_at', { ascending: false }).limit(500)
+      .then(({ data }) => setReviews((data as Review[]) ?? []));
     sb.from('project_memberships').select('role, profiles(full_name, email)').eq('project_id', pid).eq('role', 'project_manager').limit(1)
       .then(({ data }) => {
         const p = (data?.[0] as { profiles?: { full_name?: string; email?: string } | { full_name?: string; email?: string }[] } | undefined)?.profiles;
@@ -50,11 +56,12 @@ export default function Reports() {
     const sb = CLOUD ? supabaseBrowser() : null;
     if (!sb) return;
     const { data: u } = await sb.auth.getUser();
-    const { error } = await sb.from('project_report_exports').insert({
+    const { data: row, error } = await sb.from('project_report_exports').insert({
       project_id: pid, report_ref: r.reference, period_from: r.series[0]?.day ?? null, period_to: r.asOf,
       planned_pct: r.overall ? Math.round(r.overall.planned * 100) / 100 : null, actual_pct: r.overall ? Math.round(r.overall.actual * 100) / 100 : null,
       schedule_status: r.overall?.status ?? '', generated_by: u.user?.id,
-    });
+    }).select('id').single();
+    if (row) setExportIds((m) => ({ ...m, [r.reference]: (row as { id: string }).id }));
     setLogNote(error ? `Report not logged: ${error.message}` : 'Logged in the report history; the Google Sheet updates on the next sync.');
     if (!error) {
       loadHistory();
@@ -79,6 +86,19 @@ export default function Reports() {
         note={coverPhotos(evidence).length ? undefined : 'No cover photos are selected yet: add them under Site evidence → Project cover photos.'}
         load={async (id) => (await getPhoto(id).catch(() => undefined)) ?? (CLOUD ? await fetchFromServer(id, evidence.find((e) => e.id === id)?.storagePath ?? `${pid}/${id}.jpg`) : null)}
         onGenerated={logged}
+        onSend={CLOUD ? async (blob, r) => {
+          const exportId = exportIds[r.reference];
+          if (!exportId) throw new Error('This report was not logged, so it cannot be sent. Generate it again while online.');
+          const form = new FormData();
+          form.set('exportId', exportId);
+          form.set('file', blob, `${r.fileName}.pdf`);
+          const res = await fetch('/api/reports/review', { method: 'POST', body: form }).catch(() => null);
+          if (!res) throw new Error('Sending needs an internet connection.');
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(j.error ?? 'The report could not be sent.');
+          loadHistory();
+          return `${r.reference} was sent. The project's client sees it under “Reports for your review” and can approve it or request changes.`;
+        } : undefined}
         input={(asOf, from) => ({
           audience: 'internal', generatedAt: new Date(), preparedBy: state.userName || 'NEAS', asOf, periodFrom: from,
           project: { code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate, manager },
@@ -101,11 +121,17 @@ export default function Reports() {
           {o.listed.length === 0 ? <div className="empty">{o.showHidden ? 'You have not hidden any reports.' : 'No reports generated yet.'}</div> : (
             <div className="table-wrap">
               <table className="tbl">
-                <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Reference</th><th>Generated</th><th className="num">Planned</th><th className="num">Actual</th><th>Schedule</th></tr></thead>
+                <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Reference</th><th>Generated</th><th className="num">Planned</th><th className="num">Actual</th><th>Schedule</th><th>Client review</th></tr></thead>
                 {o.tbodies((h) => (
                   <tr><td className="pick-col">{o.checkbox(h)}</td><td>{h.report_ref}</td><td>{fmtDate(h.generated_at)} {new Date(h.generated_at).toLocaleTimeString()}</td>
-                    <td className="num">{h.planned_pct == null ? '—' : `${Number(h.planned_pct).toFixed(1)}%`}</td><td className="num">{h.actual_pct == null ? '—' : `${Number(h.actual_pct).toFixed(1)}%`}</td><td>{h.schedule_status || '—'}</td></tr>
-                ), 6)}
+                    <td className="num">{h.planned_pct == null ? '—' : `${Number(h.planned_pct).toFixed(1)}%`}</td><td className="num">{h.actual_pct == null ? '—' : `${Number(h.actual_pct).toFixed(1)}%`}</td><td>{h.schedule_status || '—'}</td>
+                    <td>{(() => {
+                      const st = REVIEW[h.approval_status];
+                      if (!st) return <span className="note">Not sent</span>;
+                      const rv = reviews.find((x) => x.export_id === h.id);
+                      return <><span className={`pill ${st[1]}`}>{st[0]}</span>{rv && <div className="note">{rv.reviewer_name}, {fmtDate(rv.created_at)}{rv.comment ? ` — “${rv.comment}”` : ''}</div>}</>;
+                    })()}</td></tr>
+                ), 7)}
               </table>
             </div>
           )}

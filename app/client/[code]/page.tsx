@@ -4,6 +4,7 @@ import type { ClientView } from '@/lib/cloud/clientView';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
 import ClientProjectView from '@/components/ClientProjectView';
 import AuthCard from '@/components/AuthCard';
+import ClientReportReviews from '@/components/ClientReportReviews';
 
 const cacheKey = (code: string) => `neas-client-cache:${code}`;
 
@@ -94,6 +95,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
       <main className="client-main">
         {!needLogin && !view && <div className="card note">{error ?? 'Loading…'}</div>}
 
+        {view && !cachedAt && <ClientReportReviews code={code} />}
         {view && (
           <ClientProjectView
             view={view}
