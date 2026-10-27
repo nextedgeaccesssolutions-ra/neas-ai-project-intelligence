@@ -62,6 +62,20 @@ export default function TemplatesPage() {
     setPending(pendingFor(pid));
   }, [sb, pid]);
   useEffect(() => { void load(); }, [load]);
+  // a Word / PowerPoint file chosen in another page's Import arrives here, ready to review
+  useEffect(() => {
+    if (!pid || !/[?&]imported=1/.test(window.location.search)) return;
+    try {
+      const raw = sessionStorage.getItem('neas-imported-template');
+      sessionStorage.removeItem('neas-imported-template');
+      window.history.replaceState(null, '', '/templates');
+      if (!raw) return;
+      const { name, definition } = JSON.parse(raw) as { name: string; definition: TemplateDefinition };
+      if (!canManage(pid)) return notify('Only the project manager or a Super Admin can add report templates.');
+      setEditing({ id: '', project_id: pid, name, definition, updated_at: '' });
+      notify(`Read ${definition.sections.length} section(s) from ${name}. Check them, then press Save template.`);
+    } catch { /* nothing to pick up */ }
+  }, [pid]);
   useEffect(() => {
     const on = () => void load();
     window.addEventListener('online', on);

@@ -92,7 +92,16 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
     }
     const file = files.find((f) => !f.type.startsWith('image/'));
     if (file && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
-      notify(`${file.name} is a report document, not a table. To reuse its layout, open Reports → Report templates and press “Import a template from Word / PowerPoint”. This Import reads spreadsheets (Excel or CSV) with column names in the first row.`);
+      setBusy(`Reading ${file.name}…`);
+      try {
+        const { templateFromFile } = await import('@/lib/templateImport');
+        const def = await templateFromFile(file);
+        sessionStorage.setItem('neas-imported-template', JSON.stringify({ name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def }));
+        window.location.href = '/templates?imported=1';
+      } catch (e) {
+        setBusy(null);
+        notify((e as Error).message);
+      }
       return;
     }
     if (!file || !importColumns || !onImport) {
