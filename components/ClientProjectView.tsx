@@ -15,7 +15,7 @@ import { gpsSourceLabel, mapUrl } from '@/lib/geo';
 import type { GpsSource, GpsStatus } from '@/lib/types';
 
 export default function ClientProjectView({ view, cachedAt, footer }: { view: ClientView; cachedAt?: string | null; footer?: ReactNode }) {
-  const fresh = useRef<Promise<unknown> | null>(null);
+  const fresh = useRef<{ at: number; p: Promise<unknown> } | null>(null);
   return (
     <>
       {cachedAt && <div className="banner">Offline copy saved {new Date(cachedAt).toLocaleString()}. It may be out of date. Reconnect to see the latest approved information.</div>}
@@ -104,8 +104,11 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
           const first = await get(view.files?.find((f) => f.id === id)?.url);
           if (first) return first;
           // photo links expire after an hour: fetch fresh ones once and try again
-          if (!fresh.current) fresh.current = fetch(`/api/client/snapshot?code=${encodeURIComponent(view.project.code)}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-          const v = await fresh.current as { files?: { id: string; url: string | null }[] } | null;
+          if (!fresh.current || Date.now() - fresh.current.at > 50 * 60_000) {
+            fresh.current = { at: Date.now(), p: fetch(`/api/client/snapshot?code=${encodeURIComponent(view.project.code)}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null) };
+          }
+          const v = await fresh.current.p as { files?: { id: string; url: string | null }[] } | null;
+          if (!v) fresh.current = null; // try again for the next photo
           return get(v?.files?.find((f) => f.id === id)?.url);
         }}
         input={(asOf) => {

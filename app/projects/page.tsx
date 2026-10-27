@@ -81,6 +81,10 @@ export default function ProjectRegister() {
     if (!(await askConfirm(`Archive ${pickedIds.length} project(s)? Members lose access until a Super Admin reactivates them in Control panel → Projects. Nothing is deleted.`))) return;
     const { error: err } = await withPin(() => supabaseBrowser()!.from('projects').update({ status: 'archived' }).in('id', pickedIds));
     if (err) return notify(`Not archived: ${err.message}`);
+    if (pickedIds.includes(state.activeProjectId ?? '')) {
+      const next = state.projects.find((p) => !pickedIds.includes(p.id));
+      if (next) setActiveProject(next.id);
+    }
     await pullAll().catch(() => undefined);
     notify(`${pickedIds.length} project(s) archived.`);
   };
@@ -108,7 +112,7 @@ export default function ProjectRegister() {
             <label className="field">Site<input className="input" maxLength={300} value={cloudEdit.site} onChange={(e) => setCloudEdit({ ...cloudEdit, site: e.target.value })} /></label>
             <label className="field">Status
               <select className="input" value={cloudEdit.status} onChange={(e) => setCloudEdit({ ...cloudEdit, status: e.target.value })}>
-                {['draft', 'active', 'completed'].map((x) => <option key={x} value={x}>{x}</option>)}
+                {[...new Set(['draft', 'active', 'completed', cloudEdit.status])].map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
             </label>
             <label className="field">Contract value (₱)<input className="input" inputMode="decimal" value={cloudEdit.contractValue} onChange={(e) => setCloudEdit({ ...cloudEdit, contractValue: e.target.value })} placeholder="Blank if not yet agreed" /></label>
@@ -180,7 +184,7 @@ export default function ProjectRegister() {
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm btn-primary" href="/" onClick={() => setActiveProject(p.id)}>Open</Link>{' '}
                         <Link className="btn btn-sm" href={`/reports?project=${encodeURIComponent(p.id)}`} onClick={() => setActiveProject(p.id)}>View reports</Link>{' '}
-                        {CLOUD && isSuperAdmin() && <button className="btn btn-sm" onClick={() => { setCloudEdit({ id: p.id, code: p.code ?? p.id, name: p.name, client: p.client, site: p.site, status: ['draft', 'active', 'completed'].includes(p.status) ? p.status : 'active', contractValue: p.contractValue == null ? '' : String(p.contractValue) }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>}
+                        {CLOUD && isSuperAdmin() && <button className="btn btn-sm" onClick={() => { setCloudEdit({ id: p.id, code: p.code ?? p.id, name: p.name, client: p.client, site: p.site, status: p.status, contractValue: p.contractValue == null ? '' : String(p.contractValue) }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>}
                         {!CLOUD && <><button className="btn btn-sm" onClick={() => { setDraft({ ...p, contractValue: p.contractValue == null ? '' : String(p.contractValue), isNew: false }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>{' '}
                         <button className="btn btn-sm btn-danger" onClick={() => askConfirm(`Delete ${p.id} and all its activities, reports, BOQ and photos? This cannot be undone.`).then((ok) => ok && deleteProject(p.id))}>Delete</button></>}
                       </td>

@@ -183,7 +183,7 @@ export async function templateReportPdf(t: TemplateDefinition, d: TemplateReport
   return pdf.output('blob');
 }
 
-export const newSectionId = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+export const newSectionId = () => `s${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
 /** Word (.docx) in the NEAS report layout: cover, numbered sections, tables, photo annex 2 per row. */
 export async function templateReportDocx(t: TemplateDefinition, d: TemplateReportData, opts: {

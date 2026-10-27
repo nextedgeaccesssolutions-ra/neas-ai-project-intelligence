@@ -58,10 +58,15 @@ export default function FieldReports() {
     const ids = reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').map((r) => r.id);
     if (!ids.length) return setMsg('None of the selected reports is waiting for approval.');
     if (!(await askConfirm(`Approve ${ids.length} submitted report(s)?`, { danger: false }))) return;
-    const { error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).in('id', ids);
-    if (err) return setError(`Approval failed: ${err.message}. Reviews need an internet connection.`);
+    let ok = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      const { data, error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).eq('id', id).eq('status', 'submitted').select('id');
+      if (!err && data?.length) ok++;
+      else failed.push(err?.message ?? 'already reviewed or not yours to approve');
+    }
     await pullAll().catch(() => undefined);
-    setMsg(`${ids.length} report(s) approved.`);
+    setMsg(`${ok} report(s) approved.${failed.length ? ` ${failed.length} not approved (${[...new Set(failed)].join('; ')}).` : ''}`);
   };
 
   if (!ready) return <Loading />;

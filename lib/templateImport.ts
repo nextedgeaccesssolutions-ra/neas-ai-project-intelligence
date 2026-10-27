@@ -11,11 +11,23 @@ const titleCase = (s: string) => (s === s.toUpperCase() && /[A-Z]/.test(s) ? s.t
 
 interface Block { kind: 'p' | 'tbl'; text: string; style: string; bullet: boolean; rows: string[][]; images: number }
 
+/** Top-level paragraphs and tables in order; a table is taken whole even when it contains tables. */
+function topLevel(body: string): string[] {
+  const out: string[] = [];
+  const tag = /<w:tbl>|<\/w:tbl>|<w:p[ >][\s\S]*?<\/w:p>/g;
+  let depth = 0, start = -1;
+  for (let m = tag.exec(body); m; m = tag.exec(body)) {
+    if (m[0] === '<w:tbl>') { if (depth++ === 0) start = m.index; }
+    else if (m[0] === '</w:tbl>') { if (--depth === 0) out.push(body.slice(start, m.index + m[0].length)); }
+    else if (depth === 0) out.push(m[0]);
+  }
+  return out;
+}
+
 function docxBlocks(xml: string): Block[] {
   const body = xml.match(/<w:body>([\s\S]*)<\/w:body>/)?.[1] ?? '';
   const out: Block[] = [];
-  for (const m of body.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>|<w:p[ >][\s\S]*?<\/w:p>/g)) {
-    const b = m[0];
+  for (const b of topLevel(body)) {
     if (b.startsWith('<w:tbl>')) {
       const rows = [...b.matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)].map((r) => [...r[0].matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map((c) =>
         [...c[0].matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)].map((p) => clean(texts(p[0], 'w:t').join(''))).filter(Boolean).join('\n')));
