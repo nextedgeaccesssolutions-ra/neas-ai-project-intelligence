@@ -81,6 +81,8 @@ export function dragSource(id: string, picked: Set<string> | string[]) {
   return {
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
+      // never start a drag from a field the person is typing or selecting text in
+      if ((e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) { e.preventDefault(); return; }
       const ids = sel.includes(id) ? sel : [id];
       e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
       e.dataTransfer.setData('text/plain', `${ids.length} item(s)`);
@@ -113,8 +115,9 @@ export function UngroupZone({ label, onDrop }: { label: string; onDrop: (ids: st
 }
 
 /** Touch-friendly alternative to dragging: choose the group from a list. */
-export function MoveToMenu({ groups, current, onMove }: { groups: { id: string; name: string }[]; current: string | null; onMove: (groupId: string | null) => void }) {
-  if (!groups.length) return null;
+export function MoveToMenu({ groups, current, currentEditable = true, onMove }: { groups: { id: string; name: string }[]; current: string | null; currentEditable?: boolean; onMove: (groupId: string | null) => void }) {
+  // an item in a group this person cannot change stays where it is
+  if (!groups.length || (current && !currentEditable)) return null;
   return (
     <select className="input input-sm move-to" value="" aria-label="Move to group" onChange={(e) => { const v = e.target.value; if (v) onMove(v === '__none' ? null : v); }} onClick={(e) => e.stopPropagation()}>
       <option value="">Move to…</option>

@@ -96,11 +96,13 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
 
   // drag-and-drop and "Move to": into an existing group of the same project, or back out of any group
   const moveTo = async (ids: string[], gid: string | null) => {
-    const keep = ids.filter((i) => listed.some((t) => id(t) === i));
+    // only items shown here, and only out of groups this person may change
+    const keep = ids.filter((i) => listed.some((t) => id(t) === i)).filter((i) => { const cur = org.groupOf.get(itemKey(kind, i)); return !cur || editable(cur); });
+    if (keep.length < ids.length) notify(`${ids.length - keep.length} ${noun}(s) are in a group you cannot change and were left where they are.`);
     if (!keep.length) return;
     if (gid === null) { done(await org.ungroup(kind, keep), 'Moved out of the group.'); return; }
     const g = org.groups.find((x) => x.id === gid);
-    if (!g || !editable(g)) { notify('You cannot add items to that group.'); return; }
+    if (!g || !editable(g) || (g.project_id === null && list !== 'projects')) { notify('You cannot add items to that group.'); return; }
     const projs = [...new Set(keep.map((i) => project(items.find((t) => id(t) === i)!)))];
     if (g.project_id && projs.some((p) => p !== g.project_id)) { notify(`Only ${noun}s from the group's own project can go in it.`); return; }
     done(!!(await org.group(g.project_id, kind, keep, { id: g.id })), `Moved ${keep.length} ${noun}(s) to “${g.name}”.`);
@@ -109,12 +111,12 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
   /** draggable props for a row or card */
   const drag = (t: T) => (showHidden ? {} : dragSource(id(t), picked));
   /** "Move to" menu for a row or card (phones, keyboards) */
-  const moveMenu = (t: T) => (showHidden ? null : <MoveToMenu groups={targets(t)} current={org.groupOf.get(key(t))?.id ?? null} onMove={(gid) => void moveTo([id(t)], gid)} />);
+  const moveMenu = (t: T) => { const cur = org.groupOf.get(key(t)); return showHidden ? null : <MoveToMenu groups={targets(t)} current={cur?.id ?? null} currentEditable={!cur || editable(cur)} onMove={(gid) => void moveTo([id(t)], gid)} />; };
   const ungroupZone = !showHidden && groups.length > 0 ? <UngroupZone label={`Drop here to take ${noun}s out of their group`} onDrop={(ids) => void moveTo(ids, null)} /> : null;
 
   const header = (g: ViewGroup, count: number) => (
     <GroupHeader label={g.name} count={count} open={open.isOpen(g.id)} onToggle={() => open.toggle(g.id)}
-      onDropItems={editable(g) ? (ids) => void moveTo(ids, g.id) : undefined}
+      onDropItems={editable(g) && (g.project_id !== null || list === 'projects') ? (ids) => void moveTo(ids, g.id) : undefined}
       badge={g.scope === 'project' ? 'Shared with project' : 'Only you'}
       onRename={editable(g) ? () => { setRenaming(g); setRenameTo(g.name); } : undefined}
       onRemove={editable(g) ? () => askConfirm(`Remove the group "${g.name}"? Its ${count} ${noun}(s) go back to the main list. Nothing is deleted.`, { danger: false }).then(async (ok) => { if (ok && (await org.remove(g))) notify('Group removed.'); }) : undefined} />

@@ -279,7 +279,10 @@ export default function SiteEvidence() {
   const ungrouped = showHidden ? listed : listed.filter((e) => !org.groupOf.get(itemKey('attachment', e.id)) || !projGroups.some((g) => g.id === org.groupOf.get(itemKey('attachment', e.id))!.id));
   // drag-and-drop and "Move to": into a group of this project, or back to the main list
   const movePhotos = async (ids: string[], gid: string | null) => {
-    const keep = ids.filter((i) => listed.some((e) => e.id === i));
+    // only photos shown here, and only out of groups this person may change
+    const canChange = (i: string) => { const cur = org.groupOf.get(itemKey('attachment', i)); return !cur || cur.scope === 'personal' || reviewer; };
+    const keep = ids.filter((i) => listed.some((e) => e.id === i)).filter(canChange);
+    if (keep.length < ids.length) notify(`${ids.length - keep.length} photo(s) are in a shared group only a project manager can change, and were left where they are.`);
     if (!keep.length) return;
     if (gid === null) { done(await org.ungroup('attachment', keep), 'Moved back to the main list.'); return; }
     const g = projGroups.find((x) => x.id === gid);
@@ -324,7 +327,7 @@ export default function SiteEvidence() {
     const from = pairFrom ? byId.get(pairFrom) : undefined;
     const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
     return (
-      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }} {...(showHidden || pairFrom ? {} : dragSource(e.id, picked))}>
+      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }} {...(showHidden || pairFrom || isEditing ? {} : dragSource(e.id, picked))}>
       <input type="checkbox" className="pick" checked={picked.has(e.id)} onChange={() => togglePick(e.id)} aria-label={`Select ${e.ref || e.kind} ${e.caption}`} />
         <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
         <figcaption className="meta">
@@ -381,7 +384,7 @@ export default function SiteEvidence() {
                 {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
                 {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
                 {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0)) + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
-                {!showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} onMove={(gid) => void movePhotos([e.id], gid)} />}
+                {!showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} currentEditable={(() => { const cur = org.groupOf.get(itemKey('attachment', e.id)); return !cur || cur.scope === 'personal' || reviewer; })()} onMove={(gid) => void movePhotos([e.id], gid)} />}
                 {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                 {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
                 {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
