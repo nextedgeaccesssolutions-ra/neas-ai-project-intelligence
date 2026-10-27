@@ -19,7 +19,7 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
   return (
     <>
       {cachedAt && <div className="banner">Offline copy saved {new Date(cachedAt).toLocaleString()}. It may be out of date. Reconnect to see the latest approved information.</div>}
-      <section className="card">
+      <section className="card" id="client-overview">
         <div className="eyebrow">{view.project.code}</div>
         <h1 style={{ margin: '4px 0' }}>{view.project.name}</h1>
         <div className="client-meta">
@@ -63,18 +63,18 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
       )}
 
       {view.reports && (
-        <section className="card">
-          <div className="card-head"><h2>Progress reports</h2></div>
-          {!view.reports.length ? <div className="empty">No approved reports yet.</div> : (
+        <section className="card" id="client-field-reports">
+          <div className="card-head"><h2>Field reports</h2><span className="note">Approved reports shared with you</span></div>
+          {!view.reports.length ? <div className="empty">No field reports have been shared yet.</div> : (
             <ReportGroups reports={view.reports} />
           )}
         </section>
       )}
 
       {view.files && (
-        <section className="card">
-          <div className="card-head"><h2>Photos and documents</h2></div>
-          {!view.files.length ? <div className="empty">Nothing approved for viewing yet.</div> : (
+        <section className="card" id="client-site-evidence">
+          <div className="card-head"><h2>Site evidence</h2><span className="note">Photos and documents shared with you</span></div>
+          {!view.files.length ? <div className="empty">No photos or documents have been shared yet.</div> : (
             <ClientGallery files={view.files} project={view.project} />
           )}
         </section>
@@ -134,6 +134,12 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
         }}
       />
       {footer}
+      {/* phones: jump between the parts of the page the project shares */}
+      <nav className="bottom-bar" aria-label="Quick navigation">
+        <a href="#client-overview"><span aria-hidden="true">▦</span><span>Board</span></a>
+        {view.reports && <a href="#client-field-reports"><span aria-hidden="true">✎</span><span>Field</span></a>}
+        {view.files && <a href="#client-site-evidence"><span aria-hidden="true">◉</span><span>Photos</span></a>}
+      </nav>
     </>
   );
 }
