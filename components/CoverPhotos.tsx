@@ -7,10 +7,12 @@ import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
 import { coverPhotos, coverReference, reorderCover, COVER_TILE_CM } from '@/lib/coverPhotos';
 import type { Evidence, Project } from '@/lib/types';
 
-export default function CoverPhotos({ project, evidence, canManage, updateEvidence, onAdd, syncState }: {
+export default function CoverPhotos({ project, evidence, canManage, updateEvidence, onAdd, onUpload, syncState }: {
   project: Project; evidence: Evidence[]; canManage: boolean;
   updateEvidence: (id: string, patch: Partial<Evidence>) => void;
   onAdd: () => void;
+  /** upload photos straight onto the cover */
+  onUpload?: (files: File[]) => void | Promise<void>;
   /** per-photo sync label, e.g. "Waiting to sync" */
   syncState?: (id: string) => string | null;
 }) {
@@ -39,7 +41,13 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
         <span className="note">Printed on the project report cover at exactly {COVER_TILE_CM} cm × {COVER_TILE_CM} cm; the first 2 go on page 1</span>
       </div>
       <div className="form-actions" style={{ marginTop: 0, flexWrap: 'wrap' }}>
-        <button className="btn btn-sm" onClick={onAdd}>Upload building / site photo</button>
+        {onUpload && canManage ? (
+          <label className="btn btn-sm btn-primary" style={{ cursor: 'pointer' }}>
+            Upload cover photo(s)
+            <input type="file" accept="image/*" multiple hidden onChange={(ev) => { const f = Array.from(ev.target.files ?? []); ev.target.value = ''; if (f.length) void onUpload(f); }} />
+          </label>
+        ) : null}
+        <button className="btn btn-sm" onClick={onAdd}>Upload with full details</button>
         {canManage && candidates.length > 0 && (
           <>
             <select className="input" style={{ width: 'auto', maxWidth: 320 }} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Photo to put on the cover">

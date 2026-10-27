@@ -2,6 +2,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
+import CoverPageEditor from '@/components/CoverPageEditor';
+import { isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
 import ProjectReportPanel from '@/components/ProjectReportPanel';
 import { useOrgList } from '@/components/OrgList';
 import { fetchFromServer } from '@/components/PhotoThumb';
@@ -13,7 +15,8 @@ import { supabaseBrowser } from '@/lib/cloud/browser';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
 import { fmtDate } from '@/lib/format';
-import type { ProjectReport } from '@/lib/projectReport';
+import { buildProjectReport, type CoverSettings, type ProjectReport, type ProjectReportInput } from '@/lib/projectReport';
+import { todayLocal } from '@/lib/calc';
 
 type Export = { id: string; report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string; approval_status: string; sent_for_review_at: string | null };
 type Review = { export_id: string; reviewer_name: string; decision: string; comment: string; created_at: string };
@@ -27,6 +30,8 @@ export default function Reports() {
   const [history, setHistory] = useState<Export[]>([]);
   const [logNote, setLogNote] = useState<string | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [coverSettings, setCoverSettings] = useState<CoverSettings | null>(null);
+  useCloudStatus();
   const [exportIds, setExportIds] = useState<Record<string, string>>({});
 
   useEffect(() => { if (want && want !== state.activeProjectId && state.projects.some((p) => p.id === want)) setActiveProject(want); }, [want, ready]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -35,6 +40,8 @@ export default function Reports() {
     if (!sb || !pid) return;
     sb.from('project_report_exports').select('id, report_ref, generated_at, actual_pct, planned_pct, schedule_status, approval_status, sent_for_review_at').eq('project_id', pid).order('generated_at', { ascending: false }).limit(200)
       .then(({ data }) => setHistory((data as Export[]) ?? []));
+    sb.from('report_cover_settings').select('cover_values, layout').eq('project_id', pid).maybeSingle()
+      .then(({ data }) => setCoverSettings(data ? { values: data.cover_values as Record<string, string>, layout: data.layout as CoverSettings['layout'] } : null));
     sb.from('client_report_reviews').select('export_id, reviewer_name, decision, comment, created_at').eq('project_id', pid).order('created_at', { ascending: false }).limit(500)
       .then(({ data }) => setReviews((data as Review[]) ?? []));
     sb.from('project_memberships').select('role, profiles(full_name, email)').eq('project_id', pid).eq('role', 'project_manager').limit(1)
@@ -69,6 +76,20 @@ export default function Reports() {
     }
   };
 
+  const reportInput = (asOf: string, from: string | null): ProjectReportInput => ({
+          audience: 'internal', generatedAt: new Date(), preparedBy: state.userName || 'NEAS', asOf, periodFrom: from,
+          project: { code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate, manager },
+          activities, reports, stops, calendar: calendarFor(pid), pendingReports: reports.filter((r) => r.status === 'submitted').length,
+          cover: coverPhotos(evidence).map((e) => ({
+            id: e.id, caption: e.caption, category: e.coverCategory, ref: e.ref, workArea: e.workArea, location: e.locationDetail,
+            lat: e.gps?.lat ?? null, lng: e.gps?.lng ?? null, accuracy: e.gps?.accuracy ?? null, source: e.gpsSource ?? null, status: e.gpsStatus, takenAt: e.takenAt,
+          })),
+          evidence: evidence.filter((e) => e.kind !== 'Reference' && e.takenAt.slice(0, 10) <= asOf).sort((a, b) => a.takenAt.localeCompare(b.takenAt)).map((e) => ({
+            id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: name(e.activityId), workArea: e.workArea, location: e.locationDetail, pairId: e.pairId,
+            gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined, mapUrl: mapUrl(e.gps?.lat, e.gps?.lng),
+          })),
+  });
+
   return (
     <>
       <div className="page-head">
@@ -99,20 +120,9 @@ export default function Reports() {
           loadHistory();
           return `${r.reference} was sent. The project's client sees it under “Reports for your review” and can approve it or request changes.`;
         } : undefined}
-        input={(asOf, from) => ({
-          audience: 'internal', generatedAt: new Date(), preparedBy: state.userName || 'NEAS', asOf, periodFrom: from,
-          project: { code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate, manager },
-          activities, reports, stops, calendar: calendarFor(pid), pendingReports: reports.filter((r) => r.status === 'submitted').length,
-          cover: coverPhotos(evidence).map((e) => ({
-            id: e.id, caption: e.caption, category: e.coverCategory, ref: e.ref, workArea: e.workArea, location: e.locationDetail,
-            lat: e.gps?.lat ?? null, lng: e.gps?.lng ?? null, accuracy: e.gps?.accuracy ?? null, source: e.gpsSource ?? null, status: e.gpsStatus, takenAt: e.takenAt,
-          })),
-          evidence: evidence.filter((e) => e.kind !== 'Reference' && e.takenAt.slice(0, 10) <= asOf).sort((a, b) => a.takenAt.localeCompare(b.takenAt)).map((e) => ({
-            id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: name(e.activityId), workArea: e.workArea, location: e.locationDetail, pairId: e.pairId,
-            gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined, mapUrl: mapUrl(e.gps?.lat, e.gps?.lng),
-          })),
-        })}
+        input={(asOf, from) => ({ ...reportInput(asOf, from), coverSettings })}
       />
+      {CLOUD && <CoverPageEditor projectId={pid} defaults={buildProjectReport(reportInput(todayLocal(), null)).fields} settings={coverSettings} isAdmin={isSuperAdmin()} onSaved={loadHistory} />}
       {logNote && <p className="note">{logNote}</p>}
       {CLOUD && (
         <section className="card">

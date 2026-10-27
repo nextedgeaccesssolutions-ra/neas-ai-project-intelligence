@@ -30,6 +30,8 @@ export interface ProjectReportInput {
   project: ReportProject & { manager?: string | null };
   generatedAt: Date;
   preparedBy: string;
+  /** cover page edits for this project */
+  coverSettings?: CoverSettings | null;
   /** reporting cut-off (YYYY-MM-DD) */
   asOf: string;
   periodFrom?: string | null;
@@ -105,6 +107,35 @@ export function coverLines(c: CoverItem, n: number, projectName: string, tz = 'A
   };
 }
 
+/** Per-project cover page edits (report_cover_settings). Keys are the default line labels or "custom:<n>". */
+export interface CoverSettings {
+  values?: Record<string, string>;
+  layout?: { title?: string; rows?: { key: string; label?: string; show?: boolean }[]; extra?: { key: string; label: string }[] };
+}
+/** Lines the generator fills in itself; they can be hidden or renamed but never given other text. */
+export const LOCKED_COVER_LINES = ['Report reference', 'Generated'];
+/** lines the PDF places in the heading; they keep their names */
+const FIXED_LABELS = ['Project title', 'Report reference'];
+
+/** Apply cover edits: replace values, rename, hide, reorder and add extra lines. */
+export function applyCoverSettings(fields: [string, string][], s: CoverSettings | null | undefined): [string, string][] {
+  if (!s) return fields;
+  const values = s.values ?? {};
+  const base = new Map(fields);
+  const all: { key: string; value: string }[] = [
+    ...fields.map(([key, value]) => ({ key, value: !LOCKED_COVER_LINES.includes(key) && clean(values[key] ?? '') ? clean(values[key]) : value })),
+    ...(s.layout?.extra ?? []).filter((x) => clean(values[x.key] ?? '')).map((x) => ({ key: x.key, value: clean(values[x.key]) })),
+  ];
+  const rows = s.layout?.rows ?? [];
+  const pos = new Map(rows.map((r, i) => [r.key, i]));
+  const labelOf = (key: string) => FIXED_LABELS.includes(key) ? key : clean(rows.find((r) => r.key === key)?.label ?? '') || (s.layout?.extra ?? []).find((x) => x.key === key)?.label || key;
+  return all
+    .filter((x) => rows.find((r) => r.key === x.key)?.show !== false)
+    .map((x, i) => ({ ...x, o: pos.get(x.key) ?? rows.length + i }))
+    .sort((a, b) => a.o - b.o)
+    .map((x) => [base.has(x.key) || x.key.startsWith('custom:') ? labelOf(x.key) : x.key, x.value] as [string, string]);
+}
+
 export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   const tz = input.timeZone ?? 'Asia/Manila';
   const p = input.project;
@@ -137,6 +168,7 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   fields.push(['Generated', `${fmtWhen(input.generatedAt.toISOString(), tz)} (${tz})`]);
   fields.push(['Prepared by', clean(input.preparedBy) || 'Not provided']);
 
+  const coverFields = applyCoverSettings(fields, input.coverSettings);
   const cover = input.cover.map((c, i) => coverLines(c, i + 1, clean(p.name), tz));
 
   const inPeriod = (d: string) => d >= from && d <= day;
@@ -190,9 +222,9 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   ];
 
   return {
-    title: 'Project Report', reference,
+    title: clean(input.coverSettings?.layout?.title ?? '') || 'Project Report', reference,
     fileName: `NEAS_${safeName(p.code)}_${safeName(p.name)}_Project-Report_${dateStamp(input.generatedAt, tz)}`,
-    project: p, audience: input.audience, asOf: day, fields, cover, overall, series, rows,
+    project: { ...p, name: coverFields.find(([k]) => k === 'Project title')?.[1] ?? p.name }, audience: input.audience, asOf: day, fields: coverFields, cover, overall, series, rows,
     accomplishments, outstanding, delays, observations, limitations, summary, approval, evidence: input.evidence,
   };
 }

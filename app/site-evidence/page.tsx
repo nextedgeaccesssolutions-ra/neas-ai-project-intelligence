@@ -148,7 +148,8 @@ export default function SiteEvidence() {
   const partnerOf = (e: Evidence) => (e.pairId ? evidence.find((x) => x.pairId === e.pairId && x.id !== e.id) : undefined);
 
   /** Compress and store photos with capture time, GPS (when allowed) and work-area location. */
-  const addPhotos = async (files: File[]) => {
+  const addPhotos = async (files: File[], opts?: { cover?: boolean }) => {
+    let coverNext = evidence.filter((x) => x.isCover).length;
     if (!activityId) return setError('Choose an activity first.');
     if (!files.length) return setError('Choose or capture a photo.');
     let manual = null;
@@ -178,6 +179,8 @@ export default function SiteEvidence() {
         addEvidence({
           id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
           gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), coverCategory: kind === 'Reference' ? coverCategory : null, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
+          // a cover upload is a building / site reference photo placed straight on the report cover
+          ...(opts?.cover ? { kind: 'Reference' as const, coverCategory: coverCategory, isCover: true, coverOrder: ++coverNext, ref: photoRef('Reference', takenAt, id) } : {}),
         });
         ok++;
       } catch (e) {
@@ -501,6 +504,7 @@ export default function SiteEvidence() {
           updateEvidence={updateEvidence}
           syncState={(id) => (!CLOUD ? 'Saved on this device' : pendingIds.has(id) ? 'Waiting to sync' : 'Synced')}
           onAdd={() => { setKind('Reference'); document.getElementById('capture-card')?.scrollIntoView({ behavior: 'smooth' }); }}
+          onUpload={(files) => addPhotos(files, { cover: true })}
         />
       )}
 
