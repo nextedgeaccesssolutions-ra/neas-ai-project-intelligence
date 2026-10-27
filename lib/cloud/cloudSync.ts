@@ -6,8 +6,8 @@ import type { AppState, Evidence } from '../types';
 import { supabaseBrowser } from './browser';
 import { FILES_BUCKET, OFFLINE_GRACE_HOURS } from './env';
 import * as M from './mapping';
-import { forgetOfflineLogin } from '../offlineLogin';
-import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, rebaseOps, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
+import { forgetOfflineLogin, recentOfflineUnlock } from '../offlineLogin';
+import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, rebaseOps, resolveConflict, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
 import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
@@ -282,6 +282,8 @@ export function scheduleSync(ms = 0) {
 export async function syncNow(): Promise<void> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return set({ online: false });
   if (status.auth !== 'active' && status.auth !== 'offline_grace') return;
+  // signed in offline with a passcode only: nothing can be sent until a real online sign-in
+  if (!(await supabaseBrowser()?.auth.getSession())?.data.session) return;
   set({ syncing: true });
   try {
     const rep = await processOutbox(send, upload);
@@ -293,11 +295,23 @@ export async function syncNow(): Promise<void> {
       }
     }
     await setMeta('versions', versions);
+    // conflicts are not kept: the server copy wins and the device's stale edit is dropped (the pull below refreshes this device)
+    let dropped = 0;
+    for (const o of await allOps()) {
+      if (o.status !== 'conflict') continue;
+      // later edits of the same record move onto the server version so they are not dropped too
+      const v = Number((o.server_record as { version?: number } | null)?.version);
+      if (Number.isFinite(v)) await rebaseOps(o.entity, o.record_id, o.base_version, v);
+      applyServerRecord(o);
+      await resolveConflict(o.op_id, 'server');
+      dropped++;
+    }
+    if (dropped) await setMeta('versions', versions);
     const left = await allOps();
-    if (!rep.networkError && !left.some((o) => o.status === 'pending')) await pullAll();
+    if (!rep.networkError && (dropped || !left.some((o) => o.status === 'pending'))) await pullAll();
     // ask the server to refresh the Google Sheet after real changes (it coalesces and skips duplicates)
     if (rep.applied.length && Date.now() - lastNudge > 120_000) { lastNudge = Date.now(); fetch('/api/integrations/sheets/nudge', { method: 'POST' }).catch(() => undefined); }
-    set({ error: rep.networkError ? 'Connection problem. Will retry automatically.' : null, lastSyncAt: new Date().toISOString() });
+    set({ error: rep.networkError ? 'Connection problem. Will retry automatically.' : dropped ? `${dropped} change(s) had already been changed by someone else; the server version was kept.` : null, lastSyncAt: new Date().toISOString() });
   } catch (e) {
     set({ error: (e as Error).message });
   } finally {
@@ -337,7 +351,7 @@ async function loadIdentity(): Promise<void> {
   const sb = supabaseBrowser()!;
   const { data: u } = await sb.auth.getUser();
   if (!u.user) return set({ auth: 'signed_out', profile: null, memberships: [] });
-  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at, allowed_views, password_set_at').eq('id', u.user.id).single();
+  const { data: profile } = await sb.from('profiles').select('id, email, full_name, username, global_role, status, email_verified_at, allowed_views, password_set_at').eq('id', u.user.id).single();
   const { data: memberships } = await sb.from('project_memberships').select('project_id, role, can_approve_reports').eq('user_id', u.user.id);
   const active = profile?.status === 'active' && !!profile.email_verified_at;
   await setMeta('identity', { profile, memberships, verified_at: Date.now() });
@@ -354,7 +368,9 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
   const online = typeof navigator === 'undefined' || navigator.onLine;
   set({ online });
   const { data: sess } = await sb.auth.getSession();
-  if (!sess.session) return set({ auth: 'signed_out' });
+  // a passcode just checked offline on this device unlocks the cached identity of that same username
+  const unlocked = !online ? recentOfflineUnlock() : null;
+  if (!sess.session && !unlocked) return set({ auth: 'signed_out' });
   if (online) {
     try {
       await loadIdentity();
@@ -364,7 +380,7 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
   }
   if (!online || status.auth === 'checking') {
     const id = await getMeta<{ profile: Profile; memberships: Membership[]; verified_at: number }>('identity');
-    const fresh = id && Date.now() - id.verified_at < OFFLINE_GRACE_HOURS * 3600 * 1000;
+    const fresh = id && (Date.now() - id.verified_at < OFFLINE_GRACE_HOURS * 3600 * 1000 || (!!unlocked && (id.profile as { username?: string | null }).username === unlocked));
     if (id?.profile && fresh && id.profile.status === 'active') set({ auth: 'offline_grace', profile: id.profile, memberships: id.memberships });
     else set({ auth: 'expired' });
   }
@@ -395,6 +411,7 @@ export async function cloudSignOut(clearCache: () => void) {
   await supabaseBrowser()?.auth.signOut();
   await setMeta('identity', null);
   if (who) forgetOfflineLogin(who);
+  try { localStorage.removeItem('neas-offline-unlock'); } catch { /* storage blocked */ }
   clearCache();
   set({ auth: 'signed_out', profile: null, memberships: [] });
 }

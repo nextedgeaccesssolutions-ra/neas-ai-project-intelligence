@@ -78,7 +78,7 @@ export default function AdminPage() {
         sb().from('project_memberships').select('project_id, user_id, role, can_approve_reports'),
         sb().from('client_access_credentials').select('id, project_id, label, username, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
         sb().from('audit_logs').select('*').order('at', { ascending: false }).limit(300),
-        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').neq('status', 'applied').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
+        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').eq('status', 'rejected').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
         sb().from('integration_sync_log').select('*').order('at', { ascending: false }).limit(50),
         sb().from('approved_client_content').select('*'),
         sb().from('project_invitations').select('*').order('created_at', { ascending: false }).limit(200),

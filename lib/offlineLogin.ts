@@ -49,6 +49,15 @@ export async function checkOfflineLogin(username: string, pin: string): Promise<
   const ok = (await derive(u, pin, unb64(e.salt))) === e.hash;
   e.tries = ok ? 0 : e.tries + 1;
   writeAll(list);
-  if (ok) return { target: e.target };
+  if (ok) { try { localStorage.setItem(UNLOCK_KEY, JSON.stringify({ username: u, at: Date.now() })); } catch { /* storage blocked */ } return { target: e.target }; }
   return { error: e.tries >= MAX_TRIES ? 'Offline sign-in is now locked on this device. Connect to the internet and sign in.' : `Username or passcode is not correct (${MAX_TRIES - e.tries} offline tries left).` };
+}
+
+const UNLOCK_KEY = 'neas-offline-unlock';
+/** The username whose passcode was checked offline on this device within the last 12 hours, if any. */
+export function recentOfflineUnlock(): string | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(UNLOCK_KEY) ?? 'null') as { username: string; at: number } | null;
+    return v && Date.now() - v.at < 12 * 3600 * 1000 ? v.username : null;
+  } catch { return null; }
 }

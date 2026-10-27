@@ -306,6 +306,7 @@ export default function SiteEvidence() {
     done(true, `Moved ${pickedIds.length} photo(s) to ${[area, loc].filter(Boolean).join(' · ')}.`);
     setMoveArea(''); setMoveLoc('');
   };
+  const photoNo = new Map(listed.map((e, i) => [e.id, i]));
   const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickedIds = [...picked].filter((id) => listed.some((e) => e.id === id));
   const done = (ok: boolean, msg: string) => { if (ok) { notify(msg); setPicked(new Set()); } };
@@ -373,11 +374,11 @@ export default function SiteEvidence() {
             </>
           ) : (
             <>
-              <span><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span> <b>{e.ref || '—'}</b></span>
-              <span>{name(e.activityId)}{e.workArea ? ` · ${e.workArea}` : ''}</span>
-              {e.locationDetail && <span className="note">{e.locationDetail}</span>}
+              {/* same three lines as the photo captions in reports: Photo n · ref · kind / description / date · activity · area · location */}
+              <span><b>{[`Photo ${(photoNo.get(e.id) ?? 0) + 1}`, e.ref].filter(Boolean).join(' · ')} · </b><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span></span>
               <span>{e.caption || <span className="note">No description</span>}</span>
-              <span className="note">Captured {new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+              <span>{[new Date(e.takenAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }), name(e.activityId), e.workArea, e.locationDetail].filter(Boolean).join(' · ')}</span>
+              <span className="note">{(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
               <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                 📍 {gpsLabel(e)}
                 {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
