@@ -90,6 +90,20 @@ export interface FieldReport {
   /** cloud mode: review state */
   status?: 'draft' | 'submitted' | 'approved' | 'rejected';
   clientVisible?: boolean;
+  /** step-by-step field report: the structured details (stored in project_reports.data) */
+  details?: ReportDetails;
+}
+
+export interface ReportDetails {
+  type: 'Progress' | 'Inspection' | 'Issue' | 'Other';
+  location: string; area: string; floor: string; weather: string; description: string;
+  tasks: { label: string; done: boolean }[];
+  materials: { name: string; qty: number; unit: string }[];
+  remarks: string;
+  /** signature images are Site evidence photos */
+  signers: { role: 'Technician / Inspector' | 'Client'; name: string; photoId: string; at: string }[];
+  /** report photos in their order, with their category */
+  photos: { id: string; kind: string }[];
 }
 
 export type BoqCategory = 'Labor' | 'Materials' | 'Equipment' | 'Subcontract' | 'Other';
