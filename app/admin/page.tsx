@@ -23,7 +23,7 @@ const TABS: [Tab, string][] = [
 interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
-interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
+interface Cred { id: string; project_id: string; label: string; username?: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
 interface SyncOp { op_id: string; user_id: string; entity: string; status: string; result: { error?: string }; received_at: string; project_id: string; record_id: string; op: string }
 interface IntLog { id: number; at: string; status: string; rows_written: number; error: string | null }
@@ -76,7 +76,7 @@ export default function AdminPage() {
         sb().from('profiles').select('*').order('created_at', { ascending: false }),
         sb().from('projects').select('*').order('code'),
         sb().from('project_memberships').select('project_id, user_id, role, can_approve_reports'),
-        sb().from('client_access_credentials').select('id, project_id, label, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
+        sb().from('client_access_credentials').select('id, project_id, label, username, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
         sb().from('audit_logs').select('*').order('at', { ascending: false }).limit(300),
         sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').neq('status', 'applied').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
         sb().from('integration_sync_log').select('*').order('at', { ascending: false }).limit(50),
@@ -999,11 +999,22 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   const create = async (rotate: boolean) => {
     if (!p) return;
-    if (rotate && !(await askConfirm('Rotate the passcode? All current client passcodes and sessions for this project stop working.'))) return;
+    if (rotate && !(await askConfirm('Rotate the project passcode? All shared project passcodes and their sessions stop working. Client username logins keep working.'))) return;
     const expires = days ? new Date(Date.now() + Number(days) * 864e5).toISOString() : null;
     const { data, error } = await withPin(() => sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate, p_one_time: oneTime }));
     if (error) return notify(error.message);
     setShown(String(data));
+    await reload();
+  };
+  // a client username login: set a new 6-digit passcode (also restores a revoked login)
+  const [resetShown, setResetShown] = useState<{ username: string; pin: string } | null>(null);
+  const resetLogin = async (c: Cred) => {
+    if (!(await askConfirm(`Give @${c.username} a new 6-digit passcode${c.revoked_at ? ' and restore the login' : ''}? The old passcode stops working.`, { danger: false }))) return;
+    let pin = '';
+    while (!pin || new Set(pin).size === 1 || '0123456789'.includes(pin) || '9876543210'.includes(pin)) pin = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+    const { error } = await withPin(() => sb().rpc('admin_reset_client_login', { p_credential: c.id, p_passcode: pin }));
+    if (error) return notify(error.message);
+    setResetShown({ username: c.username!, pin });
     await reload();
   };
   const revoke = async (c: Cred) => {
@@ -1049,16 +1060,26 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <p className="note" style={{ marginTop: 0 }}>With a one-time passcode the client signs in once; the portal then stays open on that device for the session length below and keeps an offline copy.</p>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={() => create(false)}>Generate passcode</button>
-            <button className="btn" onClick={() => create(true)}>Rotate (revoke all and issue new)</button>
+            <button className="btn" onClick={() => create(true)}>Rotate project passcode (revoke old ones, issue new)</button>
           </div>
+          {resetShown && (
+            <div className="banner" role="status" style={{ marginTop: 10 }}>
+              <b>New passcode for @{resetShown.username}: </b><code style={{ fontSize: 18, letterSpacing: '.15em' }}>{resetShown.pin}</code>{' '}
+              <button className="btn btn-sm" onClick={() => setResetShown(null)}>Done</button>
+              <div className="note">Shown only now. The client signs in on the normal sign-in page with the username and this passcode.</div>
+            </div>
+          )}
           <table className="tbl" style={{ marginTop: 12 }}>
             <thead><tr><th>Label</th><th>Type</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th /></tr></thead>
             <tbody>
               {creds.map((c) => {
                 const st = c.revoked_at ? 'revoked' : c.expires_at && c.expires_at < new Date().toISOString() ? 'expired' : c.max_uses && c.use_count >= c.max_uses ? 'used' : 'active';
                 return (
-                  <tr key={c.id}><td>{c.label}</td><td className="note">{c.max_uses === 1 ? 'One-time' : 'Reusable'}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
-                    <td>{st === 'active' && <button className="btn btn-sm btn-danger" onClick={() => revoke(c)}>Revoke</button>}</td></tr>
+                  <tr key={c.id}><td>{c.label}</td><td className="note">{c.username ? <>Client login <b>@{c.username}</b></> : c.max_uses === 1 ? 'One-time passcode' : 'Reusable passcode'}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {c.username && <button className="btn btn-sm" onClick={() => resetLogin(c)}>{st === 'revoked' ? 'Restore with new passcode' : 'New passcode'}</button>}{' '}
+                      {st === 'active' && <button className="btn btn-sm btn-danger" onClick={() => revoke(c)}>Revoke</button>}
+                    </td></tr>
                 );
               })}
               {!creds.length && <tr><td colSpan={7} className="note">No passcodes yet.</td></tr>}

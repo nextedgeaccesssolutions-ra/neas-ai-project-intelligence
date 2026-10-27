@@ -79,6 +79,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
         {error && <p className="bad" role="alert">{error}</p>}
         <button className="btn btn-primary" disabled={busy || passcode.replace(/[^A-Za-z0-9]/g, '').length < 8}>{busy ? 'Checking…' : 'View project'}</button>
       </form>
+      <p className="note" style={{ margin: 0 }}>Have a username and a 6-digit passcode instead? <a className="linklike" href="/login">Sign in here</a>.</p>
     </AuthCard>
   );
 
