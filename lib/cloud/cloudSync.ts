@@ -6,6 +6,7 @@ import type { AppState, Evidence } from '../types';
 import { supabaseBrowser } from './browser';
 import { FILES_BUCKET, OFFLINE_GRACE_HOURS } from './env';
 import * as M from './mapping';
+import { forgetOfflineLogin } from '../offlineLogin';
 import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
 import { getPhoto } from '../photos';
 
@@ -375,8 +376,10 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
 
 /** Sign out and remove cached project data from this device (unsent changes are kept unless the person discards them). */
 export async function cloudSignOut(clearCache: () => void) {
+  const who = (status.profile as { username?: string | null } | null)?.username;
   await supabaseBrowser()?.auth.signOut();
   await setMeta('identity', null);
+  if (who) forgetOfflineLogin(who);
   clearCache();
   set({ auth: 'signed_out', profile: null, memberships: [] });
 }

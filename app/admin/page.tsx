@@ -892,10 +892,10 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
     if (isClient && !g.projectId) return notify('Choose the project this client may see.');
     if ((isClient || g.pin) && !/^\d{6}$/.test(g.pin)) return notify('The passcode is 6 digits. Type one or press Generate.');
     try {
-      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: e.email || undefined, projectId: g.projectId || undefined, pin: g.pin || undefined })) as unknown as { code?: string; expiresAt?: string };
+      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: isClient ? undefined : e.email || undefined, projectId: g.projectId || undefined, pin: g.pin || undefined })) as unknown as { code?: string; expiresAt?: string };
       if (r.code && r.expiresAt) setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
       else setMadeLogin({ who: n.name, username: g.username.trim().toLowerCase(), pin: g.pin, client: isClient });
-      setG({ ...g, fullName: '', username: '', email: '', pin: '' });
+      setG((x) => ({ ...x, fullName: '', username: '', email: '', pin: '' }));
       await reload();
     } catch (x) {
       notify((x as Error).message);

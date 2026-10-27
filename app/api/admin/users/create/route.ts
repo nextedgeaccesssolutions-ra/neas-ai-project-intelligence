@@ -31,7 +31,7 @@ export const POST = handle(async (req) => {
   }
 
   const svc = supabaseService();
-  const { data: clash } = await sb.rpc('username_taken', { p_username: username });
+  const { data: clash } = await svc.rpc('username_taken', { p_username: username });
   if (clash) throw new HttpError(409, 'That username is already used. Choose another.');
   // the e-mail is optional: without one the account gets a private placeholder address nobody receives mail at
   const e = body.email?.trim() ? checkEmail(body.email) : { ok: true as const, email: `${username}@users.neas.invalid` };

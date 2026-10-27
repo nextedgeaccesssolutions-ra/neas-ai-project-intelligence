@@ -21,6 +21,7 @@ select test.check('client login: right username + passcode opens a session for t
 select test.check('client login: wrong passcode is refused', (select not ok from neas.client_login_username('client.one', '000111', 'ip-c1')));
 select neas.client_login_username('client.one', '000111', 'ip-c2') from generate_series(1, 5);
 select test.check('client login: 5 wrong in 15 minutes blocks even the right passcode', (select not ok and error like 'Too many%' from neas.client_login_username('client.one', '482913', 'ip-c2')));
+select test.check('client login: the project-code login does not accept a username passcode', (select not ok from neas.client_login('PRJ-2026-099', '482913', 'ip-c4')));
 reset role;
 update neas.client_access_credentials set revoked_at = now() where username = 'client.one';
 set role service_role;

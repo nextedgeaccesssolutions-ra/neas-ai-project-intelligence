@@ -66,7 +66,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
 
   const logout = async () => {
     await fetch('/api/client/logout', { method: 'POST' }).catch(() => undefined);
-    try { localStorage.removeItem(cacheKey(code)); } catch { /* ignore */ }
+    try { localStorage.removeItem(cacheKey(code)); localStorage.removeItem('neas-offline-logins'); } catch { /* ignore */ }
     setView(null);
     setNeedLogin(true);
   };
