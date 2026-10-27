@@ -94,7 +94,7 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
                     </form>
                   ) : <>
                     <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}{' '}
-                    <button className="btn btn-sm" onClick={() => setEdit({ id: e.id, coverCategory: e.coverCategory ?? '', caption: e.caption ?? '', workArea: e.workArea ?? '', locationDetail: e.locationDetail ?? '' })}>Edit details</button>
+                    {canManage && <button className="btn btn-sm" onClick={() => setEdit({ id: e.id, coverCategory: e.coverCategory ?? '', caption: e.caption ?? '', workArea: e.workArea ?? '', locationDetail: e.locationDetail ?? '' })}>Edit details</button>}
                   </>}
                   <dl>{ref.lines.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
                   <span className="note">{sync ?? 'Saved'}</span>
