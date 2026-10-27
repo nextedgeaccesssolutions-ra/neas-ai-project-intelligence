@@ -112,7 +112,7 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
     return p ? { ...a, start: p.start ?? a.start, end: p.end ?? a.end } : a;
   };
   const lo = (a: Activity) => [a.start, a.baselineStart, a.actualStart].filter(Boolean).sort()[0] as string;
-  const hi = (a: Activity) => [a.end, a.baselineEnd, a.actualFinish].filter(Boolean).sort().reverse()[0] as string;
+  const hi = (a: Activity) => [a.end, a.baselineEnd, a.actualFinish, a.rescheduleEnd].filter(Boolean).sort().reverse()[0] as string;
   const start = data.reduce((m, a) => (lo(a) < m ? lo(a) : m), lo(data[0]));
   const end = addDays(data.reduce((m, a) => (hi(a) > m ? hi(a) : m), hi(data[0])), 1);
   const total = Math.max(1, daysBetween(start, end));
@@ -201,6 +201,15 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
               <rect x={xs} y={y0 + 4} width={Math.max(3, xe - xs)} height={18} rx="4" fill="var(--planned-soft)"
                 stroke={changed ? 'var(--gold)' : undefined} strokeWidth={changed ? 2 : undefined}
                 style={{ cursor: editable ? 'grab' : undefined }} onPointerDown={(e) => begin(e, orig, 'move')} />
+              {a.rescheduleStart && a.rescheduleEnd && (
+                <g>
+                  <line x1={xe} y1={y0 + 13} x2={x(a.rescheduleStart)} y2={y0 + 13} stroke="#b9770e" strokeDasharray="2 3" />
+                  <rect x={x(a.rescheduleStart)} y={y0 + 4} width={Math.max(3, x(addDays(a.rescheduleEnd, 1)) - x(a.rescheduleStart))} height={18} rx="4"
+                    fill="#fdebd0" stroke="#b9770e" strokeWidth={1.5}>
+                    <title>{`Rescheduled ${fmtDate(a.rescheduleStart)} – ${fmtDate(a.rescheduleEnd)}${a.delayReason ? `: ${a.delayReason}` : ''}`}</title>
+                  </rect>
+                </g>
+              )}
               {mine.map((s) => {
                 const from = localDay(s.stoppedAt);
                 const to = s.restartedAt ? localDay(s.restartedAt) : asOf;

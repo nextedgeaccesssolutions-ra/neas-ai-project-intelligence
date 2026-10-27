@@ -31,9 +31,11 @@ type Draft = {
   qtyUnit: string;
   delayReason: string;
   requiredPhotos: string;
+  newStart: string;
+  newFinish: string;
 };
 
-const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '', requiredPhotos: '' });
+const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '', requiredPhotos: '', newStart: '', newFinish: '' });
 
 const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
   const last = latestReport(a.id, reports);
@@ -53,6 +55,7 @@ const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
     qtyUnit: a.quantityUnit ?? '',
     delayReason: a.delayReason ?? '',
     requiredPhotos: a.requiredPhotos == null ? '' : String(a.requiredPhotos),
+    newStart: a.rescheduleStart ?? '', newFinish: a.rescheduleEnd ?? '',
   };
 };
 const optNum = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -111,6 +114,11 @@ export default function ProjectManagement() {
     if (reqPhotos != null && (!Number.isInteger(reqPhotos) || reqPhotos < 0 || reqPhotos > 500)) return setError('Required photos must be a whole number from 0 to 500.');
     if (draft.actualFinish && !draft.actualStart) return setError('Enter the actual start before the actual finish.');
     if (draft.actualStart && draft.actualFinish && draft.actualFinish < draft.actualStart) return setError('Actual finish cannot be before the actual start.');
+    if (!!draft.newStart !== !!draft.newFinish) return setError('Enter both New start and New finish, or clear both.');
+    if (draft.newStart && draft.newFinish < draft.newStart) return setError('New finish cannot be before New start.');
+    if (draft.newStart && draft.newStart < draft.start) return setError('New start cannot be before the planned start.');
+    if (draft.newStart && (draft.newStart !== (editing?.rescheduleStart ?? '') || draft.newFinish !== (editing?.rescheduleEnd ?? '')) && !draft.delayReason.trim())
+      return setError('Give a reason for the reschedule (e.g. weather, access, client instruction).');
     if (editing && (draft.start !== editing.start || draft.end !== editing.end) && !draft.delayReason.trim())
       return setError('Give a reason for changing the planned dates (e.g. weather, access, client instruction).');
     if (progressChanged && !draft.actualDate) return setError('Choose the date this progress applies to.');
@@ -125,6 +133,7 @@ export default function ProjectManagement() {
       baselineStart: editing ? editing.baselineStart ?? editing.start : draft.start, baselineEnd: editing ? editing.baselineEnd ?? editing.end : draft.end,
       actualStart: draft.actualStart || null, actualFinish: draft.actualFinish || null, remainingDays: remaining,
       quantityTotal: qtyTotal, quantityUnit: draft.qtyUnit.trim(), delayReason: draft.delayReason.trim(), requiredPhotos: reqPhotos || null,
+      rescheduleStart: draft.newStart || null, rescheduleEnd: draft.newFinish || null,
     };
     upsertActivity(a);
     // Progress is stored as a field report, the single source for actual % everywhere
@@ -230,10 +239,19 @@ export default function ProjectManagement() {
               Delay / change reason
               <input id="act-delay" className="input" value={draft.delayReason} onChange={(e) => setDraft({ ...draft, delayReason: e.target.value })} placeholder="required when planned dates change" />
             </label>
+            <label className="field">
+              New start (reschedule)
+              <input id="act-new-start" className="input" type="date" min={draft.start} value={draft.newStart} onChange={(e) => setDraft({ ...draft, newStart: e.target.value })} />
+            </label>
+            <label className="field">
+              New finish (reschedule)
+              <input id="act-new-finish" className="input" type="date" min={draft.newStart || draft.start} value={draft.newFinish} onChange={(e) => setDraft({ ...draft, newFinish: e.target.value })} />
+            </label>
           </div>
           {editing?.baselineStart && (
             <p className="note" style={{ margin: '8px 0 0' }}>
-              Original baseline: {fmtDate(editing.baselineStart)} – {fmtDate(editing.baselineEnd ?? editing.end)} (only a Super Admin can rebaseline).
+              Original baseline: {fmtDate(editing.baselineStart)} – {fmtDate(editing.baselineEnd ?? editing.end)} (only a Super Admin can rebaseline). New start / New finish add a second Gantt bar for the remaining work; the plan above stays the baseline for planned progress.
+              {(draft.newStart || draft.newFinish) && <> <button type="button" className="linklike" onClick={() => setDraft({ ...draft, newStart: '', newFinish: '' })}>Clear reschedule</button></>}
               {draft.qtyTotal && ' Actual % comes from verified quantity ÷ approved quantity.'}
             </p>
           )}

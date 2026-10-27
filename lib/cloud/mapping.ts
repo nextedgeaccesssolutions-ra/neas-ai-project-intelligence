@@ -4,7 +4,7 @@ import type { WorkCalendar } from '../schedule';
 
 export interface DbProject { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | string | null; client_portal_enabled: boolean; version: number; created_at: string }
 export interface DbActivity { id: string; project_id: string; name: string; start_date: string; end_date: string; weight: number | string; is_milestone: boolean; client_visible: boolean; sort_order: number; version: number; deleted_at: string | null;
-  baseline_start?: string | null; baseline_end?: string | null; actual_start?: string | null; actual_finish?: string | null; remaining_days?: number | string | null; quantity_total?: number | string | null; quantity_unit?: string | null; delay_reason?: string | null; required_photos?: number | string | null }
+  baseline_start?: string | null; baseline_end?: string | null; actual_start?: string | null; actual_finish?: string | null; remaining_days?: number | string | null; quantity_total?: number | string | null; quantity_unit?: string | null; delay_reason?: string | null; required_photos?: number | string | null; reschedule_start?: string | null; reschedule_end?: string | null }
 export interface DbStop { id: string; project_id: string; activity_id: string; stopped_at: string; reason: string; remarks: string; supervisor: string; affects_schedule: boolean; restarted_at: string | null; restart_supervisor: string; restart_remarks: string; safety_cleared: boolean; remaining_days: number | string | null }
 export interface DbCalendar { project_id: string; work_days: number[]; exceptions: WorkCalendar['exceptions'] | null; hours_per_day?: number | string | null; time_zone?: string | null }
 export interface DbReport { id: string; project_id: string; activity_id: string | null; report_type: string; report_date: string; actual_pct: number | string | null; completed_qty?: number | string | null; notes: string; status: string; client_visible: boolean; submitted_by: string | null; version: number; created_at: string; deleted_at: string | null }
@@ -31,7 +31,7 @@ export const activityFromDb = (a: DbActivity): Activity => ({
   id: a.id, projectId: a.project_id, name: a.name, start: a.start_date, end: a.end_date, weight: num(a.weight),
   baselineStart: a.baseline_start ?? null, baselineEnd: a.baseline_end ?? null, actualStart: a.actual_start ?? null, actualFinish: a.actual_finish ?? null,
   remainingDays: optNum(a.remaining_days), quantityTotal: optNum(a.quantity_total), quantityUnit: a.quantity_unit ?? '', delayReason: a.delay_reason ?? '',
-  requiredPhotos: optNum(a.required_photos),
+  requiredPhotos: optNum(a.required_photos), rescheduleStart: a.reschedule_start ?? null, rescheduleEnd: a.reschedule_end ?? null,
 });
 export const calendarFromDb = (c: DbCalendar): WorkCalendar => ({ workDays: c.work_days ?? [], exceptions: c.exceptions ?? [], hoursPerDay: c.hours_per_day == null ? 8 : num(c.hours_per_day), timeZone: c.time_zone ?? 'Asia/Manila' });
 export const stopFromDb = (s: DbStop): ActivityStop => ({
@@ -67,6 +67,7 @@ export const activityToDb = (a: Activity) => ({
   actual_start: a.actualStart ?? null, actual_finish: a.actualFinish ?? null, remaining_days: a.remainingDays ?? null,
   quantity_total: a.quantityTotal ?? null, quantity_unit: a.quantityUnit ?? '', delay_reason: a.delayReason ?? '',
   required_photos: a.requiredPhotos ?? null,
+  reschedule_start: a.rescheduleStart && a.rescheduleEnd ? a.rescheduleStart : null, reschedule_end: a.rescheduleStart && a.rescheduleEnd ? a.rescheduleEnd : null,
 });
 export const calendarToDb = (projectId: string, c: WorkCalendar) => ({ project_id: projectId, work_days: c.workDays, exceptions: c.exceptions, hours_per_day: c.hoursPerDay ?? 8, time_zone: c.timeZone ?? 'Asia/Manila' });
 export const reportToDb = (r: FieldReport) => ({ activity_id: r.activityId || null, report_date: r.date, actual_pct: r.actualPct, completed_qty: r.completedQty ?? null, notes: r.notes, report_type: 'progress' });

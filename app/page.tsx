@@ -10,6 +10,8 @@ import GanttControls from '@/components/GanttControls';
 import { useCanManage } from '@/components/RoleGate';
 import ShareDialog from '@/components/ShareDialog';
 import { CLOUD } from '@/lib/cloud/env';
+import { isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { notify } from '@/components/Dialogs';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, plannedPct, projectProgress, projectSpan, sCurve, todayLocal, totalWeight } from '@/lib/calc';
 import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
@@ -17,7 +19,9 @@ import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
 const tone = (v: number) => (v >= 0 ? 'ok' : v > -10 ? 'warn' : 'bad');
 
 export default function Overview() {
-  const { ready, project, state } = useStore();
+  const { ready, project, state, upsertProject } = useStore();
+  useCloudStatus();
+  const [cvEdit, setCvEdit] = useState<string | null>(null);
   const { activities, reports, evidence, stops } = useProjectData();
   const canManage = useCanManage();
   const [asOf, setAsOf] = useState<string>(() => todayLocal());
@@ -76,8 +80,25 @@ export default function Overview() {
       <section className="grid kpis">
         <div className="card">
           <div className="kpi-label">Contract value</div>
-          <div className="kpi-val">{fmtPHP(project.contractValue)}</div>
-          <div className="kpi-sub">{project.contractValue == null ? <Link href={`/projects?edit=${encodeURIComponent(project.id)}`}>Add in Project register</Link> : project.status}</div>
+          {cvEdit == null ? <>
+            <div className="kpi-val">{fmtPHP(project.contractValue)}</div>
+            <div className="kpi-sub">
+              {project.contractValue == null && !(!CLOUD || isSuperAdmin()) ? <Link href={`/projects?edit=${encodeURIComponent(project.id)}`}>Add in Project register</Link> : project.status}
+              {(!CLOUD || isSuperAdmin()) && <> · <button className="linklike" onClick={() => setCvEdit(project.contractValue == null ? '' : String(project.contractValue))}>Edit</button></>}
+            </div>
+          </> : (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const v = cvEdit.trim() === '' ? null : Number(cvEdit.replace(/,/g, ''));
+              if (v != null && (!Number.isFinite(v) || v < 0 || v > 1e12)) return notify('Enter a valid amount in PHP.');
+              upsertProject({ ...project, contractValue: v == null ? null : Math.round(v * 100) / 100 });
+              setCvEdit(null);
+              notify('Contract value saved.');
+            }} style={{ display: 'grid', gap: 6 }}>
+              <input className="input" inputMode="decimal" autoFocus aria-label="Contract value in PHP" value={cvEdit} onChange={(e) => setCvEdit(e.target.value)} placeholder="e.g. 473214.29" />
+              <div className="form-actions" style={{ marginTop: 0 }}><button className="btn btn-sm btn-primary">Save</button><button type="button" className="btn btn-sm" onClick={() => setCvEdit(null)}>Cancel</button></div>
+            </form>
+          )}
         </div>
         <div className="card">
           <div className="kpi-label">Planned progress</div>

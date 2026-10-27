@@ -39,6 +39,9 @@ export interface Activity {
   delayReason?: string;
   /** number of evidence photos this scope must have (optional) */
   requiredPhotos?: number | null;
+  /** remaining work moved to new dates (second Gantt bar); the planned dates above stay the plan */
+  rescheduleStart?: string | null;
+  rescheduleEnd?: string | null;
 }
 
 export type StopReason = 'weather' | 'wind' | 'client_instruction' | 'site_access' | 'safety' | 'equipment' | 'manpower' | 'material' | 'other';
