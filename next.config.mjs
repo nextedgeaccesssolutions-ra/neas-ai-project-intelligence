@@ -4,9 +4,11 @@ const nextConfig = {
   poweredByHeader: false,
   // pptxgenjs references Node built-ins (node:fs, node:https) it only uses outside the browser
   webpack(config, { isServer, webpack }) {
+    // pdfjs-dist mentions the Node "canvas" package; the browser build never uses it
+    config.resolve.alias = { ...config.resolve.alias, canvas: false };
     if (!isServer) {
       config.plugins.push(new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, ''); }));
-      config.resolve.fallback = { ...config.resolve.fallback, fs: false, https: false, http: false, path: false, os: false, zlib: false, stream: false, url: false };
+      config.resolve.fallback = { ...config.resolve.fallback, fs: false, canvas: false, https: false, http: false, path: false, os: false, zlib: false, stream: false, url: false };
     }
     return config;
   },

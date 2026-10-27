@@ -7,6 +7,8 @@ export interface TemplateSection {
   id: string; title: string; kind: SectionKind; items?: string[]; columns?: string[]; rows?: string[][];
   /** chart: counts the values of one column of a table section in the same report */
   source?: string; column?: string;
+  /** what an imported file had in this section; a new report starts with it, so the report matches the original */
+  content?: SectionData;
 }
 export interface TemplateDefinition {
   title: string;
@@ -14,7 +16,8 @@ export interface TemplateDefinition {
   cover: { key: string; label: string; default?: string }[];
   sections: TemplateSection[];
 }
-export interface ReportPhoto { evidenceId: string; caption: string }
+/** A photo from Site evidence, or (src) an image carried inside the template from an imported file. */
+export interface ReportPhoto { evidenceId: string; caption: string; src?: string }
 export interface SectionData { text?: string; bullets?: string[]; status?: Record<string, string>; rows?: string[][]; photos?: ReportPhoto[] }
 export interface TemplateReportData { cover: Record<string, string>; sections: Record<string, SectionData> }
 
@@ -42,14 +45,64 @@ export function normaliseTemplate(raw: unknown): TemplateDefinition {
         columns: arr(s.columns).map((x) => str(x, 80)).filter(Boolean),
         rows: arr(s.rows).map((r) => arr(r).map((x) => str(x, 2000))),
         source: str(s.source, 60) || undefined, column: str(s.column, 80) || undefined,
+        content: normaliseContent(s.content),
       })),
   };
+}
+
+const IMAGE_RE = /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/;
+/** Imported section content: text, bullets, tile values, table rows and embedded images (JPEG/PNG data, at most 3 MB each). */
+export function normaliseContent(raw: unknown): SectionData | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const c: SectionData = {};
+  if (typeof o.text === 'string' && o.text.trim()) c.text = o.text.slice(0, 50000);
+  const bullets = arr(o.bullets).map((x) => str(x, 2000)).filter(Boolean);
+  if (bullets.length) c.bullets = bullets;
+  if (o.status && typeof o.status === 'object') c.status = Object.fromEntries(Object.entries(o.status as Record<string, unknown>).map(([k, v]) => [k.slice(0, 120), str(v, 60)]));
+  const rows = arr(o.rows).map((r) => arr(r).map((x) => str(x, 2000)));
+  if (rows.length) c.rows = rows.slice(0, 2000);
+  const photos = arr(o.photos).map((p) => p as Record<string, unknown>)
+    .filter((p) => typeof p.src === 'string' && ((p.src.length < 900_000 && IMAGE_RE.test(p.src)) || /^tpl:[\w-]{1,60}$/.test(p.src)))
+    .map((p, i) => ({ evidenceId: str(p.evidenceId, 60) || `imported-${i + 1}`, caption: str(p.caption, 300), src: p.src as string }));
+  if (photos.length) c.photos = photos;
+  return Object.keys(c).length ? c : undefined;
+}
+
+/** The image data of a photo: its own, or (tpl:id) the photo imported into the report's template. */
+export function photoSrc(t: TemplateDefinition, ph: ReportPhoto): string | undefined {
+  if (!ph.src?.startsWith('tpl:')) return ph.src;
+  const id = ph.src.slice(4);
+  for (const s of t.sections) { const hit = s.content?.photos?.find((p) => p.evidenceId === id); if (hit?.src) return hit.src; }
+  return undefined;
+}
+
+/** Width, height and bytes of an embedded image (data URL), for the PDF and Word exports. */
+export async function embeddedImage(src: string): Promise<{ data: string; bytes: Uint8Array; w: number; h: number } | null> {
+  if (!IMAGE_RE.test(src) || typeof Image === 'undefined') return null;
+  const img = new Image();
+  img.src = src;
+  await img.decode().catch(() => undefined);
+  if (!img.naturalWidth) return null;
+  const bytes = Uint8Array.from(atob(src.split(',')[1]), (ch) => ch.charCodeAt(0));
+  return { data: src, bytes, w: img.naturalWidth, h: img.naturalHeight };
 }
 
 /** A new report starts with the template's default cover values and table rows. */
 export function blankReport(t: TemplateDefinition): TemplateReportData {
   const sections: Record<string, SectionData> = {};
   for (const s of t.sections) {
+    // imported content is copied in as it was in the original file
+    if (s.content) {
+      const c = s.content;
+      sections[s.id] = s.kind === 'table' ? { rows: (c.rows ?? []).map((r) => (s.columns ?? []).map((_, i) => r[i] ?? '')) }
+        : s.kind === 'status' ? { status: Object.fromEntries((s.items ?? []).map((i) => [i, c.status?.[i] ?? ''])) }
+        : s.kind === 'bullets' ? { bullets: c.bullets?.length ? [...c.bullets] : [''] }
+        // a report refers to the template's imported photos (tpl:id) instead of storing a second copy
+        : s.kind === 'photos' ? { photos: (c.photos ?? []).map((p) => ({ evidenceId: p.evidenceId, caption: p.caption, ...(p.src ? { src: `tpl:${p.evidenceId}` } : {}) })), ...(c.text ? { text: c.text } : {}) }
+        : { text: c.text ?? '' };
+      continue;
+    }
     if (s.kind === 'table') sections[s.id] = { rows: (s.columns ?? []).length ? (s.rows?.length ? s.rows : [[]]).map((r) => (s.columns ?? []).map((_, i) => r[i] ?? '')) : [] };
     else if (s.kind === 'status') sections[s.id] = { status: Object.fromEntries((s.items ?? []).map((i) => [i, ''])) };
     else if (s.kind === 'bullets') sections[s.id] = { bullets: [''] };
@@ -156,13 +209,15 @@ export async function templateReportPdf(t: TemplateDefinition, d: TemplateReport
     }
     if (s.kind === 'photos') {
       const photos = sd.photos ?? [];
+      for (const p of (sd.text ?? '').split(/\n{2,}/).filter((x) => x.trim())) { para(p.trim()); y += 4; }
       const cw = (W - M * 2 - 14) / 2, ch = 190;
       for (let i = 0; i < photos.length; i += 2) {
         room(ch + 30);
         for (let k = 0; k < 2 && i + k < photos.length; k++) {
           const ph = photos[i + k];
           const x = M + k * (cw + 14);
-          const img = await opts.photo(ph.evidenceId).catch(() => null);
+          const src = photoSrc(t, ph);
+          const img = ph.src ? (src ? await embeddedImage(src) : null) : await opts.photo(ph.evidenceId).catch(() => null);
           pdf.setFillColor(241, 244, 246); pdf.rect(x, y, cw, ch, 'F');
           if (img && img.w > 0 && img.h > 0) { const f = fit(img, cw, ch); pdf.addImage(img.data, 'JPEG', x + f.dx, y + f.dy, f.w, f.h); }
           else { pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text('Photo not available', x + cw / 2, y + ch / 2, { align: 'center' }); }
@@ -246,11 +301,14 @@ export async function templateReportDocx(t: TemplateDefinition, d: TemplateRepor
     if (s.kind === 'table' && (s.columns ?? []).length) body.push(table(s.columns ?? [], (sd.rows ?? []).filter((r) => r.some((c) => c.trim()))));
     if (s.kind === 'photos') {
       const photos = sd.photos ?? [];
+      for (const para of (sd.text ?? '').split(/\n{2,}/).filter((x) => x.trim())) body.push(p(para.trim(), { size: 21 }));
       for (let i = 0; i < photos.length; i += 2) {
         const pair = photos.slice(i, i + 2);
         // a photo without a usable size is listed by caption only
         const cells = await Promise.all(pair.map(async (ph, k) => {
-          const img = await opts.photo(ph.evidenceId).catch(() => null);
+          const src = photoSrc(t, ph);
+          const emb = src ? await embeddedImage(src) : null;
+          const img = emb ? { data: emb.bytes, w: emb.w, h: emb.h } : await opts.photo(ph.evidenceId).catch(() => null);
           return new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [
             img && img.w > 0 && img.h > 0 ? new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: img.data, transformation: (() => { const k = Math.min(290 / img.w, 218 / img.h); return { width: Math.round(img.w * k), height: Math.round(img.h * k) }; })() })] }) : p('Photo not available', { size: 18, color: '5D6F7B' }),
             p(`Photo ${i + k + 1} - ${ph.caption}`, { size: 18, align: AlignmentType.CENTER }),

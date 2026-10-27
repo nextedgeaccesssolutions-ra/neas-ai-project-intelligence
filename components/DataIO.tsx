@@ -102,7 +102,8 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
       try {
         const { templateFromFile } = await import('@/lib/templateImport');
         const def = await templateFromFile(file);
-        sessionStorage.setItem('neas-imported-template', JSON.stringify({ name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def }));
+        const { setMeta } = await import('@/lib/offline/outbox');
+        await setMeta('imported-template', { name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def });
         window.location.href = '/templates?imported=1';
       } catch (e) {
         setBusy(null);

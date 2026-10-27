@@ -509,3 +509,13 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 /* cover photo card: wider, centred, labels above their values so long references wrap cleanly */
 .cover-ref dl { grid-template-columns: 1fr; }
 .cover-ref dt { margin-top: 4px; }
+
+/* phone bottom bar: Board, Field reports, Site evidence, Reports, Sync */
+.bottom-bar { display: none; }
+@media (max-width: 760px) {
+  .bottom-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; justify-content: space-around; background: var(--navy, #081e2a); padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); box-shadow: 0 -4px 16px rgba(7, 29, 41, .18); }
+  .bottom-bar a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 48px; justify-content: center; color: #9fb3c1; text-decoration: none; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .bottom-bar a[aria-current="page"] { color: var(--gold, #ebc07e); }
+  .bottom-bar svg { width: 22px; height: 22px; }
+  .main .content { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+}

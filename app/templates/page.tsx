@@ -1,6 +1,7 @@
 'use client';
 // Report templates: every project has its own editable template(s), started from the NEAS library
 // (the Triconti quarterly mast inspection layout). Staff fill reports in from a template and export Word.
+import { getMeta, setMeta } from '@/lib/offline/outbox';
 import { useCallback, useEffect, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { askConfirm, notify } from '@/components/Dialogs';
@@ -17,6 +18,7 @@ import { cacheProject, cachedProject, dropPending, flushPending, keepOnDevice, p
 import {
   blankReport, chartCounts, KIND_LABEL, newSectionId, normaliseTemplate, templateReportDocx, templateReportPdf,
   type SectionData, type SectionKind, type TemplateDefinition, type TemplateReportData, type TemplateSection,
+  photoSrc,
 } from '@/lib/reportTemplates';
 
 type TemplateRow = { id: string; project_id: string | null; name: string; definition: unknown; updated_at: string };
@@ -66,16 +68,19 @@ export default function TemplatesPage() {
   useEffect(() => {
     // wait for the project and the person's roles (they load after a page reload) before deciding
     if (!pid || !cloud.profile || !/[?&]imported=1/.test(window.location.search)) return;
-    try {
-      const raw = sessionStorage.getItem('neas-imported-template');
-      sessionStorage.removeItem('neas-imported-template');
-      window.history.replaceState(null, '', '/templates');
-      if (!raw) return;
-      const { name, definition } = JSON.parse(raw) as { name: string; definition: TemplateDefinition };
-      if (!canManage(pid)) return notify('Only the project manager or a Super Admin can add report templates.');
-      setEditing({ id: '', project_id: pid, name, definition, updated_at: '' });
-      notify(`Read ${definition.sections.length} section(s) from ${name}. Check them, then press Save template.`);
-    } catch { /* nothing to pick up */ }
+    // kept in IndexedDB: an import with photos is too large for session storage
+    void (async () => {
+      try {
+        const got = await getMeta<{ name: string; definition: TemplateDefinition }>('imported-template');
+        await setMeta('imported-template', null);
+        window.history.replaceState(null, '', '/templates');
+        if (!got) return;
+        const { name, definition } = got;
+        if (!canManage(pid)) return notify('Only the project manager or a Super Admin can add report templates.');
+        setEditing({ id: '', project_id: pid, name, definition, updated_at: '' });
+        notify(`Read ${definition.sections.length} section(s) from ${name}. Check them, then press Save template.`);
+      } catch { /* nothing to pick up */ }
+    })();
   }, [pid, cloud.profile, cloud.memberships]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const on = () => void load();
@@ -118,6 +123,7 @@ export default function TemplatesPage() {
   // a Word / PowerPoint report becomes a new template, opened in the editor for review before saving
   const importFile = async (file: File) => {
     try {
+      notify(`Reading ${file.name}…`);
       const def = await templateFromFile(file);
       setEditing({ id: '', project_id: pid, name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def, updated_at: '' });
       notify(`Read ${def.sections.length} section(s) from ${file.name}. Check them, then press Save template.`);
@@ -162,8 +168,8 @@ export default function TemplatesPage() {
             {manager && (
               <div className="form-actions">
                 <label className="btn" style={{ cursor: 'pointer' }}>
-                  Import a template from Word / PowerPoint
-                  <input type="file" hidden accept=".docx,.pptx,.pdf,.doc,.ppt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+                  Import a template from Word / PowerPoint / Excel / PDF
+                  <input type="file" hidden accept=".docx,.pptx,.xlsx,.pdf,.doc,.ppt,.xls" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
                 </label>
                 <span className="note">Headings become sections, tables keep their columns and standard rows, photo pages become the photo annex.</span>
               </div>
@@ -478,6 +484,7 @@ function ReportForm({ report, evidence, manager, projectName, projectId, onClose
               {s.kind === 'photos' && <>
                 {(sd.photos ?? []).map((ph, k) => (
                   <div key={ph.evidenceId} className="form-actions" style={{ marginTop: 4 }}>
+                    {photoSrc(def, ph) ? <img src={photoSrc(def, ph)} alt={ph.caption || `Photo ${k + 1}`} style={{ width: 96, height: 72, objectFit: 'cover', borderRadius: 4 }} /> : null}
                     <span className="note" style={{ minWidth: 70 }}>Photo {k + 1}</span>
                     <input className="input" maxLength={300} value={ph.caption} onChange={(e) => setSec(s.id, { photos: (sd.photos ?? []).map((x, j) => (j === k ? { ...x, caption: e.target.value } : x)) })} aria-label={`Caption for photo ${k + 1}`} />
                     <button type="button" className="btn btn-sm" onClick={() => setSec(s.id, { photos: (sd.photos ?? []).filter((_, j) => j !== k) })}>Remove</button>

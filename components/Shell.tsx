@@ -277,6 +277,19 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             </section>
           ) : children}
         </main>
+        {/* phones: the field pages one thumb-tap away; only pages this account may open are shown */}
+        <nav className="bottom-bar" aria-label="Quick navigation">
+          {[...nav.filter((n) => ['/', '/field-reports', '/site-evidence', '/reports'].includes(n.href)),
+            ...(CLOUD && canView('offline_queue', cloud.profile) ? [{ href: '/offline-queue', label: 'Sync', icon: 'sync' }] : [])].map((n) => {
+            const on = n.href === '/' ? pathname === '/' : pathname.startsWith(n.href);
+            return (
+              <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined}>
+                <Icon name={n.icon} />
+                <span>{n.href === '/' ? 'Board' : n.href === '/reports' ? 'Reports' : n.href === '/field-reports' ? 'Field' : n.href === '/site-evidence' ? 'Photos' : n.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
         <DialogHost />
       </div>
     </div>

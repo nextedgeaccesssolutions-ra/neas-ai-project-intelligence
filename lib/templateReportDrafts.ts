@@ -17,7 +17,9 @@ export interface PendingSave {
 }
 
 const read = <T,>(k: string, fallback: T): T => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; } };
-const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+// photos imported into a template are not kept in device storage (it holds about 5 MB); the server copy keeps them
+const lean = (_: string, v: unknown) => (typeof v === 'string' && v.startsWith('data:image/') && v.length > 2000 ? '' : v);
+const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v, lean)); return true; } catch { return false; } };
 
 export const cacheProject = (pid: string, v: { templates: unknown[]; reports: unknown[] }) => write(CACHE(pid), { ...v, at: new Date().toISOString() });
 export const cachedProject = (pid: string) => read<{ templates: unknown[]; reports: unknown[]; at?: string } | null>(CACHE(pid), null);
@@ -39,7 +41,9 @@ export async function flushPending(sb: SupabaseClient): Promise<{ sent: number; 
     if (p.conflict) { conflicts++; continue; }
     if (p.error) { refused++; continue; }
     if (p.base === null) {
-      const { error } = await sb.from('template_reports').insert({ id: p.id, project_id: p.project_id, template_id: p.template_id, title: p.title, definition: p.definition, data: p.data });
+      // the device copy of the definition has no imported photos: take the template's own definition from the server
+      const tpl = p.template_id ? (await sb.from('report_templates').select('definition').eq('id', p.template_id).maybeSingle()).data : null;
+      const { error } = await sb.from('template_reports').insert({ id: p.id, project_id: p.project_id, template_id: p.template_id, title: p.title, definition: tpl?.definition ?? p.definition, data: p.data });
       if (!error) { dropPending(p.id); sent++; }
       // already on the server (an earlier send whose reply was lost, or someone else's copy): let the person choose
       else if (error.code === '23505') { keepOnDevice({ ...p, conflict: true }); conflicts++; }

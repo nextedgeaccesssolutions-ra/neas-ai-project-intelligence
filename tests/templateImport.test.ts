@@ -13,7 +13,7 @@ describe.skipIf(!existsSync(SAMPLE))('Word report import (Triconti sample)', () 
     expect(titles.some((x) => x.startsWith('status:'))).toBe(true);
     const findings = t.sections.find((s) => s.kind === 'table' && /findings/i.test(s.title))!;
     expect(findings.columns).toEqual(['Inspection Element', 'Evidence / Check', 'Action / Result', 'Status']);
-    expect(findings.rows!.length).toBe(11);
+    expect(findings.content!.rows!.length).toBe(11);
     console.log(t.title, '|', t.cover.map((c) => c.label).join(', '), '\n', titles.join('\n'));
   });
 });
