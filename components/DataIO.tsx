@@ -91,6 +91,10 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
       if (images.length === files.length) return;
     }
     const file = files.find((f) => !f.type.startsWith('image/'));
+    if (file && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
+      notify(`${file.name} is a report document, not a table. To reuse its layout, open Reports → Report templates and press “Import a template from Word / PowerPoint”. This Import reads spreadsheets (Excel or CSV) with column names in the first row.`);
+      return;
+    }
     if (!file || !importColumns || !onImport) {
       if (file) notify('Only photos can be imported here.');
       return;

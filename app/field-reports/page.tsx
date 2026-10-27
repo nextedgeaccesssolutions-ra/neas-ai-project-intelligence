@@ -54,6 +54,20 @@ export default function FieldReports() {
 
   const o = useOrgList({ list: 'field_reports', kind: 'field_report', items: filter ? reports.filter((r) => r.activityId === filter) : reports, id: (r) => r.id, project: (r) => r.projectId, noun: 'report' });
 
+  const shareMany = async (share: boolean) => {
+    const pool = reports.filter((r) => r.status === 'approved' && o.listed.some((x) => x.id === r.id));
+    const chosen = pool.filter((r) => o.picked.has(r.id));
+    const target = (chosen.length ? chosen : pool).filter((r) => !!r.clientVisible !== share);
+    if (!target.length) return setMsg(share ? 'Those reports are already shared with the client.' : 'Those reports are already hidden from the client.');
+    if (!(await askConfirm(`${share ? 'Share' : 'Hide'} ${target.length} approved report(s) ${share ? 'with' : 'from'} the client? Their photos follow.`, { danger: false }))) return;
+    const sb = supabaseBrowser()!;
+    const ids = target.map((r) => r.id);
+    const { error: err } = await sb.from('project_reports').update({ client_visible: share }).in('id', ids);
+    if (err) return setError(`Not changed: ${err.message}. This needs an internet connection.`);
+    await sb.from('report_attachments').update({ client_visible: share }).in('report_id', ids);
+    await pullAll().catch(() => undefined);
+    setMsg(`${ids.length} report(s) ${share ? 'shared with' : 'hidden from'} the client.`);
+  };
   const approveSelected = async () => {
     const ids = reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').map((r) => r.id);
     if (!ids.length) return setMsg('None of the selected reports is waiting for approval.');
@@ -212,9 +226,13 @@ export default function FieldReports() {
           </select>
         </div>
         {o.toolbar}
-        {CLOUD && reviewer && !o.showHidden && reports.some((r) => o.picked.has(r.id) && r.status === 'submitted') && (
+        {CLOUD && reviewer && !o.showHidden && (
           <div className="form-actions" style={{ marginTop: 0 }}>
-            <button className="btn btn-sm btn-primary" onClick={approveSelected}>Approve selected ({reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').length} waiting)</button>
+            {reports.some((r) => o.picked.has(r.id) && r.status === 'submitted') && <button className="btn btn-sm btn-primary" onClick={approveSelected}>Approve selected ({reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').length} waiting)</button>}
+            {reports.some((r) => r.status === 'approved') && <>
+              <button className="btn btn-sm" onClick={() => shareMany(true)}>Share {reports.some((r) => o.picked.has(r.id) && r.status === 'approved') ? 'selected' : 'all approved'} with client</button>
+              <button className="btn btn-sm" onClick={() => shareMany(false)}>Hide {reports.some((r) => o.picked.has(r.id) && r.status === 'approved') ? 'selected' : 'all'} from client</button>
+            </>}
           </div>
         )}
         {o.listed.length === 0 ? (
