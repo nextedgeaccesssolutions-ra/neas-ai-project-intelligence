@@ -257,7 +257,11 @@ export async function exportJpeg(el: HTMLElement, filename: string) {
 // ---------- import ----------
 export type ImportSource = 'Excel' | 'CSV' | 'Word' | 'PDF';
 
-function parseCsv(text: string): string[][] {
+function parseCsv(raw: string): string[][] {
+  const text = raw.replace(/^\uFEFF/, '');
+  // semicolon-separated files: more semicolons than commas outside quotes on the first lines
+  const head = text.slice(0, 4000).replace(/"[^"]*"/g, '');
+  const sep = (head.match(/;/g) ?? []).length > (head.match(/,/g) ?? []).length ? ';' : ',';
   const out: string[][] = [];
   let row: string[] = [];
   let cur = '';
@@ -269,7 +273,7 @@ function parseCsv(text: string): string[][] {
       else if (ch === '"') q = false;
       else cur += ch;
     } else if (ch === '"') q = true;
-    else if (ch === ',' || ch === '\t') { row.push(cur); cur = ''; }
+    else if (ch === sep || ch === '\t') { row.push(cur); cur = ''; }
     else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[i + 1] === '\n') i++;
       row.push(cur); out.push(row); row = []; cur = '';

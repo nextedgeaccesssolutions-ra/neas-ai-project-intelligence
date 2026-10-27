@@ -91,7 +91,11 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
       if (images.length === files.length) return;
     }
     const file = files.find((f) => !f.type.startsWith('image/'));
-    if (file && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
+    // a Word file or NEAS PDF with a matching data table imports as data; any other report document becomes a template
+    const dataTable = file && /\.(docx|pdf)$/i.test(file.name) && importColumns && onImport
+      ? await importTable(file, importColumns, importSheet).then((x) => x.rows.some((r) => Object.values(r).filter((v) => String(v ?? '').trim()).length >= 2)).catch(() => false)
+      : false;
+    if (file && !dataTable && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
       setBusy(`Reading ${file.name}…`);
       try {
         const { templateFromFile } = await import('@/lib/templateImport');
