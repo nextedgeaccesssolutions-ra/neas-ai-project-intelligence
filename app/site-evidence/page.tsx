@@ -1,5 +1,5 @@
 'use client';
-import OrgToolbar, { GroupHeader } from '@/components/OrgToolbar';
+import OrgToolbar, { dragSource, GroupHeader, MoveToMenu, UngroupZone } from '@/components/OrgToolbar';
 import { itemKey, useCollapsed, useViewOrg, type ViewGroup } from '@/lib/viewOrg';
 import { useCloudStatus } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
@@ -277,6 +277,15 @@ export default function SiteEvidence() {
   const projGroups = org.groups.filter((g) => g.project_id === pid);
   const sections = showHidden ? [] : projGroups.map((g) => ({ g, items: listed.filter((e) => org.groupOf.get(itemKey('attachment', e.id))?.id === g.id) })).filter((x) => x.items.length);
   const ungrouped = showHidden ? listed : listed.filter((e) => !org.groupOf.get(itemKey('attachment', e.id)) || !projGroups.some((g) => g.id === org.groupOf.get(itemKey('attachment', e.id))!.id));
+  // drag-and-drop and "Move to": into a group of this project, or back to the main list
+  const movePhotos = async (ids: string[], gid: string | null) => {
+    const keep = ids.filter((i) => listed.some((e) => e.id === i));
+    if (!keep.length) return;
+    if (gid === null) { done(await org.ungroup('attachment', keep), 'Moved back to the main list.'); return; }
+    const g = projGroups.find((x) => x.id === gid);
+    if (!g || !(g.scope === 'personal' || reviewer)) { notify('You cannot add photos to that group.'); return; }
+    done(!!(await org.group(pid, 'attachment', keep, { id: g.id })), `Moved ${keep.length} photo(s) to “${g.name}”. The photos themselves did not change.`);
+  };
   const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickedIds = [...picked].filter((id) => listed.some((e) => e.id === id));
   const done = (ok: boolean, msg: string) => { if (ok) { notify(msg); setPicked(new Set()); } };
@@ -315,7 +324,7 @@ export default function SiteEvidence() {
     const from = pairFrom ? byId.get(pairFrom) : undefined;
     const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
     return (
-      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }}>
+      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }} {...(showHidden || pairFrom ? {} : dragSource(e.id, picked))}>
       <input type="checkbox" className="pick" checked={picked.has(e.id)} onChange={() => togglePick(e.id)} aria-label={`Select ${e.ref || e.kind} ${e.caption}`} />
         <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
         <figcaption className="meta">
@@ -371,7 +380,8 @@ export default function SiteEvidence() {
                 {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
                 {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
                 {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
-                {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: evidence.filter((x) => x.isCover).length + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
+                {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0)) + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
+                {!showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} onMove={(gid) => void movePhotos([e.id], gid)} />}
                 {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                 {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
                 {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
@@ -591,6 +601,7 @@ export default function SiteEvidence() {
           return (
             <div key={g.id}>
               <GroupHeader label={g.name} count={items.length} open={sectionsOpen.isOpen(g.id)} onToggle={() => sectionsOpen.toggle(g.id)} badge={g.scope === 'project' ? 'Shared with project' : 'Only you'}
+                onDropItems={editable ? (ids) => void movePhotos(ids, g.id) : undefined}
                 onRename={editable ? () => setRenaming(g) : undefined}
                 onRemove={editable ? () => askConfirm(`Remove the group "${g.name}"? Its ${items.length} photo(s) go back to the main list. No photo is deleted.`, { danger: false }).then(async (ok) => { if (ok && await org.remove(g)) notify('Group removed. The photos are back in the main list.'); }) : undefined} />
               {sectionsOpen.isOpen(g.id) && <div className={`evidence-grid layout-${layout}`}>{items.map(card)}</div>}
@@ -604,6 +615,7 @@ export default function SiteEvidence() {
           </form>
         )}
         {sections.length > 0 && slots > 0 && <h3 className="share-sub">Not in a group ({ungrouped.length})</h3>}
+        {sections.length > 0 && !showHidden && <UngroupZone label="Drag photos here to take them out of their group · or drag them onto a group name above" onDrop={(ids) => void movePhotos(ids, null)} />}
         {slots === 0 ? (sections.length ? null : <div className="empty">{showHidden ? 'You have not hidden any photos.' : evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div>) : (
           <>{pager}
           <div className={`evidence-grid layout-${layout}`}>

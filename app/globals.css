@@ -496,3 +496,9 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .org-all { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; cursor: pointer; }
 .action-row { display: flex; align-items: center; gap: 8px; }
 .action-row > a { flex: 1; min-width: 0; }
+
+/* drag and drop between groups */
+[draggable="true"] { cursor: grab; }
+.drop-zone { border: 2px dashed var(--line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; color: var(--muted, #5d6f7b); text-align: center; font-size: 13px; }
+.drop-over { outline: 2px dashed var(--gold); outline-offset: 2px; background: var(--warn-bg); }
+.move-to { width: auto; max-width: 180px; padding: 4px 8px; font-size: 12px; }
