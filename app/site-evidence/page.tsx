@@ -208,6 +208,36 @@ export default function SiteEvidence() {
     if (other) updateEvidence(other.id, { pairId: null });
   };
 
+  // client visibility for many photos at once: the selected ones, or every photo in the current view
+  const setClientVisibleMany = async (ids: string[], val: boolean) => {
+    if (!ids.length) return;
+    if (!(await askConfirm(`${val ? 'Show' : 'Hide'} ${ids.length} photo(s) ${val ? 'to' : 'from'} the client?`, { danger: false }))) return;
+    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).in('id', ids);
+    if (err) return setError(`Could not update: ${err.message}`);
+    setClientVisible((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, val])) }));
+    notify(`${ids.length} photo(s) ${val ? 'shared with' : 'hidden from'} the client.`);
+  };
+
+  // pair unpaired BEFORE and AFTER photos that share activity, work area and location (in capture order)
+  const detailKey = (e: Evidence) => [e.activityId, (e.workArea ?? '').trim().toLowerCase(), (e.locationDetail ?? '').trim().toLowerCase()].join('|');
+  const autoPairs = (() => {
+    const open = evidence.filter((e) => pairable(e.kind) && !partnerOf(e) && (e.workArea ?? '').trim());
+    const out: [Evidence, Evidence][] = [];
+    const groups = new Map<string, Evidence[]>();
+    for (const e of open) groups.set(detailKey(e), [...(groups.get(detailKey(e)) ?? []), e]);
+    for (const list of groups.values()) {
+      const bs = list.filter((e) => e.kind === 'Before').sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+      const as = list.filter((e) => e.kind === 'After').sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+      for (let i = 0; i < Math.min(bs.length, as.length); i++) out.push([bs[i], as[i]]);
+    }
+    return out;
+  })();
+  const runAutoPair = async () => {
+    if (!(await askConfirm(`Pair ${autoPairs.length} BEFORE/AFTER set(s) that share the same activity, work area and location? You can re-pair or unpair any of them afterwards.`, { danger: false }))) return;
+    for (const [b, a] of autoPairs) { const pairId = uid('pair'); updateEvidence(b.id, { pairId }); updateEvidence(a.id, { pairId }); }
+    notify(`Paired ${autoPairs.length} set(s) by details.`);
+  };
+
   const ql = q.trim().toLowerCase();
   const shown = evidence.filter((e) =>
     (!fActivity || e.activityId === fActivity) &&
@@ -506,6 +536,15 @@ export default function SiteEvidence() {
           <label className="field">GPS<select className="input" value={fGps} onChange={(e) => { setFGps(e.target.value); setPage(0); }}><option value="">Any</option><option value="with">With location</option><option value="without">Without GPS</option><option value="manual">Manually entered</option><option value="warning">Accuracy warning</option></select></label>
           <label className="field">Pairing<select className="input" value={fPair} onChange={(e) => { setFPair(e.target.value); setPage(0); }}><option value="">Any</option><option value="paired">Paired</option><option value="unpaired">Missing a match</option></select></label>
         </div>
+        {(!CLOUD || reviewer) && !showHidden && listed.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            {CLOUD && <>
+              <button className="btn btn-sm" onClick={() => setClientVisibleMany(pickedIds.length ? pickedIds : listed.map((e) => e.id), true)}>Show {pickedIds.length ? `${pickedIds.length} selected` : `all ${listed.length}`} to client</button>
+              <button className="btn btn-sm" onClick={() => setClientVisibleMany(pickedIds.length ? pickedIds : listed.map((e) => e.id), false)}>Hide {pickedIds.length ? `${pickedIds.length} selected` : `all ${listed.length}`} from client</button>
+            </>}
+            <button className="btn btn-sm btn-primary" disabled={!autoPairs.length} onClick={runAutoPair} title="Matches unpaired BEFORE and AFTER photos with the same activity, work area and location">Auto-pair by details ({autoPairs.length})</button>
+          </div>
+        )}
         {pairFrom && byId.get(pairFrom) && (
           <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             Pairing {byId.get(pairFrom)!.ref || byId.get(pairFrom)!.kind}: choose the matching {byId.get(pairFrom)!.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo.
