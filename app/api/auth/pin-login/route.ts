@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { assertSameOrigin, handle, HttpError, ipHash, readJson, supabaseAsUser, supabaseService } from '@/lib/cloud/server';
 import { checkUsername, normaliseUsername } from '@/lib/cloud/validate';
 import { notifyAdmin } from '@/lib/cloud/notify';
@@ -20,6 +21,22 @@ export const POST = handle(async (req) => {
   if (!checkUsername(username) || !/^\d{6}$/.test(pin)) throw await padTiming(started, new HttpError(401, GENERIC));
   const ip = ipHash(req);
   const svc = supabaseService();
+
+  // client usernames open the client portal for their project (approved content only)
+  const { data: clientCred } = await svc.from('client_access_credentials').select('id').eq('username', username).is('revoked_at', null).maybeSingle();
+  if (clientCred) {
+    const { data, error } = await svc.rpc('client_login_username', { p_username: username, p_passcode: pin, p_ip_hash: ip, p_user_agent: req.headers.get('user-agent')?.slice(0, 300) ?? null });
+    if (error) throw new HttpError(503, 'Sign-in is unavailable right now. Try again shortly.');
+    const row = (Array.isArray(data) ? data[0] : data) as { ok: boolean; error: string | null; session_token: string | null; project_code: string | null; expires_at: string | null } | undefined;
+    if (!row?.ok || !row.session_token || !row.project_code) {
+      throw await padTiming(started, new HttpError(row?.error?.startsWith('Too many') ? 429 : 401, row?.error?.startsWith('Too many') ? row.error : GENERIC));
+    }
+    cookies().set('neas_client', `${row.project_code}.${row.session_token}`, {
+      httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/',
+      expires: row.expires_at ? new Date(row.expires_at) : undefined,
+    });
+    return padTiming(started, Response.json({ ok: true, redirect: `/client/${encodeURIComponent(row.project_code)}` }));
+  }
 
   const { data: begin, error: beginErr } = await svc.rpc('pin_login_begin', { p_username: username, p_ip_hash: ip });
   if (beginErr) throw new HttpError(503, 'Sign-in is unavailable right now. Try again shortly.');

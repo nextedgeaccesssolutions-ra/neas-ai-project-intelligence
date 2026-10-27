@@ -4,6 +4,7 @@ import { useState } from 'react';
 import AuthCard from '@/components/AuthCard';
 import { supabaseBrowser, supabaseLinkClient } from '@/lib/cloud/browser';
 import { CLOUD } from '@/lib/cloud/env';
+import { checkOfflineLogin, rememberOfflineLogin } from '@/lib/offlineLogin';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -25,9 +26,17 @@ export default function LoginPage() {
   const submitPin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!navigator.onLine) return setError('Signing in needs an internet connection. If you signed in on this device recently, open the app instead: your work is available offline.');
-    if (!/^\d{6}$/.test(pin)) return setError('Your PIN is 6 digits.');
+    if (!/^\d{6}$/.test(pin)) return setError('Your passcode is 6 digits.');
     setBusy(true);
+    if (!navigator.onLine) {
+      // offline: check against this device's saved hash from an earlier online sign-in
+      const r = await checkOfflineLogin(username, pin);
+      setBusy(false);
+      setPin('');
+      if ('error' in r) return setError(r.error);
+      window.location.href = r.target;
+      return;
+    }
     const r = await fetch('/api/auth/pin-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, pin }) }).catch(() => null);
     const j = r ? await r.json().catch(() => ({})) : {};
     if (!r || !r.ok) {
@@ -35,6 +44,10 @@ export default function LoginPage() {
       setPin('');
       return setError(!r ? 'Cannot reach the server. Check your connection.' : j.error ?? 'Username or PIN is not correct, or the account is not active.');
     }
+    const target = typeof j.redirect === 'string' && j.redirect.startsWith('/client/') ? j.redirect : '/';
+    await rememberOfflineLogin(username, pin, target).catch(() => undefined);
+    // a client username goes straight to that project's client view
+    if (target !== '/') { window.location.href = target; return; }
     await afterLogin('Your PIN was accepted');
   };
 
@@ -105,13 +118,13 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthCard eyebrow="NEAS Enterprise Platform" title="Secure team sign-in" subtitle="Sign in with your username and 6-digit PIN to manage projects, field reports and site evidence. Your work stays available offline on this device after you sign in." note="Clients: open the project link from NEAS and enter your passcode instead. Forgot your PIN or locked out? Ask your NEAS administrator for a one-time code.">
-      <p className={online ? 'ok' : 'bad'} role="status" style={{ margin: 0 }}>{online ? '● Online — ready to sign in' : '● Offline — signing in needs a connection; if you signed in here recently, open the app instead'}</p>
+    <AuthCard eyebrow="NEAS Enterprise Platform" title="Secure team sign-in" subtitle="Staff and clients: sign in with your username and 6-digit passcode. Your work stays available offline on this device after you sign in." note="Forgot your PIN or locked out? Ask your NEAS administrator for a one-time code.">
+      <p className={online ? 'ok' : 'bad'} role="status" style={{ margin: 0 }}>{online ? '● Online — ready to sign in' : '● Offline — you can sign in if you signed in on this device before'}</p>
       {mode === 'pin' ? (
         <>
           <form onSubmit={submitPin} className="auth-form">
             <label className="field">Username<input id="login-username" className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={username} onChange={(e) => setUsername(e.target.value)} /></label>
-            <label className="field">PIN
+            <label className="field">PIN / passcode
               <span style={{ display: 'flex', gap: 8 }}>
                 <input id="login-pin" className="input" type={showPin ? 'text' : 'password'} inputMode="numeric" autoComplete="current-password" pattern="\d{6}" maxLength={6} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} style={{ letterSpacing: '0.3em' }} />
                 <button type="button" className="btn" onClick={() => setShowPin((s) => !s)} aria-pressed={showPin} aria-controls="login-pin">{showPin ? 'Hide' : 'Show'}</button>

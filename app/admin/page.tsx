@@ -872,17 +872,30 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
       notify((x as Error).message);
     }
   };
-  const [g, setG] = useState({ fullName: '', email: '', projectId: '', role: 'employee', hours: 72 });
+  const [g, setG] = useState({ fullName: '', username: '', email: '', projectId: '', role: 'employee', hours: 72, pin: '' });
   const [issued, setIssued] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
+  const [madeLogin, setMadeLogin] = useState<{ who: string; username: string; pin: string; client: boolean } | null>(null);
+  const isClient = g.role === 'client';
+  const generatePin = () => {
+    // 6 random digits, never all the same or a simple run
+    for (;;) {
+      const p = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+      if (new Set(p).size > 1 && !'0123456789'.includes(p) && !'9876543210'.includes(p)) return setG((x) => ({ ...x, pin: p }));
+    }
+  };
   const addWithCode = async () => {
     const n = checkName(g.fullName);
     if (!n.ok) return notify(n.error);
-    const e = checkEmail(g.email);
+    if (!g.username.trim()) return notify('Enter a username: it is their sign-in name.');
+    const e = g.email.trim() ? checkEmail(g.email) : { ok: true as const, email: '' };
     if (!e.ok) return notify(e.error);
+    if (isClient && !g.projectId) return notify('Choose the project this client may see.');
+    if ((isClient || g.pin) && !/^\d{6}$/.test(g.pin)) return notify('The passcode is 6 digits. Type one or press Generate.');
     try {
-      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: e.email, projectId: g.projectId || undefined })) as unknown as { code: string; expiresAt: string };
-      setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
-      setG({ ...g, fullName: '', email: '' });
+      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: e.email || undefined, projectId: g.projectId || undefined, pin: g.pin || undefined })) as unknown as { code?: string; expiresAt?: string };
+      if (r.code && r.expiresAt) setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
+      else setMadeLogin({ who: n.name, username: g.username.trim().toLowerCase(), pin: g.pin, client: isClient });
+      setG({ ...g, fullName: '', username: '', email: '', pin: '' });
       await reload();
     } catch (x) {
       notify((x as Error).message);
@@ -896,16 +909,30 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>Add a person with a one-time code</h2><span className="note">No e-mail needed: you hand them the code</span></div>
+        <div className="card-head"><h2>Add a person or client</h2><span className="note">Sign-in is username + 6-digit passcode. No e-mail needed.</span></div>
         {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={issued.who} onClose={() => setIssued(null)} />}
+        {madeLogin && (
+          <div className="banner" role="status" style={{ display: 'grid', gap: 6 }}>
+            <div><b>{madeLogin.client ? 'Client login' : 'Account'} ready for {madeLogin.who}.</b> Username <code>{madeLogin.username}</code>, passcode <code style={{ letterSpacing: '.1em' }}>{madeLogin.pin}</code>{' '}
+              <button className="btn btn-sm" onClick={() => setMadeLogin(null)}>Done</button></div>
+            <div className="note">Shown only now (stored as a hash). Hand it over directly. They sign in on the normal sign-in page{madeLogin.client ? ' and see only what you approved for clients on that project' : ''}. After their first online sign-in on a device, that device also works offline.</div>
+          </div>
+        )}
         <div className="form-grid">
-          <label className="field">Full name<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
-          <label className="field">E-mail (their sign-in name)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>
-          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
-          <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option></select></label>
-          <label className="field">Code valid for<select className="input" value={g.hours} onChange={(e) => setG({ ...g, hours: Number(e.target.value) })}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>
+          <label className="field">Full name{isClient ? ' / company contact' : ''}<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
+          <label className="field">Username<input className="input" autoCapitalize="none" spellCheck={false} placeholder="e.g. jancho.client" value={g.username} onChange={(e) => setG({ ...g, username: e.target.value })} /></label>
+          {!isClient && <label className="field">E-mail (optional)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>}
+          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">{isClient ? 'Choose a project' : 'No project yet'}</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
+          <label className="field">Passcode (6 digits){isClient ? '' : ' — or leave empty for a one-time code'}
+            <span style={{ display: 'flex', gap: 8 }}>
+              <input className="input" inputMode="numeric" maxLength={6} value={g.pin} onChange={(e) => setG({ ...g, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} style={{ letterSpacing: '0.3em' }} />
+              <button type="button" className="btn" onClick={generatePin}>Generate</button>
+            </span>
+          </label>
+          {!isClient && !g.pin && <label className="field">Code valid for<select className="input" value={g.hours} onChange={(e) => setG({ ...g, hours: Number(e.target.value) })}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>}
         </div>
-        <div className="form-actions"><button className="btn btn-primary" onClick={addWithCode}>Create account and code</button></div>
+        <div className="form-actions"><button className="btn btn-primary" onClick={addWithCode}>{isClient ? 'Create client login' : g.pin ? 'Create account' : 'Create account and code'}</button></div>
       </section>
       <section className="card">
         <div className="card-head"><h2>Invite a person by e-mail</h2><span className="note">Pre-approved: they set their own password from a single-use link</span></div>
