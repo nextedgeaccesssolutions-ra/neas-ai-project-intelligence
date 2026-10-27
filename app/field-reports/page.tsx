@@ -1,4 +1,5 @@
 'use client';
+import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -26,10 +27,12 @@ export default function FieldReports() {
   const reviewer = useCanManage();
   const review = async (id: string, patch: Record<string, unknown>, label: string) => {
     const sb = supabaseBrowser()!;
-    const { error: err } = await sb.from('project_reports').update(patch).eq('id', id);
+    const { data: rv, error: err } = await sb.from('project_reports').update(patch).eq('id', id).select('id, version');
     if (err) return setError(`${label} failed: ${err.message}. Reviews need an internet connection.`);
+    await noteServerVersions('project_reports', rv ?? []);
     if ('client_visible' in patch) {
-      await sb.from('report_attachments').update({ client_visible: patch.client_visible }).eq('report_id', id);
+      const { data: av } = await sb.from('report_attachments').update({ client_visible: patch.client_visible }).eq('report_id', id).select('id, version');
+      await noteServerVersions('report_attachments', av ?? []);
     }
     await pullAll().catch(() => undefined);
     setMsg(`${label}.`);
@@ -66,10 +69,12 @@ export default function FieldReports() {
     // one report at a time, only on projects this person manages, so every result is exact
     for (const r of target) {
       if (!canManage(r.projectId)) { failed.push('not a project you manage'); continue; }
-      const { data, error: err } = await sb.from('project_reports').update({ client_visible: share }).eq('id', r.id).select('id');
+      const { data, error: err } = await sb.from('project_reports').update({ client_visible: share }).eq('id', r.id).select('id, version');
+      await noteServerVersions('project_reports', data ?? []);
       if (err || !data?.length) { failed.push(err?.message ?? 'not changed'); continue; }
       ok++;
-      const { error: pe } = await sb.from('report_attachments').update({ client_visible: share }).eq('report_id', r.id);
+      const { data: av, error: pe } = await sb.from('report_attachments').update({ client_visible: share }).eq('report_id', r.id).select('id, version');
+      await noteServerVersions('report_attachments', av ?? []);
       if (pe) photoFail++;
     }
     await pullAll().catch(() => undefined);
@@ -82,7 +87,8 @@ export default function FieldReports() {
     let ok = 0;
     const failed: string[] = [];
     for (const id of ids) {
-      const { data, error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).eq('id', id).eq('status', 'submitted').select('id');
+      const { data, error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).eq('id', id).eq('status', 'submitted').select('id, version');
+      await noteServerVersions('project_reports', data ?? []);
       if (!err && data?.length) ok++;
       else failed.push(err?.message ?? 'already reviewed or not yours to approve');
     }

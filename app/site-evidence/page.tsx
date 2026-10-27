@@ -1,4 +1,5 @@
 'use client';
+import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import OrgToolbar, { dragSource, GroupHeader, MoveToMenu, UngroupZone } from '@/components/OrgToolbar';
 import { itemKey, useCollapsed, useViewOrg, type ViewGroup } from '@/lib/viewOrg';
 import { useCloudStatus } from '@/lib/cloud/cloudSync';
@@ -141,8 +142,9 @@ export default function SiteEvidence() {
   if (!project) return <NoProject />;
 
   const toggleClientVisible = async (id: string, val: boolean) => {
-    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
+    const { data, error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id).select('id, version');
     if (err) return setError(`Could not update: ${err.message}`);
+    await noteServerVersions('report_attachments', data ?? []);
     setClientVisible((prev) => ({ ...prev, [id]: val }));
     notify(val ? 'Shared with client.' : 'Hidden from client.');
   };
@@ -222,8 +224,9 @@ export default function SiteEvidence() {
   const setClientVisibleMany = async (ids: string[], val: boolean) => {
     if (!ids.length) return;
     if (!(await askConfirm(`${val ? 'Show' : 'Hide'} ${ids.length} photo(s) ${val ? 'to' : 'from'} the client?`, { danger: false }))) return;
-    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).in('id', ids);
+    const { data, error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).in('id', ids).select('id, version');
     if (err) return setError(`Could not update: ${err.message}`);
+    await noteServerVersions('report_attachments', data ?? []);
     setClientVisible((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, val])) }));
     notify(`${ids.length} photo(s) ${val ? 'shared with' : 'hidden from'} the client.`);
   };

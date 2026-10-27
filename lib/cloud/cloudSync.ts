@@ -7,7 +7,7 @@ import { supabaseBrowser } from './browser';
 import { FILES_BUCKET, OFFLINE_GRACE_HOURS } from './env';
 import * as M from './mapping';
 import { forgetOfflineLogin } from '../offlineLogin';
-import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
+import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, rebaseOps, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
 import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
@@ -304,6 +304,18 @@ export async function syncNow(): Promise<void> {
     set({ syncing: false });
     await refreshCounts();
   }
+}
+
+/** Record new server versions after a direct update that bypassed the outbox, so later edits on this device are not refused as conflicts. */
+export async function noteServerVersions(entity: Entity, rows: { id: string; version: number }[]) {
+  for (const r of rows) {
+    const old = versions[vkey(entity, r.id)]?.version ?? null;
+    // only our own update happened in between; a bigger jump means someone else changed it too, so a later conflict must still show
+    if (old === null || r.version !== old + 1) continue;
+    versions[vkey(entity, r.id)] = { id: r.id, version: r.version };
+    await rebaseOps(entity, r.id, old, r.version);
+  }
+  await setMeta('versions', versions);
 }
 
 /** Use the server's copy for a conflicted record (after the person chose it). */
