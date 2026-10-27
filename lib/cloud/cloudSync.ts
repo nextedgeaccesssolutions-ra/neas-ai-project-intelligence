@@ -56,8 +56,11 @@ export const viewOfPath = (path: string): ViewKey | null => {
 /** null allowed_views = every module. Super Admins always see everything. */
 /** Modules every signed-in user always has, whatever their module settings. */
 export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
+/** A client account sees Overview and reports only: field reports and site evidence stay hidden. */
+export const CLIENT_VIEWS: ViewKey[] = ['overview'];
+export const isClientViews = (v: readonly string[] | null | undefined) => !!v && v.length === CLIENT_VIEWS.length && CLIENT_VIEWS.every((k) => v.includes(k));
 export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
-  !view || !profile || ALWAYS_VIEWS.includes(view) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
+  !view || !profile || (ALWAYS_VIEWS.includes(view) && !isClientViews(profile.allowed_views)) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
 // ---------------------------------------------------------------------------
 type Versions = Record<string, { id: string; version: number }>;

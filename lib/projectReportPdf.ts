@@ -127,10 +127,31 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     y += lines.length * 10.5 + 2;
   }
   const T = COVER_TILE_PT, gap = W() - M * 2 - 2 * T;
-  const coverOnFirst = r.cover.slice(0, 2);
+  const single = r.coverPhoto?.single ?? false;
+  const coverOnFirst = single ? [] : r.cover.slice(0, 2);
   // tiles keep their exact size: if they do not fit under the details, they start on page 2
   const tileBlock = T + 11 + 20 + 5 * 9.2;
-  if (coverOnFirst.length && y + 10 + tileBlock <= H() - 34) {
+  if (single && r.cover.length) {
+    // one cover photo, centred, sized as a share of the page width and fitted to the space left on page 1
+    const c = r.cover[0];
+    const img = images.get(c.item.id);
+    const below = c.mapUrl ? 32 : 20;
+    const boxW = (W() - M * 2) * (r.coverPhoto.sizePct / 100);
+    const boxH = Math.max(60, H() - 34 - (y + 12) - below);
+    if (img) {
+      const f = fit(img, boxW, boxH);
+      const ix = (W() - f.w) / 2, iy = y + 12;
+      pdf.addImage(img.data, 'JPEG', ix, iy, f.w, f.h);
+      y = iy + f.h + 12;
+    } else {
+      pdf.setFillColor(241, 244, 246); pdf.rect((W() - boxW) / 2, y + 12, boxW, Math.min(boxH, boxW * 0.6), 'F');
+      pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text('Photo not available', W() / 2, y + 12 + Math.min(boxH, boxW * 0.6) / 2, { align: 'center' });
+      y += 12 + Math.min(boxH, boxW * 0.6) + 12;
+    }
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(...INK);
+    pdf.text(pdf.splitTextToSize(c.title, W() - M * 2)[0], W() / 2, y, { align: 'center' });
+    if (c.mapUrl) { pdf.setFontSize(7.5); pdf.setTextColor(...GOLD); const t = 'VIEW PHOTO LOCATION ON MAP'; pdf.textWithLink(t, (W() - pdf.getTextWidth(t)) / 2, y + 11, { url: c.mapUrl }); }
+  } else if (coverOnFirst.length && y + 10 + tileBlock <= H() - 34) {
     y += 10;
     coverOnFirst.forEach((c, i) => coverTile(c, M + i * (T + gap), y, 5));
   } else if (r.cover.length) {
@@ -141,8 +162,8 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     pdf.text('No project cover photos have been selected for this report.', M, y + 18);
   }
 
-  // ---------------- photo location register: 4 tiles a page at full size, all details
-  if (r.cover.length) {
+  // ---------------- photo location register: 4 tiles a page at full size, all details (optional)
+  if (r.cover.length && (!single || r.coverPhoto.register)) {
     for (let i = 0; i < r.cover.length; i += 4) {
       y = newPage('Photo location register');
       r.cover.slice(i, i + 4).forEach((c, k) => {

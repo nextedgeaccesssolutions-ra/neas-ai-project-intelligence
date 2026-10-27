@@ -12,7 +12,7 @@ import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
 import { askPin, isPinRequired, withPin } from '@/components/PinPrompt';
 import { useOrgList } from '@/components/OrgList';
-import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
+import { ALWAYS_VIEWS, CLIENT_VIEWS, isClientViews, VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
 const TABS: [Tab, string][] = [
@@ -491,7 +491,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   const ql = q.trim().toLowerCase();
   const filtered = d.profiles.filter((u) =>
     (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
-    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
+    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : role === 'client' ? u.global_role !== 'super_admin' && isClientViews(u.allowed_views) : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
   );
@@ -519,7 +519,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
       columns: ['Full name', 'E-mail', 'E-mail verified', 'Account status', 'Approval', 'Global role', 'Projects (role)', 'Last sign-in', 'Created', 'Password', 'Password reset', 'Modules'].map((label) => ({ key: label, label })),
       rows: rows.map((u) => ({
         'Full name': u.full_name, 'E-mail': u.email, 'E-mail verified': u.email_verified_at ? 'Yes' : 'No', 'Account status': u.status, Approval: approvalOf(u),
-        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
+        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : isClientViews(u.allowed_views) ? 'Client' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
         Created: fmtDate(u.created_at.slice(0, 10)), Password: passwordOf(u), 'Password reset': resetOf(u), Modules: u.global_role === 'super_admin' || !u.allowed_views ? 'All' : u.allowed_views.join(', '),
       })),
     }],
@@ -547,7 +547,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
         <div className="form-grid" style={{ marginBottom: 14 }}>
           <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
           <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option><option value="deleted">Deleted</option></select></label>
-          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
+          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="client">Client</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
           <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
         </div>
 
@@ -583,7 +583,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                       </div>
                     </td>
                     <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.pin_locked_at && <> <span className="pill pill-bad">PIN locked</span></>}{u.status_reason && <div className="note">{u.status_reason}</div>}{u.username && <div className="note">@{u.username}</div>}</td>
-                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
+                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : isClientViews(u.allowed_views) ? <span className="pill">Client</span> : 'Staff'}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
                     <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
                     <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
@@ -658,10 +658,15 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
   return (
     <div>
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        {isClientViews(u.allowed_views)
+          ? <><span className="pill">Client account</span><span className="note">Sees Overview, Global reports and Project reports for their projects only. Field reports, Site evidence and every other module are hidden.</span></>
+          : <button className="btn btn-sm" disabled={saving} onClick={() => save([...CLIENT_VIEWS])}>Make this a client account (reports only)</button>}
+      </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
         {VIEWS.map(([k, label]) => {
-          const always = ALWAYS_VIEWS.includes(k);
+          const always = ALWAYS_VIEWS.includes(k) && !isClientViews(u.allowed_views);
           return (
             <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={always ? 'Every user always has this module' : undefined}>
               <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />

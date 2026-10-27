@@ -4,7 +4,7 @@
 // report title, line names, which lines show, their order, and extra lines.
 import { useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { ADMIN_COVER_LINES, LOCKED_COVER_LINES, type CoverSettings } from '@/lib/projectReport';
+import { ADMIN_COVER_LINES, DEFAULT_COVER_PHOTO, LOCKED_COVER_LINES, type CoverPhotoLayout, type CoverSettings } from '@/lib/projectReport';
 import { notify } from '@/components/Dialogs';
 
 type Row = { key: string; label: string; show: boolean };
@@ -23,10 +23,12 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
   const [rows, setRows] = useState<Row[]>([]);
   const [extra, setExtra] = useState<{ key: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState<CoverPhotoLayout>(DEFAULT_COVER_PHOTO);
 
   useEffect(() => {
     setValues(settings?.values ?? {});
     setTitle(settings?.layout?.title ?? '');
+    setPhoto(settings?.layout?.coverPhoto ?? DEFAULT_COVER_PHOTO);
     const ex = settings?.layout?.extra ?? [];
     setExtra(ex);
     const saved = settings?.layout?.rows ?? [];
@@ -59,7 +61,7 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
     if (!error && isAdmin) {
       ({ error: layoutErr } = await sb.rpc('save_report_cover_layout', {
         p_project: projectId,
-        p_layout: { title: title.trim() || undefined, rows: rows.map((r) => ({ key: r.key, label: r.label.trim() || undefined, show: r.show })), extra: extra.map((x) => ({ key: x.key, label: x.label.trim() || 'Line' })) },
+        p_layout: { title: title.trim() || undefined, rows: rows.map((r) => ({ key: r.key, label: r.label.trim() || undefined, show: r.show })), extra: extra.map((x) => ({ key: x.key, label: x.label.trim() || 'Line' })), coverPhoto: photo },
       }));
     }
     setBusy(false);
@@ -77,6 +79,26 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
       </div>
       {!open ? <p className="note">The first page lists the project's details from the Project register. Edit them for this project's reports without changing the register{isAdmin ? ', and change the report title, line names, order and which lines show' : ''}.</p> : (
         <>
+          {isAdmin && (
+            <fieldset className="progress-box">
+              <legend>Cover photo</legend>
+              <div className="form-grid">
+                <label className="field">Layout
+                  <select className="input" value={photo.single ? 'single' : 'tiles'} onChange={(e) => setPhoto({ ...photo, single: e.target.value === 'single' })}>
+                    <option value="single">One photo, centred (the primary cover photo)</option>
+                    <option value="tiles">Two 9.21 cm photos with details</option>
+                  </select>
+                </label>
+                {photo.single && <label className="field">Size: {photo.sizePct}% of the page width
+                  <input type="range" min={25} max={100} step={5} value={photo.sizePct} onChange={(e) => setPhoto({ ...photo, sizePct: Number(e.target.value) })} />
+                </label>}
+                {photo.single && <label className="field" style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <input type="checkbox" checked={photo.register} onChange={(e) => setPhoto({ ...photo, register: e.target.checked })} /> Add the photo location register page
+                </label>}
+              </div>
+              <p className="note">Choose which photo is the primary one under Site evidence → Project cover photos (Make primary). The photo keeps its proportions and fits the space left on page 1.</p>
+            </fieldset>
+          )}
           {isAdmin && <label className="field">Report title<input className="input" maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Project Report" /></label>}
           <div className="table-wrap">
             <table className="tbl">
