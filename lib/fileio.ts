@@ -259,9 +259,10 @@ export type ImportSource = 'Excel' | 'CSV' | 'Word' | 'PDF';
 
 function parseCsv(raw: string): string[][] {
   const text = raw.replace(/^\uFEFF/, '');
-  // semicolon-separated files: more semicolons than commas outside quotes on the first lines
-  const head = text.slice(0, 4000).replace(/"[^"]*"/g, '');
-  const sep = (head.match(/;/g) ?? []).length > (head.match(/,/g) ?? []).length ? ';' : ',';
+  // semicolon-separated files: judged on the header line only (no tabs, more semicolons than commas outside quotes)
+  const first = (text.split(/?
+/)[0] ?? '').replace(/"[^"]*"/g, '');
+  const sep = !first.includes('	') && (first.match(/;/g) ?? []).length > (first.match(/,/g) ?? []).length ? ';' : ',';
   const out: string[][] = [];
   let row: string[] = [];
   let cur = '';

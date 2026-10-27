@@ -92,9 +92,11 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
     }
     const file = files.find((f) => !f.type.startsWith('image/'));
     // a Word file or NEAS PDF with a matching data table imports as data; any other report document becomes a template
-    const dataTable = file && /\.(docx|pdf)$/i.test(file.name) && importColumns && onImport
-      ? await importTable(file, importColumns, importSheet).then((x) => x.rows.some((r) => Object.values(r).filter((v) => String(v ?? '').trim()).length >= 2)).catch(() => false)
-      : false;
+    if (file && /\.(docx|pdf)$/i.test(file.name)) setBusy(`Reading ${file.name}…`);
+    const firstRead = file && /\.(docx|pdf)$/i.test(file.name) && importColumns && onImport
+      ? await importTable(file, importColumns, importSheet).catch(() => null)
+      : null;
+    const dataTable = !!firstRead?.rows.some((r) => Object.values(r).filter((v) => String(v ?? '').trim()).length >= 2);
     if (file && !dataTable && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
       setBusy(`Reading ${file.name}…`);
       try {
@@ -115,7 +117,7 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
     }
     setBusy(`Reading ${file.name}…`);
     try {
-      const { rows, source } = await importTable(file, importColumns, importSheet);
+      const { rows, source } = firstRead ?? await importTable(file, importColumns, importSheet);
       if (!rows.length) throw new Error('No rows found. Check that the first row holds the column names.');
       const plan = onImport(rows);
       setBusy(null);

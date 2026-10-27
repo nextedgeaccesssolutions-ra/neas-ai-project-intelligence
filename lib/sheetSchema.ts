@@ -164,12 +164,12 @@ export function matchColumn(cols: Column[], header: unknown): string | null {
 
 /** The header row: the first of the top rows that names the most known columns (a title row above it is skipped). */
 export function headerRowIndex(cols: Column[], grid: unknown[][]): number {
-  let best = 0, bestHits = -1;
-  grid.slice(0, 15).forEach((row, i) => {
-    const hits = new Set(row.map((h) => matchColumn(cols, h)).filter(Boolean)).size;
-    if (hits > bestHits) { best = i; bestHits = hits; }
-  });
-  return best;
+  const hitsOf = (row: unknown[]) => new Set(row.map((h) => matchColumn(cols, h)).filter(Boolean)).size;
+  const top = grid.slice(0, 15).map(hitsOf);
+  const max = Math.max(0, ...top);
+  // the first row stays the header unless a lower row is clearly better (a title above the real headers)
+  if (top[0] >= 1 && top[0] >= max - 1) return 0;
+  return Math.max(0, top.indexOf(max));
 }
 
 /** 2D grid → rows keyed by column key; the header row is found automatically, unknown columns dropped. */

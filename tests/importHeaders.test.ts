@@ -31,3 +31,10 @@ describe('spreadsheet import header matching', () => {
     expect(rows[0].description).toBeUndefined();
   });
 });
+
+describe('header row choice', () => {
+  it('keeps row 1 as the header when a lower row only looks a little better', () => {
+    const grid = [['Description', 'Amount note'], ['Item', 'Unit'], ['Mobilization', 'x']];
+    expect(headerRowIndex(BOQ, grid)).toBe(0);
+  });
+});
