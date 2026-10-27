@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { notify } from '@/components/Dialogs';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import CoverPageEditor from '@/components/CoverPageEditor';
 import { isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
@@ -10,7 +11,7 @@ import { fetchFromServer } from '@/components/PhotoThumb';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { getPhoto } from '@/lib/photos';
-import { CLOUD } from '@/lib/cloud/env';
+import { CLOUD, FILES_BUCKET } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
@@ -31,6 +32,7 @@ export default function Reports() {
   const [logNote, setLogNote] = useState<string | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [coverSettings, setCoverSettings] = useState<CoverSettings | null>(null);
+  const [shareLink, setShareLink] = useState<{ ref: string; url: string } | null>(null);
   useCloudStatus();
   const [exportIds, setExportIds] = useState<Record<string, string>>({});
 
@@ -110,19 +112,46 @@ export default function Reports() {
         onSend={CLOUD ? async (blob, r) => {
           const exportId = exportIds[r.reference];
           if (!exportId) throw new Error('This report was not logged, so it cannot be sent. Generate it again while online.');
-          const form = new FormData();
-          form.set('exportId', exportId);
-          form.set('file', blob, `${r.fileName}.pdf`);
-          const res = await fetch('/api/reports/review', { method: 'POST', body: form }).catch(() => null);
-          if (!res) throw new Error('Sending needs an internet connection.');
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(j.error ?? 'The report could not be sent.');
+          if (!navigator.onLine) throw new Error('Sending needs an internet connection.');
+          // the PDF goes straight to file storage (reports with many photos are too large for one server request)
+          const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map((x) => x.toString(16).padStart(2, '0')).join('');
+          const call = async (body: Record<string, unknown>) => {
+            const res = await fetch('/api/reports/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exportId, sha256, ...body }) }).catch(() => null);
+            if (!res) throw new Error('Sending needs an internet connection.');
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(j.error ?? `The report could not be sent (server answered ${res.status}).`);
+            return j as { path: string; token?: string; already?: boolean };
+          };
+          const start = await call({ step: 'start', size: blob.size });
+          if (!start.already && start.token) {
+            const { error: upErr } = await supabaseBrowser()!.storage.from(FILES_BUCKET).uploadToSignedUrl(start.path, start.token, blob, { contentType: 'application/pdf' });
+            if (upErr && !/exists|duplicate/i.test(upErr.message)) throw new Error(`The report file could not be uploaded (${upErr.message}).`);
+          }
+          await call({ step: 'finish' });
           loadHistory();
-          return `${r.reference} was sent. The project's client sees it under “Reports for your review” and can approve it or request changes.`;
+          setShareLink({ ref: r.reference, url: `${location.origin}/client/${encodeURIComponent(project.code ?? '')}` });
+          return `${r.reference} was sent. The project's client sees it under “Reports for your review” and can approve it or request changes. Share the link below.`;
         } : undefined}
         input={(asOf, from) => ({ ...reportInput(asOf, from), coverSettings })}
       />
       {CLOUD && <CoverPageEditor projectId={pid} defaults={buildProjectReport(reportInput(todayLocal(), null)).fields} settings={coverSettings} isAdmin={isSuperAdmin()} onSaved={loadHistory} />}
+      {shareLink && (() => {
+        const text = `NEAS project report ${shareLink.ref} is ready for your review and approval: ${shareLink.url} — sign in with the username and passcode NEAS gave you, then open “Reports for your review”.`;
+        const enc = encodeURIComponent(text);
+        return (
+          <section className="card">
+            <div className="card-head"><h2>Send the review link to the client</h2><button className="btn btn-sm" onClick={() => setShareLink(null)}>Close</button></div>
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <code style={{ overflowWrap: 'anywhere' }}>{shareLink.url}</code>
+              <button className="btn btn-sm btn-primary" onClick={() => navigator.clipboard.writeText(text).then(() => notify('Message and link copied.'), () => notify('Copy failed: select the link and copy it.'))}>Copy message</button>
+              <a className="btn btn-sm" href={`mailto:?subject=${encodeURIComponent(`NEAS report ${shareLink.ref} for your review`)}&body=${enc}`}>E-mail</a>
+              <a className="btn btn-sm" href={`https://wa.me/?text=${enc}`} target="_blank" rel="noreferrer">WhatsApp</a>
+              <a className="btn btn-sm" href={`viber://forward?text=${enc}`}>Viber</a>
+            </div>
+            <p className="note">The link opens the client sign-in for this project. Only people with a client login or passcode for it can see the report. Never send a passcode in the same message as the link.</p>
+          </section>
+        );
+      })()}
       {logNote && <p className="note">{logNote}</p>}
       {CLOUD && (
         <section className="card">

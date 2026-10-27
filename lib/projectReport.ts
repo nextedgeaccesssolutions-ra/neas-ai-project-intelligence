@@ -246,8 +246,9 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
 
   const approval: [string, string][] = [
     ['Prepared by', clean(input.preparedBy) || 'Not provided'],
-    ['Reviewed by', 'Not recorded'],
-    ['Approval status', 'Not recorded'],
+    // left blank for the client or reviewer to complete (by hand, or online under “Reports for your review”)
+    ['Reviewed by (name / date)', '________________________________'],
+    ['Approval status', '________________________________'],
   ];
 
   return {
