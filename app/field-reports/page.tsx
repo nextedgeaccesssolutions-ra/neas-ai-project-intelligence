@@ -54,6 +54,16 @@ export default function FieldReports() {
 
   const o = useOrgList({ list: 'field_reports', kind: 'field_report', items: filter ? reports.filter((r) => r.activityId === filter) : reports, id: (r) => r.id, project: (r) => r.projectId, noun: 'report' });
 
+  const approveSelected = async () => {
+    const ids = reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').map((r) => r.id);
+    if (!ids.length) return setMsg('None of the selected reports is waiting for approval.');
+    if (!(await askConfirm(`Approve ${ids.length} submitted report(s)?`, { danger: false }))) return;
+    const { error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).in('id', ids);
+    if (err) return setError(`Approval failed: ${err.message}. Reviews need an internet connection.`);
+    await pullAll().catch(() => undefined);
+    setMsg(`${ids.length} report(s) approved.`);
+  };
+
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
 
@@ -197,6 +207,11 @@ export default function FieldReports() {
           </select>
         </div>
         {o.toolbar}
+        {CLOUD && reviewer && !o.showHidden && reports.some((r) => o.picked.has(r.id) && r.status === 'submitted') && (
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <button className="btn btn-sm btn-primary" onClick={approveSelected}>Approve selected ({reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').length} waiting)</button>
+          </div>
+        )}
         {o.listed.length === 0 ? (
           <div className="empty">{o.showHidden ? 'You have not hidden any field reports.' : 'No field reports yet.'}</div>
         ) : (

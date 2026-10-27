@@ -5,8 +5,10 @@ import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { Loading } from '@/components/ProjectBar';
 import { CLOUD } from '@/lib/cloud/env';
-import { isSuperAdmin } from '@/lib/cloud/cloudSync';
-import { askConfirm } from '@/components/Dialogs';
+import { isSuperAdmin, pullAll } from '@/lib/cloud/cloudSync';
+import { supabaseBrowser } from '@/lib/cloud/browser';
+import { askConfirm, notify } from '@/components/Dialogs';
+import { withPin } from '@/components/PinPrompt';
 import { useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { projectProgress, todayLocal, boqTotals } from '@/lib/calc';
@@ -26,6 +28,9 @@ export default function ProjectRegister() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  // cloud: a Super Admin edits a project's register details in place
+  const [cloudEdit, setCloudEdit] = useState<{ id: string; code: string; name: string; client: string; site: string; status: string; contractValue: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -56,6 +61,30 @@ export default function ProjectRegister() {
     setError(null);
   };
 
+  const saveCloud = async () => {
+    if (!cloudEdit) return;
+    if (!cloudEdit.name.trim()) return setError('Project name is required.');
+    const cv = cloudEdit.contractValue.trim() === '' ? null : Number(cloudEdit.contractValue.replace(/,/g, ''));
+    if (cv != null && (!Number.isFinite(cv) || cv < 0)) return setError('Contract value must be a positive number.');
+    setBusy(true);
+    const { error: err } = await withPin(() => supabaseBrowser()!.from('projects').update({
+      name: cloudEdit.name.trim(), client_name: cloudEdit.client.trim(), site: cloudEdit.site.trim(), status: cloudEdit.status, contract_value: cv == null ? null : Math.round(cv * 100) / 100,
+    }).eq('id', cloudEdit.id));
+    setBusy(false);
+    if (err) return setError(`Not saved: ${err.message}`);
+    await pullAll().catch(() => undefined);
+    notify(`${cloudEdit.code} saved.`);
+    setCloudEdit(null); setError(null);
+  };
+  const pickedIds = rows.filter((p) => o.picked.has(p.id)).map((p) => p.id);
+  const archiveSelected = async () => {
+    if (!(await askConfirm(`Archive ${pickedIds.length} project(s)? Members lose access until a Super Admin reactivates them in Control panel → Projects. Nothing is deleted.`))) return;
+    const { error: err } = await withPin(() => supabaseBrowser()!.from('projects').update({ status: 'archived' }).in('id', pickedIds));
+    if (err) return notify(`Not archived: ${err.message}`);
+    await pullAll().catch(() => undefined);
+    notify(`${pickedIds.length} project(s) archived.`);
+  };
+
   return (
     <>
       <div className="page-head">
@@ -69,6 +98,29 @@ export default function ProjectRegister() {
           {CLOUD ? (isSuperAdmin() && <Link className="btn btn-primary" href="/admin#projects">Manage projects</Link>) : <button className="btn btn-primary" onClick={() => { setDraft(blank()); setError(null); }}>+ New project</button>}
         </div>
       </div>
+
+      {CLOUD && cloudEdit && (
+        <section className="card">
+          <div className="card-head"><h2>Edit {cloudEdit.code}</h2></div>
+          <div className="form-grid">
+            <label className="field" style={{ gridColumn: 'span 2' }}>Project name<input className="input" maxLength={300} value={cloudEdit.name} onChange={(e) => setCloudEdit({ ...cloudEdit, name: e.target.value })} /></label>
+            <label className="field">Client<input className="input" maxLength={200} value={cloudEdit.client} onChange={(e) => setCloudEdit({ ...cloudEdit, client: e.target.value })} /></label>
+            <label className="field">Site<input className="input" maxLength={300} value={cloudEdit.site} onChange={(e) => setCloudEdit({ ...cloudEdit, site: e.target.value })} /></label>
+            <label className="field">Status
+              <select className="input" value={cloudEdit.status} onChange={(e) => setCloudEdit({ ...cloudEdit, status: e.target.value })}>
+                {['draft', 'active', 'completed'].map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </label>
+            <label className="field">Contract value (₱)<input className="input" inputMode="decimal" value={cloudEdit.contractValue} onChange={(e) => setCloudEdit({ ...cloudEdit, contractValue: e.target.value })} placeholder="Blank if not yet agreed" /></label>
+          </div>
+          <p className="note">The BOQ selling price comes from the project's BOQ lines; change it in Estimating &amp; BOQ.</p>
+          {error && <p className="bad" role="alert">{error}</p>}
+          <div className="form-actions">
+            <button className="btn btn-primary" disabled={busy} onClick={saveCloud}>{busy ? 'Saving…' : 'Save changes'}</button>
+            <button className="btn" onClick={() => { setCloudEdit(null); setError(null); }}>Cancel</button>
+          </div>
+        </section>
+      )}
 
       {!CLOUD && draft && (
         <section className="card">
@@ -99,6 +151,12 @@ export default function ProjectRegister() {
           <input className="input" style={{ maxWidth: 280 }} placeholder="Search projects" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" />
         </div>
         {o.toolbar}
+        {CLOUD && isSuperAdmin() && !o.showHidden && pickedIds.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            <button className="btn btn-sm btn-danger" onClick={archiveSelected}>Archive selected ({pickedIds.length})</button>
+            <span className="note">Archiving removes a project from everyone's lists and can be undone in Control panel → Projects.</span>
+          </div>
+        )}
         {o.listed.length === 0 ? <div className="empty">{o.showHidden ? 'You have not hidden any projects.' : 'No projects match.'}</div> : (
           <div className="table-wrap">
             <table className="tbl">
@@ -122,6 +180,7 @@ export default function ProjectRegister() {
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm btn-primary" href="/" onClick={() => setActiveProject(p.id)}>Open</Link>{' '}
                         <Link className="btn btn-sm" href={`/reports?project=${encodeURIComponent(p.id)}`} onClick={() => setActiveProject(p.id)}>View reports</Link>{' '}
+                        {CLOUD && isSuperAdmin() && <button className="btn btn-sm" onClick={() => { setCloudEdit({ id: p.id, code: p.code ?? p.id, name: p.name, client: p.client, site: p.site, status: ['draft', 'active', 'completed'].includes(p.status) ? p.status : 'active', contractValue: p.contractValue == null ? '' : String(p.contractValue) }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>}
                         {!CLOUD && <><button className="btn btn-sm" onClick={() => { setDraft({ ...p, contractValue: p.contractValue == null ? '' : String(p.contractValue), isNew: false }); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button>{' '}
                         <button className="btn btn-sm btn-danger" onClick={() => askConfirm(`Delete ${p.id} and all its activities, reports, BOQ and photos? This cannot be undone.`).then((ok) => ok && deleteProject(p.id))}>Delete</button></>}
                       </td>

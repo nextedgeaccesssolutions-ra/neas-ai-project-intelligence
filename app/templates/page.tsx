@@ -12,6 +12,7 @@ import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync'
 import { getPhoto } from '@/lib/photos';
 import { saveFile } from '@/lib/fileio';
 import { fmtDate } from '@/lib/format';
+import { templateFromFile } from '@/lib/templateImport';
 import { cacheProject, cachedProject, dropPending, flushPending, keepOnDevice, pendingFor, serverStamp, type PendingSave } from '@/lib/templateReportDrafts';
 import {
   blankReport, chartCounts, KIND_LABEL, newSectionId, normaliseTemplate, templateReportDocx, templateReportPdf,
@@ -99,6 +100,14 @@ export default function TemplatesPage() {
     await load();
     setOpen(data as ReportRow);
   };
+  // a Word / PowerPoint report becomes a new template, opened in the editor for review before saving
+  const importFile = async (file: File) => {
+    try {
+      const def = await templateFromFile(file);
+      setEditing({ id: '', project_id: pid, name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def, updated_at: '' });
+      notify(`Read ${def.sections.length} section(s) from ${file.name}. Check them, then press Save template.`);
+    } catch (e) { notify((e as Error).message); }
+  };
   const removeReport = async (r: ReportRow) => {
     if (!(await askConfirm(`Delete the report “${r.title}”? This cannot be undone.`))) return;
     const { error } = await sb.from('template_reports').delete().eq('id', r.id);
@@ -133,6 +142,15 @@ export default function TemplatesPage() {
                 </select>
                 {chosen && <button className="btn btn-primary" onClick={() => startReport(chosen)}>New report from this template</button>}
                 {chosen && manager && <button className="btn" onClick={() => setEditing(chosen)}>Edit template</button>}
+              </div>
+            )}
+            {manager && (
+              <div className="form-actions">
+                <label className="btn" style={{ cursor: 'pointer' }}>
+                  Import a template from Word / PowerPoint
+                  <input type="file" hidden accept=".docx,.pptx,.pdf,.doc,.ppt" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+                </label>
+                <span className="note">Headings become sections, tables keep their columns and standard rows, photo pages become the photo annex.</span>
               </div>
             )}
             {manager && library.length > 0 && (
@@ -203,7 +221,7 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
 
   const save = async () => {
     setBusy(true);
-    const { error } = await supabaseBrowser()!.rpc('save_report_template', { p_id: row.id, p_project: row.project_id, p_name: name, p_definition: t });
+    const { error } = await supabaseBrowser()!.rpc('save_report_template', { p_id: row.id || null, p_project: row.project_id, p_name: name, p_definition: t });
     setBusy(false);
     if (error) return notify(error.message);
     notify('Template saved. New reports use it; reports already started keep their own copy.');
@@ -218,7 +236,7 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
 
   return (
     <section className="card">
-      <div className="card-head"><h2>Edit template</h2><button className="btn btn-sm" onClick={onClose}>Close</button></div>
+      <div className="card-head"><h2>{row.id ? 'Edit template' : 'New template (imported)'}</h2><button className="btn btn-sm" onClick={onClose}>Close</button></div>
       <div className="form-grid">
         <label className="field">Template name<input className="input" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="field">Report title<input className="input" maxLength={200} value={t.title} onChange={(e) => setT({ ...t, title: e.target.value })} /></label>
@@ -279,7 +297,7 @@ function TemplateEditor({ row, onClose }: { row: TemplateRow; onClose: () => voi
       <div className="form-actions">
         <button className="btn" onClick={() => setT({ ...t, sections: [...t.sections, { id: newSectionId(), title: 'New section', kind: 'text' }] })}>Add a section</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save template'}</button>
-        <button className="btn btn-danger" onClick={remove}>Remove template</button>
+        {row.id && <button className="btn btn-danger" onClick={remove}>Remove template</button>}
       </div>
     </section>
   );

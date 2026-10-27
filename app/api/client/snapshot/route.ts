@@ -21,7 +21,7 @@ export const GET = handle(async (req) => {
   const paths = (snap.files ?? []).map((f) => f.storage_path);
   const signed: Record<string, string> = {};
   if (paths.length) {
-    const { data: urls } = await svc.storage.from(FILES_BUCKET).createSignedUrls(paths, 600);
+    const { data: urls } = await svc.storage.from(FILES_BUCKET).createSignedUrls(paths, 3600);
     for (const u of urls ?? []) if (u.path && u.signedUrl) signed[u.path] = u.signedUrl;
   }
   const view = buildClientView(snap, todayIn(process.env.APP_TIMEZONE || 'Asia/Manila'), signed);

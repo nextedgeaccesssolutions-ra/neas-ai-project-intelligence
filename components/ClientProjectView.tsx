@@ -7,6 +7,7 @@ import type { ClientFile, ClientView } from '@/lib/cloud/clientView';
 import { fmtDate, fmtPct } from '@/lib/format';
 import EvidenceReportPanel from '@/components/EvidenceReportPanel';
 import ProjectReportPanel from '@/components/ProjectReportPanel';
+import { useRef } from 'react';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { COMPANY } from '@/lib/evidenceReport';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
@@ -14,6 +15,7 @@ import { gpsSourceLabel, mapUrl } from '@/lib/geo';
 import type { GpsSource, GpsStatus } from '@/lib/types';
 
 export default function ClientProjectView({ view, cachedAt, footer }: { view: ClientView; cachedAt?: string | null; footer?: ReactNode }) {
+  const fresh = useRef<Promise<unknown> | null>(null);
   return (
     <>
       {cachedAt && <div className="banner">Offline copy saved {new Date(cachedAt).toLocaleString()}. It may be out of date. Reconnect to see the latest approved information.</div>}
@@ -98,9 +100,13 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
       <ProjectReportPanel
         note="Contains only information NEAS has approved for you."
         load={async (id) => {
-          const url = view.files?.find((f) => f.id === id)?.url;
-          const r = url ? await fetch(url) : null;
-          return r?.ok ? r.blob() : null;
+          const get = async (u?: string | null) => { const r = u ? await fetch(u).catch(() => null) : null; return r?.ok ? r.blob() : null; };
+          const first = await get(view.files?.find((f) => f.id === id)?.url);
+          if (first) return first;
+          // photo links expire after an hour: fetch fresh ones once and try again
+          if (!fresh.current) fresh.current = fetch(`/api/client/snapshot?code=${encodeURIComponent(view.project.code)}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+          const v = await fresh.current as { files?: { id: string; url: string | null }[] } | null;
+          return get(v?.files?.find((f) => f.id === id)?.url);
         }}
         input={(asOf) => {
           const files = (view.files ?? []).filter((f) => f.mime.startsWith('image/') && f.url);

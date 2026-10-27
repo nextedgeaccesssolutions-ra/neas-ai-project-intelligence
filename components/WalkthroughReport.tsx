@@ -139,9 +139,9 @@ export default function WalkthroughReport({
       </div>
 
       <div className="wt-features">
-        <div><span className="wt-ic" aria-hidden>📷</span><span>Photo →<br />Report</span></div>
-        <div><span className="wt-ic" aria-hidden>📄</span><span>Exports to PDF,<br />Word &amp; Excel</span></div>
-        <div><span className="wt-ic" aria-hidden>🏢</span><span>Organized<br />by project</span></div>
+        <Link className="wt-tile" href="/site-evidence"><span className="wt-ic" aria-hidden>📷</span><span>Photo →<br />Report</span></Link>
+        <Link className="wt-tile" href="/reports#project-report"><span className="wt-ic" aria-hidden>📄</span><span>Exports to PDF,<br />Word &amp; Excel</span></Link>
+        <Link className="wt-tile" href="/projects"><span className="wt-ic" aria-hidden>🏢</span><span>Organized<br />by project</span></Link>
         <Link className="wt-cta" href="#new-report">Record progress <span aria-hidden>›</span></Link>
       </div>
     </section>

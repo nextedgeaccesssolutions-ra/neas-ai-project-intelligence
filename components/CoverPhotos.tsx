@@ -69,7 +69,7 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
             const ref = coverReference(e, i + 1, project.name);
             const sync = syncState?.(e.id);
             return (
-              <figure key={e.id} className="cover-tile" style={{ width: `calc(${COVER_TILE_CM}cm + 2px)` }}>
+              <figure key={e.id} className="cover-tile" style={{ width: cover.length === 1 ? 'min(100%, 560px)' : `min(100%, calc(${COVER_TILE_CM}cm + 120px))` }}>
                 <div className="cover-square"><PhotoThumb id={e.id} storagePath={e.storagePath} alt={ref.title} /></div>
                 <figcaption className="cover-ref">
                   <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}
