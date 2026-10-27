@@ -11,6 +11,7 @@ import { useCanManage } from '@/components/RoleGate';
 import ShareDialog from '@/components/ShareDialog';
 import { CLOUD } from '@/lib/cloud/env';
 import { isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { supabaseBrowser } from '@/lib/cloud/browser';
 import { notify } from '@/components/Dialogs';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, plannedPct, projectProgress, projectSpan, sCurve, todayLocal, totalWeight } from '@/lib/calc';
@@ -87,11 +88,17 @@ export default function Overview() {
               {(!CLOUD || isSuperAdmin()) && <> · <button className="linklike" onClick={() => setCvEdit(project.contractValue == null ? '' : String(project.contractValue))}>Edit</button></>}
             </div>
           </> : (
-            <form onSubmit={(e) => {
+            <form onSubmit={async (e) => {
               e.preventDefault();
               const v = cvEdit.trim() === '' ? null : Number(cvEdit.replace(/,/g, ''));
               if (v != null && (!Number.isFinite(v) || v < 0 || v > 1e12)) return notify('Enter a valid amount in PHP.');
-              upsertProject({ ...project, contractValue: v == null ? null : Math.round(v * 100) / 100 });
+              const value = v == null ? null : Math.round(v * 100) / 100;
+              // projects are not in the offline queue: in cloud mode save straight to the database (Super Admin only there)
+              if (CLOUD) {
+                const { error } = await supabaseBrowser()!.from('projects').update({ contract_value: value }).eq('id', project.id);
+                if (error) return notify(`Contract value not saved: ${error.message}`);
+              }
+              upsertProject({ ...project, contractValue: value });
               setCvEdit(null);
               notify('Contract value saved.');
             }} style={{ display: 'grid', gap: 6 }}>

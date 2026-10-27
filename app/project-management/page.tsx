@@ -116,7 +116,7 @@ export default function ProjectManagement() {
     if (draft.actualStart && draft.actualFinish && draft.actualFinish < draft.actualStart) return setError('Actual finish cannot be before the actual start.');
     if (!!draft.newStart !== !!draft.newFinish) return setError('Enter both New start and New finish, or clear both.');
     if (draft.newStart && draft.newFinish < draft.newStart) return setError('New finish cannot be before New start.');
-    if (draft.newStart && draft.newStart < draft.start) return setError('New start cannot be before the planned start.');
+    if (draft.newStart && draft.newStart < draft.start) return setError('New start cannot be before the planned start. Move the New start later, or press “Clear reschedule”.');
     if (draft.newStart && (draft.newStart !== (editing?.rescheduleStart ?? '') || draft.newFinish !== (editing?.rescheduleEnd ?? '')) && !draft.delayReason.trim())
       return setError('Give a reason for the reschedule (e.g. weather, access, client instruction).');
     if (editing && (draft.start !== editing.start || draft.end !== editing.end) && !draft.delayReason.trim())
