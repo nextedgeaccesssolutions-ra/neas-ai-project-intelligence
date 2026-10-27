@@ -280,14 +280,17 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
         {/* phones: the field pages one thumb-tap away; only pages this account may open are shown */}
         <nav className="bottom-bar" aria-label="Quick navigation">
           {[...nav.filter((n) => ['/', '/field-reports', '/site-evidence', '/reports'].includes(n.href)),
-            ...(CLOUD && canView('offline_queue', cloud.profile) ? [{ href: '/offline-queue', label: 'Sync', icon: 'sync' }] : [])].map((n) => {
-            const on = n.href === '/' ? pathname === '/' : pathname.startsWith(n.href);
-            return (
+            ...(CLOUD && canView('offline_queue', cloud.profile) ? [{ href: '/offline-queue', label: 'Sync', icon: 'sync' }] : [])].flatMap((n, i, all) => {
+            // the round "+" in the middle starts a new field report
+            const plus = nav.some((x) => x.href === '/field-reports') && i === Math.floor(all.length / 2)
+              ? [<Link key="new-report" href="/field-reports/new" className="bottom-plus" aria-label="New field report" aria-current={pathname === '/field-reports/new' ? 'page' : undefined}><span aria-hidden="true">+</span></Link>] : [];
+            const on = n.href === '/' ? pathname === '/' : pathname.startsWith(n.href) && pathname !== '/field-reports/new';
+            return [...plus, (
               <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined}>
                 <Icon name={n.icon} />
                 <span>{n.href === '/' ? 'Board' : n.href === '/reports' ? 'Reports' : n.href === '/field-reports' ? 'Field' : n.href === '/site-evidence' ? 'Photos' : n.label}</span>
               </Link>
-            );
+            )];
           })}
         </nav>
         <DialogHost />

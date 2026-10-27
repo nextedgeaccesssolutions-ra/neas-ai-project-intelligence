@@ -524,3 +524,45 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 /* activity list with a selection box in front of each event */
 .feed.feed-pick li { display: grid; grid-template-columns: 22px 170px 1fr; align-items: center; gap: 8px; }
 @media (max-width: 600px) { .feed.feed-pick li { grid-template-columns: 22px 1fr; } .feed.feed-pick li > span { grid-column: 2; } }
+
+/* New field report: steps, chips, photo grid, signature (phone first) */
+.fr-wizard { max-width: 760px; margin: 0 auto; }
+.fr-steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 10px; margin: 0 0 12px; background: var(--navy); border-radius: 12px; }
+.fr-steps button { width: 100%; background: none; border: 0; color: #9fb3c1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.fr-steps button > span { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #23465a; color: #fff; }
+.fr-steps li.on button { color: var(--gold); }
+.fr-steps li.on button > span { background: var(--gold); color: var(--navy); }
+.fr-steps li.done button > span { background: #2f6b4f; }
+.fr-card { display: grid; gap: 12px; }
+.fr-card h2, .fr-card h3 { margin: 4px 0 0; }
+.fr-chips, .fr-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.fr-chip { min-height: 48px; border: 1px solid var(--line); background: var(--card, #fff); border-radius: 10px; font-weight: 700; cursor: pointer; color: inherit; }
+.fr-chip.on { background: var(--gold); border-color: var(--gold); color: var(--navy); }
+.fr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.fr-photo { position: relative; margin: 0; }
+.fr-photo img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 10px; display: block; }
+.fr-photo figcaption { display: flex; flex-direction: column; font-size: 12.5px; padding-top: 4px; }
+.fr-x { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--navy); color: #fff; cursor: pointer; }
+.fr-drop { display: flex; gap: 14px; align-items: center; border: 2px dashed var(--line); border-radius: 12px; padding: 18px; cursor: pointer; }
+.fr-drop > span:first-child { font-size: 28px; }
+.fr-checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.fr-checks li, .fr-mat { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; }
+.fr-checks input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--gold); }
+.fr-mat { grid-template-columns: 1fr 70px 80px auto; }
+.fr-sum { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; margin: 0; }
+.fr-sum dt { color: var(--muted); }
+.fr-sum dd { margin: 0; font-weight: 600; }
+.fr-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.fr-strip img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
+.fr-more { display: grid; place-items: center; background: var(--navy); color: #fff; border-radius: 8px; font-weight: 800; }
+.fr-sign { display: flex; gap: 8px; align-items: flex-start; }
+.fr-sign[hidden] { display: none; }
+.fr-sign canvas { flex: 1; width: 100%; height: 150px; border: 1px solid var(--line); border-radius: 10px; background: #fff; touch-action: none; }
+.fr-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr 2fr; gap: 10px; padding: 12px 0; background: var(--bg); }
+.fr-actions .btn { min-height: 50px; }
+.fr-submit { background: #1f7a4d; border-color: #1f7a4d; }
+.bottom-plus { display: none; }
+@media (max-width: 760px) {
+  .bottom-bar .bottom-plus { display: grid; flex: 0 0 56px; place-items: center; width: 56px; height: 56px; margin-top: -22px; border-radius: 50%; background: var(--gold); color: var(--navy); font-size: 30px; font-weight: 800; box-shadow: 0 4px 12px rgba(202, 147, 50, .4); }
+  .fr-actions { bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
+}
