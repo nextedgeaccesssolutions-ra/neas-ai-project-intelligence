@@ -6,7 +6,7 @@ import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { pullAll } from '@/lib/cloud/cloudSync';
+import { canManage, pullAll } from '@/lib/cloud/cloudSync';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
@@ -61,12 +61,19 @@ export default function FieldReports() {
     if (!target.length) return setMsg(share ? 'Those reports are already shared with the client.' : 'Those reports are already hidden from the client.');
     if (!(await askConfirm(`${share ? 'Share' : 'Hide'} ${target.length} approved report(s) ${share ? 'with' : 'from'} the client? Their photos follow.`, { danger: false }))) return;
     const sb = supabaseBrowser()!;
-    const ids = target.map((r) => r.id);
-    const { error: err } = await sb.from('project_reports').update({ client_visible: share }).in('id', ids);
-    if (err) return setError(`Not changed: ${err.message}. This needs an internet connection.`);
-    await sb.from('report_attachments').update({ client_visible: share }).in('report_id', ids);
+    let ok = 0, photoFail = 0;
+    const failed: string[] = [];
+    // one report at a time, only on projects this person manages, so every result is exact
+    for (const r of target) {
+      if (!canManage(r.projectId)) { failed.push('not a project you manage'); continue; }
+      const { data, error: err } = await sb.from('project_reports').update({ client_visible: share }).eq('id', r.id).select('id');
+      if (err || !data?.length) { failed.push(err?.message ?? 'not changed'); continue; }
+      ok++;
+      const { error: pe } = await sb.from('report_attachments').update({ client_visible: share }).eq('report_id', r.id);
+      if (pe) photoFail++;
+    }
     await pullAll().catch(() => undefined);
-    setMsg(`${ids.length} report(s) ${share ? 'shared with' : 'hidden from'} the client.`);
+    setMsg(`${ok} report(s) ${share ? 'shared with' : 'hidden from'} the client.${failed.length ? ` ${failed.length} not changed (${[...new Set(failed)].join('; ')}).` : ''}${photoFail ? ` The photos of ${photoFail} report(s) did not follow; try again.` : ''}`);
   };
   const approveSelected = async () => {
     const ids = reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').map((r) => r.id);
