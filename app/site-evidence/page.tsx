@@ -56,6 +56,8 @@ export default function SiteEvidence() {
   const reviewer = useCanManage();
   const [activityId, setActivityId] = useState('');
   const [kind, setKind] = useState<EvidenceKind>('Before');
+  // capture form in Cover photo mode: saved photos go straight onto the report cover
+  const [coverMode, setCoverMode] = useState(false);
   const [caption, setCaption] = useState('');
   const [workArea, setWorkArea] = useState('');
   const [coverCategory, setCoverCategory] = useState<CoverCategory>('main_building');
@@ -148,9 +150,12 @@ export default function SiteEvidence() {
   const partnerOf = (e: Evidence) => (e.pairId ? evidence.find((x) => x.pairId === e.pairId && x.id !== e.id) : undefined);
 
   /** Compress and store photos with capture time, GPS (when allowed) and work-area location. */
-  const addPhotos = async (files: File[], opts?: { cover?: boolean }) => {
-    let coverNext = evidence.filter((x) => x.isCover).length;
-    if (!activityId) return setError('Choose an activity first.');
+  const addPhotos = async (files: File[], opts?: { cover?: boolean; caption?: string }) => {
+    const asCover = !!opts?.cover || coverMode;
+    // continue after the highest existing cover position, so a removed photo never leaves a duplicate number
+    let coverNext = Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0));
+    const actId = activityId || (asCover ? activities[0]?.id ?? '' : '');
+    if (!actId) return setError('Choose an activity first.');
     if (!files.length) return setError('Choose or capture a photo.');
     let manual = null;
     if (manualLoc) {
@@ -177,10 +182,10 @@ export default function SiteEvidence() {
         const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
         addEvidence({
-          id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
+          id, projectId: pid, activityId: actId, kind, caption: (opts?.caption || caption).trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
           gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), coverCategory: kind === 'Reference' ? coverCategory : null, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
           // a cover upload is a building / site reference photo placed straight on the report cover
-          ...(opts?.cover ? { kind: 'Reference' as const, coverCategory: coverCategory, isCover: true, coverOrder: ++coverNext, ref: photoRef('Reference', takenAt, id) } : {}),
+          ...(asCover ? { kind: 'Reference' as const, coverCategory: coverCategory, isCover: true, coverOrder: ++coverNext, ref: photoRef('Reference', takenAt, id) } : {}),
         });
         ok++;
       } catch (e) {
@@ -423,8 +428,9 @@ export default function SiteEvidence() {
                 </select>
               </label>
               <label className="field">Photo type
-                <select className="input" value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
+                <select className="input" value={coverMode ? '__cover' : kind} onChange={(e) => { const v = e.target.value; setCoverMode(v === '__cover'); setKind(v === '__cover' ? 'Reference' : v as EvidenceKind); }}>
                   {KINDS.map((k) => <option key={k} value={k}>{k === 'Reference' ? 'Reference (building / site, for the report cover)' : k}</option>)}
+                  {reviewer && <option value="__cover">Cover photo (goes straight on the report cover)</option>}
                 </select>
               </label>
               {kind === 'Reference' && (
@@ -504,7 +510,7 @@ export default function SiteEvidence() {
           updateEvidence={updateEvidence}
           syncState={(id) => (!CLOUD ? 'Saved on this device' : pendingIds.has(id) ? 'Waiting to sync' : 'Synced')}
           onAdd={() => { setKind('Reference'); document.getElementById('capture-card')?.scrollIntoView({ behavior: 'smooth' }); }}
-          onUpload={(files) => addPhotos(files, { cover: true })}
+          onUpload={(files, cap) => addPhotos(files, { cover: true, caption: cap })}
         />
       )}
 

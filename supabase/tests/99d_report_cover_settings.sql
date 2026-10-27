@@ -9,4 +9,9 @@ select neas.save_report_cover_values('10000000-0000-0000-0000-000000000098', '{"
 select neas.save_report_cover_layout('10000000-0000-0000-0000-000000000098', '{"title": "Monthly Progress Report", "rows": [{"key": "Site", "show": false}]}');
 select test.check('cover: a Super Admin saves values and layout', (select cover_values ->> 'Client' = 'Jangho Curtainwall Phils.' and layout ->> 'title' = 'Monthly Progress Report' from neas.report_cover_settings where project_id = '10000000-0000-0000-0000-000000000098'));
 select test.expect_error('cover: the table cannot be written directly', $$insert into neas.report_cover_settings (project_id) values ('10000000-0000-0000-0000-000000000099')$$);
+select test.expect_error('cover: a malformed layout is refused', $$select neas.save_report_cover_layout('10000000-0000-0000-0000-000000000098', '{"rows": {}}')$$);
+select test.expect_error('cover: the generated reference cannot be given other text', $$select neas.save_report_cover_values('10000000-0000-0000-0000-000000000098', '{"Report reference": "FAKE"}')$$);
+select neas.save_report_cover_values('10000000-0000-0000-0000-000000000098', '{"Site": "Century Spire, Makati"}');
+select neas.save_report_cover_values('10000000-0000-0000-0000-000000000098', '{"Client": ""}');
+select test.check('cover: saving merges lines and an empty line clears it', (select cover_values = '{"Site": "Century Spire, Makati"}'::jsonb from neas.report_cover_settings where project_id = '10000000-0000-0000-0000-000000000098'));
 reset role;

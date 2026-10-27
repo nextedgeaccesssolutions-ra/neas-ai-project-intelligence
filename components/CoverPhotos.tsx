@@ -12,12 +12,13 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
   updateEvidence: (id: string, patch: Partial<Evidence>) => void;
   onAdd: () => void;
   /** upload photos straight onto the cover */
-  onUpload?: (files: File[]) => void | Promise<void>;
+  onUpload?: (files: File[], caption: string) => void | Promise<void>;
   /** per-photo sync label, e.g. "Waiting to sync" */
   syncState?: (id: string) => string | null;
 }) {
   const [loc, setLoc] = useState<LocationInfo | null>(null);
   const [pick, setPick] = useState('');
+  const [upCaption, setUpCaption] = useState('');
   const cover = coverPhotos(evidence);
   const candidates = evidence.filter((e) => !e.isCover).sort((a, b) => Number(b.kind === 'Reference') - Number(a.kind === 'Reference') || b.takenAt.localeCompare(a.takenAt));
 
@@ -44,9 +45,10 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
         {onUpload && canManage ? (
           <label className="btn btn-sm btn-primary" style={{ cursor: 'pointer' }}>
             Upload cover photo(s)
-            <input type="file" accept="image/*" multiple hidden onChange={(ev) => { const f = Array.from(ev.target.files ?? []); ev.target.value = ''; if (f.length) void onUpload(f); }} />
+            <input type="file" accept="image/*" multiple hidden onChange={(ev) => { const f = Array.from(ev.target.files ?? []); ev.target.value = ''; if (f.length) { void onUpload(f, upCaption.trim()); setUpCaption(''); } }} />
           </label>
         ) : null}
+        {onUpload && canManage && <input className="input" style={{ maxWidth: 280 }} maxLength={200} value={upCaption} onChange={(e) => setUpCaption(e.target.value)} placeholder="Description (e.g. Century Spire, east facade)" aria-label="Cover photo description" />}
         <button className="btn btn-sm" onClick={onAdd}>Upload with full details</button>
         {canManage && candidates.length > 0 && (
           <>

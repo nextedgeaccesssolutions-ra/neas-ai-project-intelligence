@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCoverSettings } from '../lib/projectReport';
+import { applyCoverSettings, normaliseCoverSettings } from '../lib/projectReport';
 
 const base: [string, string][] = [['Project title', 'Window cleaning'], ['Client', 'JANGHO'], ['Site', 'Century Spire'], ['Report reference', 'R-1'], ['Generated', 'today']];
 
@@ -20,5 +20,9 @@ describe('cover page settings', () => {
   });
   it('drops an extra line that has no value', () => {
     expect(applyCoverSettings(base, { layout: { extra: [{ key: 'custom:1', label: 'Work area' }] } }).length).toBe(base.length);
+  });
+  it('ignores malformed settings instead of failing the report', () => {
+    const bad = { values: { Client: 5 }, layout: { rows: {}, extra: 'x', title: 7 } } as unknown;
+    expect(applyCoverSettings(base, normaliseCoverSettings(bad))).toEqual(base);
   });
 });

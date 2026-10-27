@@ -35,6 +35,13 @@ type Draft = {
   newFinish: string;
 };
 
+// common units for approved quantities; any other unit can still be typed
+const QTY_UNITS: [string, string][] = [
+  ['m²', 'square metres'], ['m', 'metres'], ['lm', 'linear metres'], ['m³', 'cubic metres'], ['ft²', 'square feet'], ['ft', 'feet'],
+  ['pcs', 'pieces'], ['nos', 'numbers'], ['units', 'units'], ['sets', 'sets'], ['lot', 'lot'], ['panels', 'panels'], ['windows', 'windows'],
+  ['drops', 'rope access drops'], ['floors', 'floors'], ['kg', 'kilograms'], ['t', 'tonnes'], ['L', 'litres'], ['days', 'man-days'], ['hrs', 'hours'], ['%', 'percent'],
+];
+
 const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '', requiredPhotos: '', newStart: '', newFinish: '' });
 
 const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
@@ -228,7 +235,8 @@ export default function ProjectManagement() {
               Approved quantity
               <div className="pct-row">
                 <input id="act-qty" className="input" type="number" min="0" step="any" value={draft.qtyTotal} onChange={(e) => setDraft({ ...draft, qtyTotal: e.target.value })} placeholder="optional" />
-                <input id="act-qty-unit" className="input" style={{ maxWidth: 90 }} value={draft.qtyUnit} onChange={(e) => setDraft({ ...draft, qtyUnit: e.target.value })} placeholder="m²" aria-label="Quantity unit" />
+                <input id="act-qty-unit" className="input" style={{ maxWidth: 110 }} list="qty-units" value={draft.qtyUnit} onChange={(e) => setDraft({ ...draft, qtyUnit: e.target.value })} placeholder="m²" aria-label="Quantity unit" />
+                <datalist id="qty-units">{QTY_UNITS.map((u) => <option key={u[0]} value={u[0]}>{u[1]}</option>)}</datalist>
               </div>
             </label>
             <label className="field">

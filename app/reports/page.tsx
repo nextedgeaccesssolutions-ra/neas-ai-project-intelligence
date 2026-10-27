@@ -15,7 +15,7 @@ import { supabaseBrowser } from '@/lib/cloud/browser';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { gpsLabel, gpsSourceLabel, mapUrl } from '@/lib/geo';
 import { fmtDate } from '@/lib/format';
-import { buildProjectReport, type CoverSettings, type ProjectReport, type ProjectReportInput } from '@/lib/projectReport';
+import { buildProjectReport, normaliseCoverSettings, type CoverSettings, type ProjectReport, type ProjectReportInput } from '@/lib/projectReport';
 import { todayLocal } from '@/lib/calc';
 
 type Export = { id: string; report_ref: string; generated_at: string; actual_pct: number | null; planned_pct: number | null; schedule_status: string; approval_status: string; sent_for_review_at: string | null };
@@ -41,7 +41,7 @@ export default function Reports() {
     sb.from('project_report_exports').select('id, report_ref, generated_at, actual_pct, planned_pct, schedule_status, approval_status, sent_for_review_at').eq('project_id', pid).order('generated_at', { ascending: false }).limit(200)
       .then(({ data }) => setHistory((data as Export[]) ?? []));
     sb.from('report_cover_settings').select('cover_values, layout').eq('project_id', pid).maybeSingle()
-      .then(({ data }) => setCoverSettings(data ? { values: data.cover_values as Record<string, string>, layout: data.layout as CoverSettings['layout'] } : null));
+      .then(({ data }) => setCoverSettings(data ? normaliseCoverSettings({ values: data.cover_values, layout: data.layout }) : null));
     sb.from('client_report_reviews').select('export_id, reviewer_name, decision, comment, created_at').eq('project_id', pid).order('created_at', { ascending: false }).limit(500)
       .then(({ data }) => setReviews((data as Review[]) ?? []));
     sb.from('project_memberships').select('role, profiles(full_name, email)').eq('project_id', pid).eq('role', 'project_manager').limit(1)

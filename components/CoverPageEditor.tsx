@@ -4,7 +4,7 @@
 // report title, line names, which lines show, their order, and extra lines.
 import { useEffect, useState } from 'react';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { LOCKED_COVER_LINES, type CoverSettings } from '@/lib/projectReport';
+import { ADMIN_COVER_LINES, LOCKED_COVER_LINES, type CoverSettings } from '@/lib/projectReport';
 import { notify } from '@/components/Dialogs';
 
 type Row = { key: string; label: string; show: boolean };
@@ -48,8 +48,13 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
   const save = async () => {
     setBusy(true);
     const sb = supabaseBrowser()!;
-    const clean = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]).filter(([k, v]) => v && !LOCKED_COVER_LINES.includes(k)));
-    const { error } = await sb.rpc('save_report_cover_values', { p_project: projectId, p_values: clean });
+    // send only the lines this person changed ('' clears a line); the server merges, so two editors never erase each other
+    const before = settings?.values ?? {};
+    const all = { ...Object.fromEntries(Object.keys(before).map((k) => [k, ''])), ...values };
+    const changed = Object.fromEntries(Object.entries(all)
+      .map(([k, v]) => [k, (v ?? '').trim()] as [string, string])
+      .filter(([k, v]) => !LOCKED_COVER_LINES.includes(k) && (isAdmin || !ADMIN_COVER_LINES.includes(k)) && v !== (before[k] ?? '')));
+    const { error } = Object.keys(changed).length ? await sb.rpc('save_report_cover_values', { p_project: projectId, p_values: changed }) : { error: null };
     let layoutErr = null;
     if (!error && isAdmin) {
       ({ error: layoutErr } = await sb.rpc('save_report_cover_layout', {
@@ -58,7 +63,8 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
       }));
     }
     setBusy(false);
-    if (error || layoutErr) return notify(`Cover page not saved: ${(error ?? layoutErr)!.message}`);
+    if (error) return notify(`Cover page not saved: ${error.message}`);
+    if (layoutErr) { onSaved(); return notify(`Line text was saved, but the layout was not: ${layoutErr.message}`); }
     notify('Cover page saved. It applies to reports generated from now on.');
     onSaved();
   };
@@ -82,7 +88,7 @@ export default function CoverPageEditor({ projectId, defaults, settings, isAdmin
                   return (
                     <tr key={r.key}>
                       <td>{custom && isAdmin ? <input className="input" value={nameOf(r.key)} maxLength={60} onChange={(e) => setExtra((x) => x.map((y) => (y.key === r.key ? { ...y, label: e.target.value } : y)))} aria-label="Extra line name" /> : nameOf(r.key)}</td>
-                      <td>{locked ? <span className="note">Filled in when the report is generated</span> : (
+                      <td>{locked || (!isAdmin && ADMIN_COVER_LINES.includes(r.key)) ? <span className="note">{locked ? 'Filled in when the report is generated' : `${values[r.key] || def.get(r.key) || ''} (only a Super Admin can change this)`}</span> : (
                         <input className="input" maxLength={300} value={values[r.key] ?? ''} placeholder={def.get(r.key) ?? 'Text for this line'} onChange={(e) => setValues((v) => ({ ...v, [r.key]: e.target.value }))} aria-label={`${nameOf(r.key)} text`} />
                       )}</td>
                       {isAdmin && <>

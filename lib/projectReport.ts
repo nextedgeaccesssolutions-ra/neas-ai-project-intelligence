@@ -114,11 +114,28 @@ export interface CoverSettings {
 }
 /** Lines the generator fills in itself; they can be hidden or renamed but never given other text. */
 export const LOCKED_COVER_LINES = ['Report reference', 'Generated'];
+/** lines only a Super Admin may give other text (who prepared it, what the report is called) */
+export const ADMIN_COVER_LINES = ['Prepared by', 'Project title'];
+
+/** Accept only the expected shape; anything malformed is ignored rather than breaking the report. */
+export function normaliseCoverSettings(raw: unknown): CoverSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const obj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
+  const values = Object.fromEntries(Object.entries(obj(o.values)).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+  const l = obj(o.layout);
+  const items = (v: unknown) => (Array.isArray(v) ? v.map(obj).filter((r) => typeof r.key === 'string') : []);
+  const rows = items(l.rows).map((r) => ({ key: r.key as string, label: str(r.label), show: r.show === false ? false : undefined }));
+  const extra = items(l.extra).filter((x) => (x.key as string).startsWith('custom:')).map((x) => ({ key: x.key as string, label: str(x.label) ?? 'Line' }));
+  return { values, layout: { title: str(l.title), rows, extra } };
+}
 /** lines the PDF places in the heading; they keep their names */
 const FIXED_LABELS = ['Project title', 'Report reference'];
 
 /** Apply cover edits: replace values, rename, hide, reorder and add extra lines. */
 export function applyCoverSettings(fields: [string, string][], s: CoverSettings | null | undefined): [string, string][] {
+  s = normaliseCoverSettings(s);
   if (!s) return fields;
   const values = s.values ?? {};
   const base = new Map(fields);
@@ -222,7 +239,7 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   ];
 
   return {
-    title: clean(input.coverSettings?.layout?.title ?? '') || 'Project Report', reference,
+    title: clean(normaliseCoverSettings(input.coverSettings)?.layout?.title ?? '') || 'Project Report', reference,
     fileName: `NEAS_${safeName(p.code)}_${safeName(p.name)}_Project-Report_${dateStamp(input.generatedAt, tz)}`,
     project: { ...p, name: coverFields.find(([k]) => k === 'Project title')?.[1] ?? p.name }, audience: input.audience, asOf: day, fields: coverFields, cover, overall, series, rows,
     accomplishments, outstanding, delays, observations, limitations, summary, approval, evidence: input.evidence,

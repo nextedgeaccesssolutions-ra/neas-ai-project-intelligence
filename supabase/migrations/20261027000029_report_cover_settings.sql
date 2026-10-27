@@ -26,8 +26,16 @@ begin
   if exists (select 1 from jsonb_each(p_values) e where jsonb_typeof(e.value) <> 'string' or length(e.value #>> '{}') > 300 or length(e.key) > 80) then
     raise exception 'Each cover line is text of at most 300 characters' using errcode = '22023';
   end if;
-  insert into neas.report_cover_settings (project_id, cover_values, updated_by) values (p_project, p_values, auth.uid())
-  on conflict (project_id) do update set cover_values = excluded.cover_values, updated_by = auth.uid(), updated_at = now();
+  if p_values ?| array['Report reference', 'Generated'] then raise exception 'That line is filled in by the report itself' using errcode = '22023'; end if;
+  if not neas.is_super_admin() and p_values ?| array['Prepared by', 'Project title'] then
+    raise exception 'Only a Super Admin can change Prepared by or the project title on the cover' using errcode = '42501';
+  end if;
+  -- merge: only the lines sent change; an empty string clears a line
+  insert into neas.report_cover_settings (project_id, cover_values, updated_by)
+    values (p_project, (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from jsonb_each(p_values) where value #>> '{}' <> ''), auth.uid())
+  on conflict (project_id) do update set
+    cover_values = (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from jsonb_each(neas.report_cover_settings.cover_values || p_values) where value #>> '{}' <> ''),
+    updated_by = auth.uid(), updated_at = now();
   insert into neas.audit_logs (actor_id, action, project_id, target_type, target_id, details)
     values (auth.uid(), 'report:cover_values_saved', p_project, 'report_cover_settings', p_project::text, jsonb_build_object('lines', (select count(*) from jsonb_object_keys(p_values))));
 end $$;
@@ -37,7 +45,12 @@ returns void language plpgsql security definer set search_path = neas, extension
 begin
   if not neas.is_super_admin() then raise exception 'Only a Super Admin can change the cover layout' using errcode = '42501'; end if;
   if not exists (select 1 from neas.projects where id = p_project) then raise exception 'Project not found' using errcode = 'P0002'; end if;
-  if jsonb_typeof(p_layout) <> 'object' or length(p_layout::text) > 20000 then raise exception 'Invalid cover layout' using errcode = '22023'; end if;
+  if jsonb_typeof(p_layout) <> 'object' or length(p_layout::text) > 20000
+     or (p_layout ? 'rows' and jsonb_typeof(p_layout -> 'rows') <> 'array')
+     or (p_layout ? 'extra' and jsonb_typeof(p_layout -> 'extra') <> 'array')
+     or (p_layout ? 'title' and jsonb_typeof(p_layout -> 'title') <> 'string') then
+    raise exception 'Invalid cover layout' using errcode = '22023';
+  end if;
   insert into neas.report_cover_settings (project_id, layout, updated_by) values (p_project, p_layout, auth.uid())
   on conflict (project_id) do update set layout = excluded.layout, updated_by = auth.uid(), updated_at = now();
   insert into neas.audit_logs (actor_id, action, project_id, target_type, target_id)
