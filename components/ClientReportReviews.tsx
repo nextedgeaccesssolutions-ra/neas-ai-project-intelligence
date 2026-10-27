@@ -16,7 +16,7 @@ export default function ClientReportReviews({ code }: { code: string }) {
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/client/reports?code=${encodeURIComponent(code)}`, { cache: 'no-store' }).catch(() => null);
-    if (!r || !r.ok) { setRows(null); return; }
+    if (!r || !r.ok) { setRows(null); setError(r?.status === 401 ? 'Your session has ended. Sign in again to see reports for your review.' : null); return; }
     setRows(await r.json());
   }, [code]);
   useEffect(() => { void load(); }, [load]);
@@ -36,7 +36,8 @@ export default function ClientReportReviews({ code }: { code: string }) {
     await load();
   };
 
-  if (!rows || !rows.length) return null;
+  if (!rows) return error ? <section className="card"><p className="bad" role="alert">{error}</p></section> : null;
+  if (!rows.length) return null;
   return (
     <section className="card">
       <div className="card-head"><h2>Reports for your review</h2><span className="note">Open the report, then approve it or request changes</span></div>
@@ -51,7 +52,7 @@ export default function ClientReportReviews({ code }: { code: string }) {
               </div>
               <div className="form-actions">
                 {rep.url ? <a className="btn btn-sm" href={rep.url} target="_blank" rel="noreferrer">Open report (PDF)</a> : <span className="note">The file is not available right now.</span>}
-                {rep.status === 'pending' && open !== rep.id && <button className="btn btn-sm btn-primary" onClick={() => { setOpen(rep.id); setError(null); }}>Review</button>}
+                {rep.status === 'pending' && open !== rep.id && <button className="btn btn-sm btn-primary" onClick={() => { setOpen(rep.id); setError(null); setComment(''); }}>Review</button>}
               </div>
               {rep.review && <p className="note">{rep.review.decision === 'approved' ? 'Approved' : 'Changes requested'} by {rep.review.name} on {new Date(rep.review.at).toLocaleString()}{rep.review.comment ? `: “${rep.review.comment}”` : ''}</p>}
               {open === rep.id && (

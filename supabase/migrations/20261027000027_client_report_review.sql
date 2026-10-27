@@ -11,6 +11,13 @@ alter table neas.project_report_exports drop constraint if exists project_report
 alter table neas.project_report_exports add constraint project_report_exports_approval_status_check
   check (approval_status in ('not_recorded', 'pending', 'approved', 'changes_requested'));
 
+-- a newly logged report always starts unreviewed: review state changes only through the functions below
+drop policy if exists project_report_exports_insert on neas.project_report_exports;
+create policy project_report_exports_insert on neas.project_report_exports for insert to authenticated
+  with check ((neas.is_super_admin() or neas.is_member(project_id)) and generated_by = auth.uid()
+              and approval_status = 'not_recorded' and review_file_path is null and review_sha256 is null
+              and sent_for_review_at is null and sent_for_review_by is null);
+
 create table if not exists neas.client_report_reviews (
   id uuid primary key default gen_random_uuid(),
   export_id uuid not null references neas.project_report_exports (id) on delete cascade,
@@ -41,10 +48,11 @@ begin
   if not (neas.is_super_admin() or neas.is_manager(e.project_id)) then
     raise exception 'Only a project manager or Super Admin can send a report to the client' using errcode = '42501';
   end if;
-  if p_path is distinct from ('client-reviews/' || e.project_id::text || '/' || e.id::text || '.pdf') then
+  if p_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'Invalid file fingerprint' using errcode = '22023'; end if;
+  -- content-addressed: the path names the file's own fingerprint, so a stored review file is never replaced
+  if p_path is distinct from ('client-reviews/' || e.project_id::text || '/' || e.id::text || '/' || p_sha256 || '.pdf') then
     raise exception 'Invalid review file' using errcode = '22023';
   end if;
-  if p_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'Invalid file fingerprint' using errcode = '22023'; end if;
   if e.approval_status = 'approved' then
     raise exception 'This report is already approved by the client. Generate a new report for further changes.' using errcode = '22023';
   end if;
@@ -86,7 +94,7 @@ begin
                  from neas.client_report_reviews r where r.export_id = e.id order by r.created_at desc limit 1))
       order by e.sent_for_review_at desc)
     from neas.project_report_exports e
-    where e.project_id = s.project_id and e.review_file_path is not null), '[]'::jsonb);
+    where e.project_id = s.project_id and e.review_file_path like 'client-reviews/' || s.project_id::text || '/%'), '[]'::jsonb);
 end $$;
 
 -- client: approve or request changes on the exact file they were shown

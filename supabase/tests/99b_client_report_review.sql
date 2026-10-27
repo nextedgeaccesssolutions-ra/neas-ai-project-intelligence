@@ -8,11 +8,11 @@ insert into neas.project_report_exports (id, project_id, report_ref) values
 set role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000d1', false);
 select test.expect_error('review: staff who are not managers cannot send a report to the client',
-  $$select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098.pdf', repeat('a', 64))$$);
+  $$select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098/' || repeat('a', 64) || '.pdf', repeat('a', 64))$$);
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
 select test.expect_error('review: the file path must be the fixed review path',
   $$select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/other/x.pdf', repeat('a', 64))$$);
-select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098.pdf', repeat('a', 64));
+select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098/' || repeat('a', 64) || '.pdf', repeat('a', 64));
 select neas.admin_create_client_login('10000000-0000-0000-0000-000000000098', 'Client reviewer', 'review.client', '582913');
 reset role;
 select test.check('review: sending marks the report pending', (select approval_status = 'pending' and review_sha256 = repeat('a', 64) from neas.project_report_exports where id = '20000000-0000-0000-0000-000000000098'));
@@ -39,6 +39,11 @@ select test.check('review: decision and reviewer are recorded', (select approval
 set role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
 select test.expect_error('review: an approved report cannot be re-sent',
-  $$select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098.pdf', repeat('c', 64))$$);
+  $$select neas.send_report_for_review('20000000-0000-0000-0000-000000000098', 'client-reviews/10000000-0000-0000-0000-000000000098/20000000-0000-0000-0000-000000000098/' || repeat('c', 64) || '.pdf', repeat('c', 64))$$);
 reset role;
 drop table rv_tok;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select test.expect_error('review: staff cannot log a report that is already approved',
+  $$insert into neas.project_report_exports (project_id, report_ref, approval_status, generated_by) values ('10000000-0000-0000-0000-000000000098', 'FAKE-APPROVED-1', 'approved', auth.uid())$$);
+reset role;

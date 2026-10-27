@@ -128,7 +128,7 @@ export default function Reports() {
                     <td>{(() => {
                       const st = REVIEW[h.approval_status];
                       if (!st) return <span className="note">Not sent</span>;
-                      const rv = reviews.find((x) => x.export_id === h.id);
+                      const rv = reviews.find((x) => x.export_id === h.id && (!h.sent_for_review_at || x.created_at >= h.sent_for_review_at));
                       return <><span className={`pill ${st[1]}`}>{st[0]}</span>{rv && <div className="note">{rv.reviewer_name}, {fmtDate(rv.created_at)}{rv.comment ? ` — “${rv.comment}”` : ''}</div>}</>;
                     })()}</td></tr>
                 ), 7)}
