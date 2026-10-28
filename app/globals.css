@@ -680,3 +680,5 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .fr-history { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
 .fr-history li { display: grid; }
 .map-frame { z-index: 0; position: relative; }
+.pdf-pages { display: grid; gap: 10px; max-height: 80vh; overflow-y: auto; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: #e9edf1; }
+.pdf-pages img { width: 100%; height: auto; display: block; background: #fff; box-shadow: 0 1px 4px rgba(7,29,41,.2); }

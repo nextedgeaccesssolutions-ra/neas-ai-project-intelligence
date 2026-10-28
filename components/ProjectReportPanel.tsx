@@ -1,5 +1,6 @@
 'use client';
 // Generate the project report PDF: preview it in the page or download it.
+import PdfPages, { inlinePdfWorks } from './PdfPages';
 import { useEffect, useState } from 'react';
 import { buildProjectReport, type ProjectReport, type ProjectReportInput } from '@/lib/projectReport';
 import type { LoadImage } from '@/lib/projectReportPdf';
@@ -89,7 +90,9 @@ export default function ProjectReportPanel({ input, load, onGenerated, onSend, n
             {onSend && <button className="btn btn-sm btn-primary" onClick={doSend} disabled={!!busy} title="The client sees exactly this file and can approve it or request changes">Send this report to the client for review</button>}
             <button className="btn btn-sm" onClick={() => setPreview(null)}>Close preview</button>
           </div>
-          <iframe title="Project report preview" src={preview.url} style={{ width: '100%', height: '80vh', border: '1px solid var(--line)', borderRadius: 10 }} />
+          {inlinePdfWorks()
+            ? <iframe title="Project report preview" src={preview.url} style={{ width: '100%', height: '80vh', border: '1px solid var(--line)', borderRadius: 10 }} />
+            : <PdfPages blob={preview.blob} title="Project report preview" />}
         </div>
       )}
     </section>
