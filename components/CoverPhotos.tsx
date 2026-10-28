@@ -1,7 +1,7 @@
 'use client';
 // Project cover / building reference photos: shown in exact 9.21 cm tiles, the same size the
 // project report prints. Project managers and Super Admins choose, order and set the primary photo.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PhotoThumb from '@/components/PhotoThumb';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
 import { COVER_CATEGORIES } from '@/lib/types';
@@ -19,6 +19,10 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
 }) {
   const [loc, setLoc] = useState<LocationInfo | null>(null);
   const [pick, setPick] = useState('');
+  // the photos can be folded away; remembered on this device
+  const [shown, setShown] = useState(true);
+  useEffect(() => { try { setShown(localStorage.getItem('neas-cover-photos-hidden') !== '1'); } catch { /* storage blocked */ } }, []);
+  const toggle = () => setShown((v) => { try { localStorage.setItem('neas-cover-photos-hidden', v ? '1' : '0'); } catch { /* storage blocked */ } return !v; });
   const [upCaption, setUpCaption] = useState('');
   // inline edit of a cover photo's heading details (category, description, work area, location)
   const [edit, setEdit] = useState<{ id: string; coverCategory: string; caption: string; workArea: string; locationDetail: string } | null>(null);
@@ -42,6 +46,7 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
     <section className="card" id="cover-photos">
       <div className="card-head">
         <h2>Project cover photos ({cover.length})</h2>
+        <button type="button" className="btn btn-sm" aria-expanded={shown} onClick={toggle}>{shown ? 'Hide photos' : 'Show photos'}</button>
         <span className="note">Printed on the project report cover at exactly {COVER_TILE_CM} cm × {COVER_TILE_CM} cm; the first 2 go on page 1</span>
       </div>
       <div className="form-actions" style={{ marginTop: 0, flexWrap: 'wrap' }}>
@@ -64,7 +69,7 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
         )}
         {!canManage && <span className="note">The project manager chooses which photos appear on the report cover.</span>}
       </div>
-      {cover.length === 0 ? (
+      {!shown ? null : cover.length === 0 ? (
         <div className="empty">No cover photos yet. Upload a building or site photo (type “Reference”), then add it to the cover.</div>
       ) : (
         <div className="cover-grid">

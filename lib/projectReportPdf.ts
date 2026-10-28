@@ -109,6 +109,19 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(...NAVY); pdf.text('NextEdge Access Solutions', tx, y + 22);
   pdf.setFontSize(10); pdf.setTextColor(...GOLD); pdf.text(r.title.toUpperCase(), tx, y + 40);
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text(`Report reference ${r.reference}`, tx, y + 56);
+  // QR code at the top right: opens this project's client portal (clients sign in with their passcode)
+  const code = (r.project as { code?: string }).code;
+  if (code && typeof window !== 'undefined') {
+    try {
+      const portal = `${window.location.origin}/client/${encodeURIComponent(code)}`;
+      const QR = (await import('qrcode')).default;
+      const qr = await QR.toDataURL(portal, { margin: 1, width: 360, color: { dark: '#071D29', light: '#FFFFFF' } });
+      const q = 74, qx = W() - M - q;
+      pdf.addImage(qr, 'PNG', qx, y, q, q);
+      pdf.link(qx, y, q, q, { url: portal });
+      pdf.setFontSize(6.5); pdf.setTextColor(...MUTED); pdf.text('Scan for the client portal', qx + q / 2, y + q + 9, { align: 'center' });
+    } catch { /* the report is still made without the code */ }
+  }
   y += logoH + 18;
   pdf.setFillColor(...GOLD); pdf.rect(M, y - 8, W() - M * 2, 2, 'F');
   pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...INK);
@@ -165,7 +178,8 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   }
 
   // ---------------- photo location register: 4 tiles a page at full size, all details (optional)
-  if (r.cover.length && (!single || r.coverPhoto.register)) {
+  // with one cover photo already printed large on page 1, the register would only repeat it
+  if (r.cover.length && (!single || (r.coverPhoto.register && r.cover.length > 1))) {
     for (let i = 0; i < r.cover.length; i += 4) {
       y = newPage('Photo location register');
       r.cover.slice(i, i + 4).forEach((c, k) => {
