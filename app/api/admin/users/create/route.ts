@@ -26,13 +26,13 @@ export const POST = handle(async (req) => {
     if (!body.projectId) throw new HttpError(400, 'Choose the project this client may see.');
     if (!pin) throw new HttpError(400, 'Enter or generate a 6-digit passcode for the client.');
     const { error: cErr } = await sb.rpc('admin_create_client_login', { p_project: body.projectId, p_label: n.name, p_username: username, p_passcode: pin, p_days: null });
-    if (cErr) throw new HttpError(cErr.code === '23505' ? 409 : 400, cErr.message);
+    if (cErr) throw new HttpError(cErr.code === '23505' ? 409 : 400, cErr.code === '23505' ? await taken(username) : cErr.message);
     return Response.json({ ok: true, client: true });
   }
 
   const svc = supabaseService();
   const { data: clash } = await svc.rpc('username_taken', { p_username: username });
-  if (clash) throw new HttpError(409, 'That username is already used. Choose another.');
+  if (clash) throw new HttpError(409, await taken(username));
   // the e-mail is optional: without one the account gets a private placeholder address nobody receives mail at
   const e = body.email?.trim() ? checkEmail(body.email) : { ok: true as const, email: `${username}@users.neas.invalid` };
   if (!e.ok) throw new HttpError(400, e.error);
@@ -74,3 +74,16 @@ export const POST = handle(async (req) => {
   const row = (Array.isArray(codeRows) ? codeRows[0] : codeRows) as { code: string; expires_at: string };
   return Response.json({ ok: true, userId: id, code: row.code, expiresAt: row.expires_at });
 });
+
+// says who already has the username (only Super Admins reach this route), so the admin knows what to do next
+async function taken(username: string): Promise<string> {
+  const svc = supabaseService();
+  const { data: cred } = await svc.from('client_access_credentials').select('label, projects(code)').eq('username', username).is('revoked_at', null).maybeSingle();
+  if (cred) {
+    const code = (cred as { projects?: { code?: string } | null }).projects?.code;
+    return `"${username}" is already the client login of ${cred.label}${code ? ` (${code})` : ''}. Choose another username, or manage that login under Client viewer access.`;
+  }
+  const { data: prof } = await svc.from('profiles').select('full_name, email').eq('username', username).maybeSingle();
+  if (prof) return `"${username}" is already used by ${prof.full_name || prof.email} (User directory). Choose another username.`;
+  return 'That username is already used. Choose another.';
+}
