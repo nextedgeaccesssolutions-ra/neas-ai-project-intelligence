@@ -178,7 +178,8 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   }
 
   // ---------------- photo location register: 4 tiles a page at full size, all details (optional)
-  if (r.cover.length && (!single || r.coverPhoto.register)) {
+  // one cover photo already printed on page 1 (with its map link): no register page repeating it
+  if (r.cover.length && (!single || (r.coverPhoto.register && r.cover.length > 1))) {
     for (let i = 0; i < r.cover.length; i += 4) {
       y = newPage('Photo location register');
       r.cover.slice(i, i + 4).forEach((c, k) => {
