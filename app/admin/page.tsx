@@ -21,7 +21,7 @@ const TABS: [Tab, string][] = [
 ];
 
 interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
-interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
+interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string; deleted_at?: string | null }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; username?: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
@@ -290,8 +290,24 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
     await reload();
   };
   const copy = (t: string) => navigator.clipboard.writeText(t).then(() => notify('Copied.'), () => notify(t));
+  // deleting hides an archived project everywhere and closes its client portal; its records stay and it can be restored
+  const removeProject = async (p: Project) => {
+    if (!(await askConfirm(`Delete ${p.code}? It disappears from every list and its client portal closes. Its reports, photos and history are kept, and you can restore it from “Show deleted”.`, { danger: true }))) return;
+    const { error } = await withPin(() => sb().from('projects').update({ deleted_at: new Date().toISOString(), client_portal_enabled: false }).eq('id', p.id));
+    if (error) return notify(error.message);
+    notify(`${p.code} deleted.`);
+    await reload();
+  };
+  const restoreProject = async (p: Project) => {
+    const { error } = await withPin(() => sb().from('projects').update({ deleted_at: null }).eq('id', p.id));
+    if (error) return notify(error.message);
+    notify(`${p.code} restored (still archived).`);
+    await reload();
+  };
+  const [showDeleted, setShowDeleted] = useState(false);
+  const deletedCount = d.projects.filter((p) => p.deleted_at).length;
 
-  const rows = d.projects.filter((p) => !q || `${p.code} ${p.name} ${p.client_name} ${p.reference_no}`.toLowerCase().includes(q.toLowerCase()));
+  const rows = d.projects.filter((p) => !!p.deleted_at === showDeleted).filter((p) => !q || `${p.code} ${p.name} ${p.client_name} ${p.reference_no}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       <section className="card">
@@ -311,7 +327,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h2>Projects ({rows.length})</h2><input className="input" style={{ maxWidth: 260 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" /></div>
+        <div className="card-head"><h2>{showDeleted ? 'Deleted projects' : 'Projects'} ({rows.length})</h2>{(deletedCount > 0 || showDeleted) && <button className="btn btn-sm" onClick={() => setShowDeleted(!showDeleted)}>{showDeleted ? 'Back to projects' : `Show deleted (${deletedCount})`}</button>}<input className="input" style={{ maxWidth: 260 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" /></div>
         <div className="table-wrap">
           <table className="tbl">
             <thead><tr><th>Project</th><th>Client / ref.</th><th>Dates</th><th>Status</th><th>Team</th><th>Client portal</th><th>Actions</th></tr></thead>
@@ -342,9 +358,11 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                       <td>{p.client_portal_enabled ? <span className="pill pill-ok">On</span> : <span className="pill">Off</span>}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button className="btn btn-sm" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Close' : 'Manage'}</button>{' '}
+                        {p.deleted_at ? <button className="btn btn-sm" onClick={() => restoreProject(p)}>Restore</button> : <>
                         {p.status !== 'active' && <button className="btn btn-sm" onClick={() => setStatus(p, 'active')}>Activate</button>}{' '}
                         {p.status === 'active' && <button className="btn btn-sm" onClick={() => setStatus(p, 'suspended')}>Suspend</button>}{' '}
                         {p.status !== 'archived' && <button className="btn btn-sm btn-danger" onClick={() => setStatus(p, 'archived')}>Archive</button>}
+                        {p.status === 'archived' && <button className="btn btn-sm btn-danger" onClick={() => removeProject(p)}>Delete</button>}</>}
                       </td>
                     </tr>
                     {open === p.id && (

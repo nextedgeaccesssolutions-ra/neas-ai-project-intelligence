@@ -1,6 +1,7 @@
 'use client';
 // Field home: the NEAS banner, quick actions, live figures and the latest field reports.
 // Every figure is counted from the data this person can see; nothing is fixed.
+import { useEffect, useState } from 'react';
 import FieldIcon from './FieldIcons';
 import PhotoThumb from './PhotoThumb';
 import { notify } from './Dialogs';
@@ -22,6 +23,10 @@ export default function FieldHome() {
   const { state, setActiveProject } = useStore();
   const cloud = useCloudStatus();
   const may = (v: ViewKey) => !CLOUD || canView(v, cloud.profile);
+  // Recent reports can be hidden; each browser remembers the choice
+  const [recentShown, setRecentShown] = useState(true);
+  useEffect(() => { try { setRecentShown(localStorage.getItem('neas-recent-reports-hidden') !== '1'); } catch { /* storage blocked */ } }, []);
+  const toggleRecent = () => setRecentShown((v) => { try { localStorage.setItem('neas-recent-reports-hidden', v ? '1' : '0'); } catch { /* storage blocked */ } return !v; });
   const active = state.projects.filter((p) => p.status === 'active');
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -61,8 +66,8 @@ export default function FieldHome() {
         {may('field_reports') && <Link href="/field-reports" className={openIssues ? 'bad' : ''}><b>{openIssues}</b><span>Open issues</span></Link>}
       </div>
       {may('field_reports') && <>
-      <div className="card-head"><h2>Recent reports</h2><Link href="/field-reports" className="note">View all ›</Link></div>
-      {!recent.length ? <div className="empty">No field reports yet. Press “New field report” to start one.</div> : (
+      <div className="card-head"><h2>Recent reports</h2><span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><button className="btn btn-sm" onClick={toggleRecent} aria-expanded={recentShown}>{recentShown ? 'Hide' : 'Show'}</button><Link href="/field-reports" className="note">View all ›</Link></span></div>
+      {!recentShown ? null : !recent.length ? <div className="empty">No field reports yet. Press “New field report” to start one.</div> : (
         <ul className="fh-recent">
           {recent.map((r) => {
             const p = proj(r.projectId);

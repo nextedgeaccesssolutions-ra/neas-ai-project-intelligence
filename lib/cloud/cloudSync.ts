@@ -142,8 +142,10 @@ async function flushStops() {
 export async function pullAll(): Promise<void> {
   const sb = supabaseBrowser();
   if (!sb || !apply || !read) return;
-  const { data: projects, error } = await sb.from('projects').select('*').order('code');
+  const { data: all, error } = await sb.from('projects').select('*').order('code');
   if (error) throw error;
+  // projects deleted in the Control panel are hidden everywhere else
+  const projects = (all ?? []).filter((p: { deleted_at?: string | null }) => !p.deleted_at);
   const bundle: M.DbBundle = { projects: projects as M.DbProject[], activities: [], reports: [], boq: [], costs: [], quotes: [], attachments: [] };
   for (const p of projects ?? []) {
     const { data, error: e2 } = await sb.rpc('pull_changes', { p_project: p.id });
