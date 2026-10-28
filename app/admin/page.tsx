@@ -552,6 +552,10 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     `Delete ${u.full_name || u.email}? They are signed out everywhere, can no longer sign in and lose all project access. Their reports and photos are kept, and the account can be restored later with Activate.`,
     true, 'Deleted by administrator');
 
+  const forget = (u: Profile) => act(u, 'delete_forever',
+    `Delete ${u.full_name || u.email} forever? Their e-mail and username become free, so you can create a new account with the same details. This cannot be undone. Their past reports and photos stay, shown as "${u.full_name || 'Removed user'} (removed)".`,
+    true);
+
   const ql = q.trim().toLowerCase();
   const filtered = d.profiles.filter((u) =>
     (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
@@ -659,6 +663,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
                         <button className="btn btn-sm" onClick={() => startEdit(u)}>Edit</button>
                         {u.id !== selfId && !u.deleted_at && <button className="btn btn-sm btn-danger" onClick={() => remove(u)}>Delete</button>}
+                        {u.deleted_at && !u.email.startsWith('removed-') && <button className="btn btn-sm btn-danger" onClick={() => forget(u)}>Delete forever</button>}
                         <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
                       </div>
                     </td>

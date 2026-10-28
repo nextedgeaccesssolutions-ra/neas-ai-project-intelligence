@@ -70,3 +70,16 @@ select test.expect_error('client: module choice for clients only works on client
   $$select neas.admin_set_client_views('00000000-0000-0000-0000-0000000000b1', array['overview'])$$);
 select neas.admin_set_client('00000000-0000-0000-0000-0000000000d1', false);
 reset role;
+-- Delete forever frees the e-mail and username of a deleted account
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select test.expect_error('delete forever: only an already-deleted account',
+  $$select neas.admin_release_deleted_user('00000000-0000-0000-0000-0000000000b1')$$);
+reset role;
+update neas.profiles set deleted_at = now(), status = 'suspended' where id = '00000000-0000-0000-0000-0000000000e1';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select neas.admin_release_deleted_user('00000000-0000-0000-0000-0000000000e1');
+select test.check('delete forever: the e-mail is free again',
+  not exists (select 1 from neas.profiles where lower(email) = 'new.hire@neas.test'));
+reset role;
