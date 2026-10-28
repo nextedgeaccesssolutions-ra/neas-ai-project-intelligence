@@ -122,7 +122,9 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
   const span = W - LW - 10;
   const x = (d: string) => LW + (daysBetween(start, d) / total) * span;
   const weekTicks: string[] = [];
-  for (let d = start; d <= end; d = addDays(d, 7)) weekTicks.push(d);
+  // a date about every tenth of the chart: daily for a short job, weekly or monthly for long ones
+  const tickStep = [1, 2, 3, 7, 14, 30, 61, 91].find((n) => total / n <= 12) ?? 182;
+  for (let d = start; d <= end; d = addDays(d, tickStep)) weekTicks.push(d);
   const clip = (s: string) => (s.length > 34 ? s.slice(0, 33) + '…' : s);
 
   const svgX = (clientX: number) => {
