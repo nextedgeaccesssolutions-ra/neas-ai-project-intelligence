@@ -5,6 +5,7 @@ import { COVER_TILE_PT } from './coverPhotos';
 import { photoCaption } from './evidenceReport';
 import { fit, makePdfSafe, toImage, type ReportImage } from './evidenceExport';
 import type { ProjectReport } from './projectReport';
+import { drawCompanyFooter } from './companyFooter';
 
 export type LoadImage = (id: string) => Promise<Blob | null>;
 const NAVY = [7, 29, 41] as const, GOLD = [202, 147, 50] as const, GOLD_SOFT = [235, 192, 126] as const;
@@ -49,6 +50,7 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...MUTED);
     pdf.text(`${r.project.code} · ${r.title} · ${r.reference}`, M, H() - 16);
     pdf.text(`Page ${page}`, W() - M, H() - 16, { align: 'right' });
+    drawCompanyFooter(pdf, H() - 25);
   };
   const head = (title: string) => {
     pdf.setFillColor(...NAVY); pdf.rect(0, 0, W(), 40, 'F');

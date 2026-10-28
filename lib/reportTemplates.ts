@@ -1,6 +1,7 @@
 // Per-project report templates (neas.report_templates) and the reports filled in from them
 // (neas.template_reports). A report keeps its own copy of the template it was started from.
 import seed from './reportTemplateSeed.json';
+import { docxCompanyFooter, drawCompanyFooter } from './companyFooter';
 
 export type SectionKind = 'text' | 'bullets' | 'status' | 'table' | 'photos' | 'chart';
 export interface TemplateSection {
@@ -234,6 +235,7 @@ export async function templateReportPdf(t: TemplateDefinition, d: TemplateReport
     pdf.setPage(p); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...MUTED);
     pdf.text(`${opts.reportTitle || t.title} · ${opts.projectName}`, M, H - 20);
     pdf.text(`Page ${p} of ${pages}`, W - M, H - 20, { align: 'right' });
+    drawCompanyFooter(pdf, H - 30);
   }
   return pdf.output('blob');
 }
@@ -320,6 +322,6 @@ export async function templateReportDocx(t: TemplateDefinition, d: TemplateRepor
       if (!photos.length) body.push(p('No photographs were attached to this report.', { size: 20, color: '5D6F7B' }));
     }
   }
-  const doc = new Document({ creator: 'NEAS', title: opts.reportTitle || t.title, sections: [{ children: body }] });
+  const doc = new Document({ creator: 'NEAS', title: opts.reportTitle || t.title, sections: [{ footers: { default: docxCompanyFooter(D) }, children: body }] });
   return Packer.toBlob(doc);
 }

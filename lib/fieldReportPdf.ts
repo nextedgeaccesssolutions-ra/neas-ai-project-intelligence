@@ -1,6 +1,7 @@
 // PDF of one step-by-step field report (A4, NEAS layout): details, work done, materials, remarks,
 // BEFORE / AFTER photos side by side with captions, other photos, signatures, page numbers.
 import type { Evidence, FieldReport } from './types';
+import { drawCompanyFooter } from './companyFooter';
 
 export const reportNo = (r: FieldReport) => `FR-${r.date.replace(/-/g, '')}-${r.id.slice(0, 4).toUpperCase()}`;
 
@@ -133,6 +134,7 @@ export async function fieldReportPdf(r: FieldReport, opts: {
     pdf.setPage(p); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...MUTED);
     pdf.text(`${reportNo(r)} · ${opts.projectCode} · NEAS Field Report`, M, H - 20);
     pdf.text(`Page ${p} of ${pages}`, W - M, H - 20, { align: 'right' });
+    drawCompanyFooter(pdf, H - 30);
   }
   return pdf.output('blob');
 }
