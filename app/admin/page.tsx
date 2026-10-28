@@ -716,7 +716,10 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
   const [saving, setSaving] = useState(false);
   const save = async (next: string[] | null) => {
     setSaving(true);
-    const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: next }));
+    // a client keeps its client status (view only, shared items) whatever modules it is given
+    const { error } = await withPin(() => u.is_client
+      ? sb().rpc('admin_set_client_views', { p_user: u.id, p_views: next ?? VIEWS.map(([k]) => k) })
+      : sb().rpc('admin_set_views', { p_user: u.id, p_views: next }));
     setSaving(false);
     if (error) return notify(error.message);
     notify(next === null ? 'All modules allowed.' : 'Module access saved. It applies on their next page load.');
@@ -728,7 +731,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <div className="form-actions" style={{ marginTop: 0 }}>
         {!!u.is_client
-          ? <><span className="pill">Client account</span><span className="note">View only, for their projects: Overview, Schedule & Gantt, Field reports, Site evidence, Global reports, Project reports, Report templates (final reports) and Offline queue, showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything.</span></>
+          ? <><span className="pill">Client account</span><span className="note">View only, for their projects, in the modules ticked below (plus Global reports, Project reports and Report templates with final reports), showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything, whatever is ticked.</span></>
           : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: view only, shared items only.'); await reload(); }}>Make this a client account (view only)</button>}
       </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
@@ -736,10 +739,10 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
         {VIEWS.map(([k, label]) => {
           const client = !!u.is_client;
           const always = ALWAYS_VIEWS.includes(k) && !client;
-          // a client account shows exactly the client view, locked: change the role to Staff to edit modules
+          // a client account can be given more modules; it stays view only with shared items in each of them
           return (
-            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'Client accounts see only this view. Change the role to Staff to choose modules.' : always ? 'Every user always has this module' : undefined}>
-              <input type="checkbox" checked={client ? CLIENT_VIEWS.includes(k) : always || sel.includes(k)} disabled={always || client} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'View only for clients' : always ? 'Every user always has this module' : undefined}>
+              <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
               {label}{always && <span className="note"> (always on)</span>}
             </label>
           );
@@ -748,6 +751,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <div className="form-actions">
         <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save(VIEWS.map(([k]) => k).filter((k) => sel.includes(k)))}>Save module access</button>
         {!all && <button className="btn btn-sm" disabled={saving} onClick={() => save(null)}>Allow all modules</button>}
+        {!!u.is_client && <button className="btn btn-sm" disabled={saving} onClick={() => save([...CLIENT_VIEWS])}>Standard client modules</button>}
       </div>
     </div>
   );
@@ -1238,6 +1242,31 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
 
 const SYNC_TABLES = ['activities', 'project_reports', 'report_attachments', 'boq_lines', 'quotations'];
 
+// Automatic report backup: the Google Apps Script refreshes the reporting sheet from the app every 30 minutes and
+// saves it to the Drive folder as Excel and PDF (integrations/apps-script-cloud.gs, backupReports).
+const BACKUP_FOLDER = 'https://drive.google.com/drive/folders/1RRDCkWAz2sbDyVybzS0zq6dThWDxDqXW';
+function BackupCard() {
+  const [busy, setBusy] = useState(false);
+  const now = async () => {
+    setBusy(true);
+    try {
+      const r = (await api('/api/integrations/sheets', {})) as unknown as { message?: string };
+      notify(`${r.message ?? 'Google Sheet updated.'} The next 30-minute backup saves it to Drive as Excel and PDF.`);
+    } catch (e) { notify((e as Error).message); }
+    setBusy(false);
+  };
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Report backups</h2><span className="note">Every 30 minutes · Excel and PDF · kept 14 days</span></div>
+      <p className="note" style={{ marginTop: 0 }}>All projects, activities, field reports, review status, photos list and team are copied to the NEAS Google Sheet and saved to the backup folder in Google Drive as an Excel workbook and a PDF, every 30 minutes.</p>
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        <a className="btn btn-sm" href={BACKUP_FOLDER} target="_blank" rel="noreferrer">Open backup folder</a>
+        <button className="btn btn-sm" disabled={busy} onClick={() => void now()}>{busy ? 'Updating…' : 'Update the sheet now'}</button>
+      </div>
+    </section>
+  );
+}
+
 function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
   // current server state of each record, so the administrator sees whether anything is actually lost
@@ -1289,6 +1318,7 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   return (
     <>
+      <BackupCard />
       <section className="card">
         <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span>{d.ops.length > 0 && <button className="btn btn-sm" disabled={!!busy} onClick={() => void resolveAll()}>{busy === 'all' ? 'Resolving…' : `Resolve all (${d.ops.length}) — keep server versions`}</button>}</div>
         {!d.ops.length ? <div className="empty">No sync problems.</div> : (

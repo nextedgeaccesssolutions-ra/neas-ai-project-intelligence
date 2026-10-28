@@ -59,3 +59,14 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1
 select neas.admin_set_client('00000000-0000-0000-0000-0000000000c1', false);
 reset role;
 update neas.profiles set status = test.v('cl_status')::neas.account_status where id = '00000000-0000-0000-0000-0000000000c1';
+-- a Super Admin can give a client more modules; the account stays a client (view only)
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select neas.admin_set_client('00000000-0000-0000-0000-0000000000d1', true);
+select neas.admin_set_client_views('00000000-0000-0000-0000-0000000000d1', array['overview', 'projects', 'estimating']);
+select test.check('client: extra modules keep the client flag',
+  (select is_client and 'estimating' = any (allowed_views) from neas.profiles where id = '00000000-0000-0000-0000-0000000000d1'));
+select test.expect_error('client: module choice for clients only works on client accounts',
+  $$select neas.admin_set_client_views('00000000-0000-0000-0000-0000000000b1', array['overview'])$$);
+select neas.admin_set_client('00000000-0000-0000-0000-0000000000d1', false);
+reset role;
