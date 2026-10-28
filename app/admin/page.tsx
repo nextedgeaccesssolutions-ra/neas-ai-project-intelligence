@@ -758,8 +758,8 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <div className="form-actions" style={{ marginTop: 0 }}>
         {!!u.is_client
-          ? <><span className="pill">Client account</span><span className="note">View only, for their projects, in the modules ticked below (plus Global reports, Project reports and Report templates with final reports), showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything, whatever is ticked.</span></>
-          : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: view only, shared items only.'); await reload(); }}>Make this a client account (view only)</button>}
+          ? <><span className="pill">Client account</span><span className="note">Opens the modules ticked below for their projects, with only approved, client-shared reports and photos. Clients cannot edit or submit anything in any module.</span></>
+          : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: all modules, shared items only, no editing.'); await reload(); }}>Make this a client account</button>}
       </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
@@ -768,7 +768,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
           const always = ALWAYS_VIEWS.includes(k) && !client;
           // a client account can be given more modules; it stays view only with shared items in each of them
           return (
-            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'View only for clients' : always ? 'Every user always has this module' : undefined}>
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'Clients cannot edit in any module' : always ? 'Every user always has this module' : undefined}>
               <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
               {label}{always && <span className="note"> (always on)</span>}
             </label>
@@ -895,7 +895,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
               return (
                 <tr key={m.project_id}>
                   <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
-                  <td><select className="input" value={m.role === 'employee' && !!u.is_client && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select></td>
+                  <td><select className="input" value={m.role === 'employee' && !!u.is_client && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client</option>}</select></td>
                   <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
                 </tr>
@@ -907,7 +907,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
         {u.status === 'active' && free.length > 0 && (
           <div className="form-actions">
             <select className="input" style={{ maxWidth: 240 }} value={addProject} onChange={(e) => setAddProject(e.target.value)} aria-label="Project to add"><option value="">Add to project…</option>{free.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select>
-            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select>
+            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client</option>}</select>
             <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => {
               // a client is a project member whose account sees only the client report views
               if (addRole === 'client' && !!!u.is_client) {

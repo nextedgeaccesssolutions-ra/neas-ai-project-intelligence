@@ -265,7 +265,6 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
           </div>
         </header>
         <main className="content" id="main-content" tabIndex={-1}>
-          {isClient && !blocked && <p className="client-banner" role="note">View only: you see the reports, photos and schedule shared with you. Changes are made by NEAS.</p>}
           {CLOUD && persist !== 'persisted' && unsentSummary(cloud) && (
             <div className="banner" role="status">
               {unsentSummary(cloud)} This browser has not agreed to keep them permanently, so they could be cleared if the phone runs low on space or the site is not opened for several days.

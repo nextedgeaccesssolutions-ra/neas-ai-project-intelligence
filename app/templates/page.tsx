@@ -152,7 +152,7 @@ export default function TemplatesPage() {
       ) : client ? (
         // client accounts: view only, finished reports of this project (the database returns only final ones)
         <section className="card">
-          <div className="card-head"><h2>Reports ({reports.length})</h2><span className="note">View only</span></div>
+          <div className="card-head"><h2>Reports ({reports.length})</h2></div>
           {reports.length === 0 ? <div className="empty">No finished reports for this project yet.</div> : (
             <div className="table-wrap">
               <table className="tbl">

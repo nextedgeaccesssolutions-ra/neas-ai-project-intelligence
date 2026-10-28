@@ -54,7 +54,7 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000c1
 select test.check('client: no template library', not exists (select 1 from neas.report_templates where project_id is null));
 select test.check('client: sees the final template report', exists (select 1 from neas.template_reports where title = 'Client final'));
 select test.check('client: no draft template reports', not exists (select 1 from neas.template_reports where status = 'draft'));
-select test.check('client: Project register is not a client module', not (select 'projects' = any (allowed_views) from neas.profiles where id = auth.uid()));
+select test.check('client: every module by default', (select allowed_views is null from neas.profiles where id = auth.uid()));
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
 select neas.admin_set_client('00000000-0000-0000-0000-0000000000c1', false);
 reset role;
