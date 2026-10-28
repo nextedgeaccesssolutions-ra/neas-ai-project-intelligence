@@ -1,4 +1,5 @@
 'use client';
+import { MobileReports } from '@/components/MobileLists';
 import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
@@ -232,6 +233,7 @@ export default function FieldReports() {
           )}
       </section>
 
+      <MobileReports projectId={pid} />
       <section className="card" id="reports-card">
         <div className="card-head">
           <h2>Saved reports ({shown.length})</h2>

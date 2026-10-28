@@ -607,3 +607,20 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .lib-head { grid-column: 1 / -1; font-weight: 800; color: var(--navy); margin: 8px 0 2px; font-size: 13px; }
 .lib-cell { display: contents; }
 .scan-video { width: 100%; max-height: 60vh; border-radius: 12px; background: #000; }
+
+/* phone lists: projects and reports */
+.mobile-only { display: none; }
+@media (max-width: 760px) {
+  .mobile-only { display: grid; }
+}
+.m-list { gap: 10px; margin-bottom: 14px; }
+.m-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.m-chips button { flex: 0 0 auto; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card, #fff); font-weight: 700; font-size: 12.5px; color: inherit; cursor: pointer; }
+.m-chips button.on { background: var(--gold); border-color: var(--gold); color: var(--navy); }
+.m-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.m-list li { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, #fff); }
+.m-list li > a, .m-list li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; color: inherit; text-decoration: none; }
+.m-list b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-bar { display: block; height: 6px; border-radius: 3px; background: #e5ecf2; overflow: hidden; margin-top: 4px; }
+.m-bar i { display: block; height: 100%; background: #1f9d63; }
+.m-pct { font-weight: 800; color: var(--navy); }

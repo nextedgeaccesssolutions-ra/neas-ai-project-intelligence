@@ -60,7 +60,7 @@ export default function OfflineQueue() {
       </div>
       <section className="grid kpis">
         <div className="card"><div className="kpi-label">Connection</div><div className="kpi-val">{c.online ? 'Online' : 'Offline'}</div><div className="kpi-sub">{c.lastSyncAt ? `Last sync ${new Date(c.lastSyncAt).toLocaleTimeString()}` : 'Not synced yet'}</div></div>
-        <div className="card"><div className="kpi-label">Pending sync</div><div className="kpi-val">{c.pending}</div></div>
+        <div className="card"><div className="kpi-label">Pending sync</div><div className="kpi-val">{c.pending}</div><div className="kpi-sub">{ops.filter((o) => o.status === 'pending' && o.entity === 'report_attachments').length} photo(s) to upload · {ops.filter((o) => o.status === 'pending' && o.entity === 'project_reports').length} report(s)</div></div>
         <div className="card"><div className="kpi-label">Conflicts</div><div className={`kpi-val ${c.conflicts ? 'bad' : ''}`}>{c.conflicts}</div></div>
         <div className="card"><div className="kpi-label">Sync errors</div><div className={`kpi-val ${c.rejected ? 'bad' : ''}`}>{c.rejected}</div></div>
       </section>

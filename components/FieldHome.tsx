@@ -6,7 +6,8 @@ import { useStore } from '@/lib/store';
 import { CLOUD } from '@/lib/cloud/env';
 import { canView, useCloudStatus } from '@/lib/cloud/cloudSync';
 import type { ViewKey } from '@/lib/cloud/cloudSync';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, fmtPct } from '@/lib/format';
+import { useProjectProgress } from './MobileLists';
 import { reportNo } from '@/lib/fieldReportPdf';
 
 const STATUS_TONE: Record<string, string> = { approved: 'pill-ok', submitted: 'pill-info', draft: 'pill-warn', rejected: 'pill-bad' };
@@ -21,6 +22,10 @@ export default function FieldHome() {
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const reportsThisMonth = state.reports.filter((r) => r.date.startsWith(monthStart)).length;
   const photos = state.evidence.filter((e) => e.kind !== 'Reference').length;
+  // overall progress: the average actual % of active projects that have a schedule
+  const prog = useProjectProgress();
+  const scheduled = active.map((p) => prog.get(p.id)).filter((v): v is number => v != null);
+  const overall = scheduled.length ? scheduled.reduce((a, b) => a + b, 0) / scheduled.length : null;
   const openIssues = state.reports.filter((r) => r.details?.type === 'Issue' && r.status !== 'approved').length;
   const recent = [...state.reports].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
   const proj = (id: string) => state.projects.find((p) => p.id === id);
@@ -42,6 +47,7 @@ export default function FieldHome() {
       </nav>
       <div className="fh-stats">
         <Link href={may('projects') ? '/projects' : '/'}><b>{active.length}</b><span>Active projects</span></Link>
+        {may('project_management') && <Link href="/project-management"><b>{overall == null ? '—' : fmtPct(overall)}</b><span>Overall progress</span></Link>}
         {may('field_reports') && <Link href="/field-reports"><b>{reportsThisMonth}</b><span>Reports this month</span></Link>}
         {may('site_evidence') && <Link href="/photos"><b>{photos}</b><span>Site photos</span></Link>}
         {may('field_reports') && <Link href="/field-reports" className={openIssues ? 'bad' : ''}><b>{openIssues}</b><span>Open issues</span></Link>}

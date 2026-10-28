@@ -1,4 +1,5 @@
 'use client';
+import { MobileProjects } from '@/components/MobileLists';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -91,6 +92,7 @@ export default function ProjectRegister() {
 
   return (
     <>
+      <MobileProjects />
       <div className="page-head">
         <div>
           <div className="eyebrow">Portfolio</div>
