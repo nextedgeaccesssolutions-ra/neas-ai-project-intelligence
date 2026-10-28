@@ -990,7 +990,7 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <label className="field">Full name{isClient ? ' / company contact' : ''}<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
           <label className="field">Username<input className="input" autoCapitalize="none" spellCheck={false} placeholder="e.g. jancho.client" value={g.username} onChange={(e) => setG({ ...g, username: e.target.value })} /></label>
           {!isClient && <label className="field">E-mail (optional)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>}
-          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">{isClient ? 'Choose a project' : 'No project yet'}</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">{isClient ? 'Choose a project' : 'No project yet'}</option>{d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
           <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
           <label className="field">Passcode (6 digits){isClient ? '' : ' — or leave empty for a one-time code'}
             <span style={{ display: 'flex', gap: 8 }}>
@@ -1007,7 +1007,7 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
         <div className="form-grid">
           <label className="field">Full name<input className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></label>
           <label className="field">E-mail<input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-          <label className="field">Project<select className="input" value={f.projectId} onChange={(e) => setF({ ...f, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Project<select className="input" value={f.projectId} onChange={(e) => setF({ ...f, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
           <label className="field">Role<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
           <label className="field">Passcode (6 digits){fClient ? '' : ' — or leave empty for a one-time code'}
             <span style={{ display: 'flex', gap: 8 }}>
@@ -1393,7 +1393,7 @@ function Recovery({ d }: { d: D }) {
           <label className="field">Project
             <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
               <option value="">All projects</option>
-              {d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+              {d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
             </select>
           </label>
         </div>
