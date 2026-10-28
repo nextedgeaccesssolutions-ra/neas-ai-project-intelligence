@@ -593,6 +593,11 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     }],
   });
 
+  // active client portal logins are listed too, so every person who can sign in appears in one place
+  const portal = (status === 'deleted' || (role && role !== 'client') ? [] : d.creds)
+    .filter((c) => c.username && !c.revoked_at && (!c.expires_at || new Date(c.expires_at) > new Date()))
+    .filter((c) => !project || c.project_id === project)
+    .filter((c) => !ql || `${c.label} ${c.username} ${d.projects.find((p) => p.id === c.project_id)?.code ?? ''}`.toLowerCase().includes(ql));
   return (
     <>
       {resetCode && <CodeReveal code={resetCode.code} expiresAt={resetCode.expiresAt} who={resetCode.who} onClose={() => setResetCode(null)} />}
@@ -621,7 +626,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
 
         {(status || role || project || ql) && (
           <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="note">{rows.length} of {d.profiles.length} users</span>
+            <span className="note">{rows.length} of {d.profiles.length} users{portal.length ? ` · ${portal.length} client portal login${portal.length === 1 ? '' : 's'}` : ''}</span>
             <button className="btn btn-sm" onClick={() => { setQ(''); setStatus(''); setRole(''); setProject(''); }}>Clear filters</button>
           </div>
         )}
@@ -693,7 +698,24 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                   )}
                 </Fragment>
               ))}
-              {!rows.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+              {!rows.length && !portal.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+              {/* client portal logins (username + passcode, one project): managed under Client viewer access */}
+              {portal.map((c) => (
+                <tr key={`portal-${c.id}`}>
+                  <td>
+                    <div className="user-name-cell">
+                      <UserAvatar name={c.label} role="staff" />
+                      <div className="name-wrap"><b>{c.label}</b><div className="note">Client portal login</div></div>
+                    </div>
+                  </td>
+                  <td><Pill s="active" /><div className="note">@{c.username}</div></td>
+                  <td><span className="pill">Client portal</span></td>
+                  <td className="note">{d.projects.find((p) => p.id === c.project_id)?.code ?? '—'}</td>
+                  <td className="note">{c.last_used_at ? new Date(c.last_used_at).toLocaleDateString() : 'Never'}</td>
+                  <td className="note">{fmtDate(c.created_at.slice(0, 10))}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}><button className="btn btn-sm" onClick={() => go('client')}>Manage</button></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
