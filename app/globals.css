@@ -624,3 +624,20 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .m-bar { display: block; height: 6px; border-radius: 3px; background: #e5ecf2; overflow: hidden; margin-top: 4px; }
 .m-bar i { display: block; height: 100%; background: #1f9d63; }
 .m-pct { font-weight: 800; color: var(--navy); }
+
+/* icon chips, thumbnails, row menu, drag handle */
+.fr-ico { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 64px; }
+.fh-act svg { width: 26px; height: 26px; }
+.fh-thumb { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 10px; overflow: hidden; background: #e8eef3; display: grid; place-items: center; color: var(--muted); }
+.fh-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fh-recent li > a { flex: 1; }
+.fh-menu { position: relative; }
+.fh-menu[open] { z-index: 30; }
+.fh-recent li { position: relative; }
+.fh-menu summary { list-style: none; cursor: pointer; padding: 4px 8px; font-size: 20px; line-height: 1; border-radius: 8px; }
+.fh-menu summary::-webkit-details-marker { display: none; }
+.fh-menu > div { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; min-width: 190px; background: var(--card, #fff); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(7, 29, 41, .15); overflow: hidden; }
+.fh-menu > div a, .fh-menu > div button { padding: 10px 14px; text-align: left; background: none; border: 0; font: inherit; color: inherit; text-decoration: none; cursor: pointer; }
+.fh-menu > div a:hover, .fh-menu > div button:hover { background: #f1f4f6; }
+.fr-handle { cursor: grab; color: var(--muted); display: inline-flex; }
+.fr-checks li[draggable] { cursor: default; }

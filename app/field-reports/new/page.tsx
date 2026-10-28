@@ -2,9 +2,10 @@
 // New Field Report: a four-step form for phones (Details → Photos → Work done → Sign & submit).
 // Photos are saved to Site evidence as they are taken and the report to Field reports, so everything
 // works offline and syncs like the rest of the app. Unfinished text is kept as a draft on this device.
+import FieldIcon from '@/components/FieldIcons';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
+import { Loading, NoProject } from '@/components/ProjectBar';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
@@ -37,7 +38,9 @@ const blank = (): Draft => ({
 });
 
 export default function NewFieldReport() {
-  const { ready, project, addReport, addEvidence, updateEvidence, deleteEvidence } = useStore();
+  const { ready, project, state, setActiveProject, addReport, addEvidence, updateEvidence, deleteEvidence } = useStore();
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const dragFrom = useRef<number | null>(null);
   const { pid, activities, reports, evidence } = useProjectData();
   const key = `neas-fr-draft:${pid}`;
   const [step, setStep] = useState(0);
@@ -64,6 +67,8 @@ export default function NewFieldReport() {
   }, [pid, key, loaded]);
   useEffect(() => { if (loaded === pid) try { localStorage.setItem(key, JSON.stringify(d)); } catch { /* storage full */ } }, [d, key, loaded, pid]);
 
+  // a signature belongs to the report of one project: switching project clears it
+  useEffect(() => { setSigned({ tech: false, client: false }); for (const c of [canvas.current.tech, canvas.current.client]) c?.getContext('2d')?.clearRect(0, 0, c.width, c.height); }, [pid]);
   // a submitted report is confirmed once nothing for it (report or its photos) waits in the offline queue
   useEffect(() => {
     if (!sent || sent.confirmed || !CLOUD) return;
@@ -232,7 +237,6 @@ export default function NewFieldReport() {
         </div>
         <Link className="btn btn-sm" href="/field-reports">All field reports</Link>
       </div>
-      <ProjectBar />
       {sent && (
         <section className={`card fr-card fr-sent ${sent.confirmed ? 'ok' : 'wait'}`} role="status">
           <h2>{sent.confirmed ? (CLOUD ? 'Submitted to the server' : 'Saved on this device') : sent.refused ? 'Not accepted by the server' : 'Pending sync'}</h2>
@@ -262,6 +266,7 @@ export default function NewFieldReport() {
         <section className="card fr-card">
           <h2>Project information</h2>
           <div className="form-grid">
+            <label className="field">Project *<select className="input" value={pid} disabled={!!busy} onChange={(e) => e.target.value && setActiveProject(e.target.value)}>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ` : ''}{p.name}</option>)}</select></label>
             <label className="field">Activity *<select className="input" value={d.activityId} onChange={(e) => set({ activityId: e.target.value })}><option value="">Choose…</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
             <label className="field">Report date *<input className="input" type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} /></label>
           </div>
@@ -272,7 +277,7 @@ export default function NewFieldReport() {
             </span>
           </label>
           <h3>Report type *</h3>
-          <div className="fr-chips">{TYPES.map((t) => <button key={t} type="button" className={chip(d.type === t)} onClick={() => set({ type: t })}>{t}</button>)}</div>
+          <div className="fr-chips">{TYPES.map((t) => <button key={t} type="button" className={`${chip(d.type === t)} fr-ico`} onClick={() => set({ type: t })}><FieldIcon name={t.toLowerCase()} />{t}</button>)}</div>
           {d.type === 'Progress' && <label className="field">Cumulative % complete *{d.activityId ? <span className="note"> (last: {fmtPct(prev)})</span> : null}<input className="input" inputMode="decimal" value={d.pct} onChange={(e) => set({ pct: e.target.value })} placeholder="e.g. 60" /></label>}
           <h3>Work area / floor</h3>
           <div className="form-grid">
@@ -282,7 +287,7 @@ export default function NewFieldReport() {
           <datalist id="fr-areas">{[...new Set(evidence.map((e) => e.workArea?.trim()).filter(Boolean))].map((v) => <option key={v} value={v} />)}</datalist>
           <datalist id="fr-locs">{[...new Set(evidence.map((e) => e.locationDetail?.trim()).filter(Boolean))].map((v) => <option key={v} value={v} />)}</datalist>
           <h3>Weather</h3>
-          <div className="fr-chips">{WEATHER.map(([w, icon]) => <button key={w} type="button" className={chip(d.weather === w)} onClick={() => set({ weather: w })}><span aria-hidden="true">{icon}</span> {w}</button>)}</div>
+          <div className="fr-chips">{WEATHER.map(([w]) => <button key={w} type="button" className={`${chip(d.weather === w)} fr-ico`} onClick={() => set({ weather: w })}><FieldIcon name={w.toLowerCase()} />{w}</button>)}</div>
           <label className="field">Description *<textarea className="input" rows={4} maxLength={500} value={d.description} onChange={(e) => set({ description: e.target.value })} placeholder="What was done, where, and the result" /><span className="note">{d.description.length}/500</span></label>
         </section>
       )}
@@ -309,8 +314,12 @@ export default function NewFieldReport() {
               </figure>
             ))}
           </div>
+          <div className="form-actions" style={{ marginTop: 0, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-sm" onClick={() => galleryRef.current?.click()}>Add multiple</button>
+            <input ref={galleryRef} type="file" accept="image/*" multiple hidden onChange={(e) => { void addPhotos(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+          </div>
           <label className="fr-drop" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void addPhotos(Array.from(e.dataTransfer.files)); }}>
-            <span aria-hidden="true">📷</span>
+            <FieldIcon name="camera" size={30} />
             <span><b>Tap to take or add {tab.toLowerCase()} photos, or drop them here</b><br /><span className="note">Saved to Site evidence with the work area and floor from step 1</span></span>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => void addPhotos(Array.from(e.target.files ?? []))} />
           </label>
@@ -323,10 +332,15 @@ export default function NewFieldReport() {
           <div className="card-head"><h2>Work done / activities</h2><button type="button" className="btn btn-sm" onClick={() => set({ tasks: [...d.tasks, { label: '', done: true }] })}>Add item</button></div>
           <ul className="fr-checks">
             {d.tasks.map((t, i) => (
-              <li key={i}>
+              <li key={i}
+                onDragOver={(e) => { if (dragFrom.current != null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                onDrop={(e) => { const from = dragFrom.current; dragFrom.current = null; if (from == null) return; e.preventDefault(); if (from === i) return; const t2 = [...d.tasks]; const [m] = t2.splice(from, 1); t2.splice(i, 0, m); set({ tasks: t2 }); }}>
                 <input type="checkbox" checked={t.done} onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, done: e.target.checked } : x)) })} aria-label={`Done: ${t.label || 'item'}`} />
                 <input className="input" value={t.label} placeholder="Activity done" onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
-                <span style={{ display: 'flex', gap: 4 }}>
+                <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <span className="fr-handle" title="Drag to reorder (or use the arrows)" aria-hidden="true" draggable
+                    onDragStart={(e) => { dragFrom.current = i; e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; }}
+                    onDragEnd={() => { dragFrom.current = null; }}><FieldIcon name="drag" size={18} /></span>
                   <button type="button" className="btn btn-sm" disabled={i === 0} aria-label="Move up" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i - 1 ? d.tasks[i] : j === i ? d.tasks[i - 1] : x)) })}>↑</button>
                   <button type="button" className="btn btn-sm" disabled={i === d.tasks.length - 1} aria-label="Move down" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i + 1 ? d.tasks[i] : j === i ? d.tasks[i + 1] : x)) })}>↓</button>
                   <button type="button" className="btn btn-sm" aria-label="Remove item" onClick={() => set({ tasks: d.tasks.filter((_, j) => j !== i) })}>✕</button>
