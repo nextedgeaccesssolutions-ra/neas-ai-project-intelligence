@@ -779,6 +779,20 @@ function UserPanel({ u, d, self, act, review, reload }: {
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
   const log = d.audit.filter((a) => a.target_id === u.id || a.actor_id === u.id).slice(0, 40);
 
+  // Client is an account setting (reports-only modules) on top of an employee membership
+  const changeMemberRole = async (m: Member, role: string) => {
+    const client = isClientViews(u.allowed_views);
+    if (role === 'client' && !client) {
+      if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects, on every project they belong to.`))) return;
+      const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: [...CLIENT_VIEWS] }));
+      if (error) return notify(error.message);
+    } else if (role !== 'client' && client) {
+      if (!(await askConfirm(`Make ${u.full_name || u.email} staff again? Their account gets every module (narrow it under Module access).`))) return;
+      const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: null }));
+      if (error) return notify(error.message);
+    }
+    await setMember(m.project_id, role === 'client' ? 'employee' : role, role === 'client' ? false : m.can_approve_reports);
+  };
   const setMember = async (projectId: string, role: string, canApprove: boolean) => {
     const { error } = await withPin(() => sb().from('project_memberships').upsert({ project_id: projectId, user_id: u.id, role, can_approve_reports: role === 'project_manager' || canApprove }));
     if (error) return notify(error.message);
@@ -834,7 +848,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
 
       <div className="user-section">
         <h4>Module access</h4>
-        <ViewsEditor u={u} reload={reload} />
+        <ViewsEditor key={(u.allowed_views ?? ['*']).join(',')} u={u} reload={reload} />
       </div>
 
       <div className="user-section">
@@ -848,7 +862,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
               return (
                 <tr key={m.project_id}>
                   <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
-                  <td><select className="input" value={m.role} onChange={(e) => setMember(m.project_id, e.target.value, m.can_approve_reports)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option></select></td>
+                  <td><select className="input" value={m.role === 'employee' && isClientViews(u.allowed_views) && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (reports only)</option>}</select></td>
                   <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
                 </tr>
