@@ -734,10 +734,12 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
         {VIEWS.map(([k, label]) => {
-          const always = ALWAYS_VIEWS.includes(k) && !isClientViews(u.allowed_views);
+          const client = isClientViews(u.allowed_views);
+          const always = ALWAYS_VIEWS.includes(k) && !client;
+          // a client account shows exactly the client view, locked: change the role to Staff to edit modules
           return (
-            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={always ? 'Every user always has this module' : undefined}>
-              <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'Client accounts see only this view. Change the role to Staff to choose modules.' : always ? 'Every user always has this module' : undefined}>
+              <input type="checkbox" checked={client ? CLIENT_VIEWS.includes(k) : always || sel.includes(k)} disabled={always || client} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
               {label}{always && <span className="note"> (always on)</span>}
             </label>
           );
@@ -811,7 +813,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
         <UserAvatar name={u.full_name || u.email} role={u.global_role} />
         <div className="user-detail-info">
           <h3>{u.full_name || u.email}</h3>
-          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'} · <Pill s={u.status} /></div>
+          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : isClientViews(u.allowed_views) ? 'Client' : 'Staff'} · <Pill s={u.status} /></div>
         </div>
       </div>
 
