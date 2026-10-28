@@ -489,6 +489,26 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   };
 
   const [resetCode, setResetCode] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
+  // Role column: Super Admin uses the existing admin rights actions; Client and Staff set the account's modules
+  const changeRole = async (u: Profile, role: string) => {
+    const who = u.full_name || u.email;
+    const text = role === 'super_admin' ? `Give ${who} full Super Admin rights?`
+      : role === 'client' ? `Make ${who} a client account? They will see only reports for their projects.`
+      : `Make ${who} staff? ${u.global_role === 'super_admin' ? 'Super Admin rights are removed.' : 'They can use every module (change this under Module access).'}`;
+    if (!(await askConfirm(text, { danger: role === 'super_admin' || u.global_role === 'super_admin' }))) return;
+    try {
+      if (role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_admin', hours: 24 });
+      else {
+        if (u.global_role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_staff', hours: 24 });
+        const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: role === 'client' ? [...CLIENT_VIEWS] : null }));
+        if (error) throw new Error(error.message);
+      }
+      notify('Role changed. Recorded in the audit log.');
+    } catch (e) {
+      notify((e as Error).message);
+    }
+    await reload();
+  };
   const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
     try {
@@ -627,7 +647,11 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                       </div>
                     </td>
                     <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.pin_locked_at && <> <span className="pill pill-bad">PIN locked</span></>}{u.status_reason && <div className="note">{u.status_reason}</div>}{u.username && <div className="note">@{u.username}</div>}</td>
-                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : isClientViews(u.allowed_views) ? <span className="pill">Client</span> : 'Staff'}</td>
+                    <td onClick={(e) => e.stopPropagation()}>{u.id === selfId || u.status !== 'active'
+                      ? (u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : isClientViews(u.allowed_views) ? <span className="pill">Client</span> : 'Staff')
+                      : <select className="input" style={{ minWidth: 120 }} aria-label="Account role" value={u.global_role === 'super_admin' ? 'super_admin' : isClientViews(u.allowed_views) ? 'client' : 'staff'} onChange={(e) => void changeRole(u, e.target.value)}>
+                          <option value="staff">Staff</option><option value="client">Client</option><option value="super_admin">Super Admin</option>
+                        </select>}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
                     <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
                     <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
@@ -836,8 +860,16 @@ function UserPanel({ u, d, self, act, review, reload }: {
         {u.status === 'active' && free.length > 0 && (
           <div className="form-actions">
             <select className="input" style={{ maxWidth: 240 }} value={addProject} onChange={(e) => setAddProject(e.target.value)} aria-label="Project to add"><option value="">Add to project…</option>{free.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select>
-            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option></select>
-            <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => { await setMember(addProject, addRole, false); setAddProject(''); }}>Give access</button>
+            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client (reports only)</option>}</select>
+            <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => {
+              // a client is a project member whose account sees only the client report views
+              if (addRole === 'client' && !isClientViews(u.allowed_views)) {
+                if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects; every other module is hidden.`))) return;
+                const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: [...CLIENT_VIEWS] }));
+                if (error) return notify(error.message);
+              }
+              await setMember(addProject, addRole === 'client' ? 'employee' : addRole, false); setAddProject('');
+            }}>Give access</button>
           </div>
         )}
       </div>
