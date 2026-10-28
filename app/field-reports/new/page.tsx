@@ -22,14 +22,17 @@ import type { Evidence, FieldReport, ReportDetails } from '@/lib/types';
 
 const STEPS = ['Details', 'Photos', 'Work done', 'Sign & submit'] as const;
 const TYPES = ['Progress', 'Inspection', 'Issue', 'Other'] as const;
-const WEATHER = [['Sunny', '☀'], ['Cloudy', '☁'], ['Rainy', '☂'], ['Windy', '≋']] as const;
+const WEATHER = [['Sunny', '☀'], ['Cloudy', '☁'], ['Rainy', '☂'], ['Windy', '≋'], ['Other', '…']] as const;
+const UNITS = ['pcs', 'L', 'kg', 'm', 'm²', 'sets', 'set', 'roll', 'lot'];
+// optional remark sections, written into the remarks under their own headings
+const EXTRA = ['Outstanding work', 'Defects and observations', 'Corrective actions', 'Safety concerns', 'Recommendations', 'Client instructions'] as const;
 const CATEGORIES = ['Before', 'After', 'During', 'Defect', 'Safety'] as const;
 type Cat = (typeof CATEGORIES)[number];
 const DEFAULT_TASKS = ['Glass cleaning', 'Frame cleaning', 'Removed water marks', 'Applied sealant (if any)', 'Inspection and final check'];
 
 interface Material { name: string; qty: string; unit: string }
 interface Draft {
-  activityId: string; date: string; type: string; location: string; area: string; floor: string; weather: string; description: string; pct: string; techName: string; clientName: string;
+  activityId: string; date: string; type: string; location: string; area: string; floor: string; weather: string; description: string; pct: string; techName: string; clientName: string; weatherNote?: string; extra?: Record<string, string>;
   tasks: { label: string; done: boolean; note?: string }[]; materials: Material[]; remarks: string; photoIds: string[];
 }
 const blank = (): Draft => ({
@@ -48,6 +51,10 @@ export default function NewFieldReport() {
   const [loaded, setLoaded] = useState('');
   const [tab, setTab] = useState<Cat>('Before');
   // the report just submitted: shown until the server confirms it (or kept on this device while offline)
+  const [online, setOnline] = useState(true);
+  useEffect(() => { const u = () => setOnline(navigator.onLine); u(); window.addEventListener('online', u); window.addEventListener('offline', u); return () => { window.removeEventListener('online', u); window.removeEventListener('offline', u); }; }, []);
+  const [fieldErr, setFieldErr] = useState<[string, string] | null>(null);
+  const errFor = (f: string) => (fieldErr && fieldErr[0] === f ? <span className="bad fr-err" role="alert">{fieldErr[1]}</span> : null);
   const [sent, setSent] = useState<{ report: FieldReport; confirmed: boolean; refused?: string } | null>(null);
   // confirmation needs the report to have been queued first: it is queued a moment after it is saved
   const queued = useRef(false);
@@ -89,7 +96,7 @@ export default function NewFieldReport() {
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
 
-  const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
+  const set = (p: Partial<Draft>) => { setD((x) => ({ ...x, ...p })); setFieldErr(null); };
   const act = activities.find((a) => a.id === d.activityId);
   const prev = d.activityId ? actualPct(d.activityId, reports, d.date, act) : 0;
   const photos = d.photoIds.map((id) => evidence.find((e) => e.id === id)).filter((e): e is Evidence => !!e);
@@ -133,16 +140,18 @@ export default function NewFieldReport() {
     [ids[a], ids[b]] = [ids[b], ids[a]];
     return { ...x, photoIds: ids };
   });
-  const check = (s: number): string | null => {
+  const problem = (s: number): [string, string] | null => {
     if (s === 0) {
-      if (!d.activityId) return 'Choose the activity this report is for.';
-      if (!d.date) return 'Report date is required.';
-      if (!d.location.trim()) return 'Location is required.';
-      if (!d.description.trim()) return 'Describe the work.';
-      if (d.type === 'Progress') { const v = Number(d.pct); if (d.pct.trim() === '' || !Number.isFinite(v) || v < 0 || v > 100) return 'Enter the cumulative % complete (0 to 100).'; }
+      if (!d.activityId) return ['activity', 'Choose the activity this report is for.'];
+      if (!d.date) return ['date', 'Report date is required.'];
+      if (!d.location.trim()) return ['location', 'Location is required.'];
+      if (d.type === 'Progress') { const v = Number(d.pct); if (d.pct.trim() === '' || !Number.isFinite(v) || v < 0 || v > 100) return ['pct', 'Enter the cumulative % complete (0 to 100).']; }
+      if (!d.description.trim()) return ['description', 'Describe the work.'];
     }
     return null;
   };
+  // the message also shows beside the field it is about
+  const check = (s: number): string | null => { const p = problem(s); setFieldErr(p); return p ? p[1] : null; };
   const go = (s: number) => {
     for (let k = 0; k < s; k++) { const e = check(k); if (e) { setStep(k); return notify(e); } }
     setStep(s);
@@ -189,18 +198,20 @@ export default function NewFieldReport() {
     for (const p of photos) updateEvidence(p.id, { activityId: d.activityId, workArea: d.area.trim(), locationDetail: d.floor.trim() });
     // BEFORE and AFTER photos of this report are paired in the order they were taken
     for (let i = 0; i < Math.min(before.length, after.length); i++) { const pairId = uid('pair'); updateEvidence(before[i].id, { pairId }); updateEvidence(after[i].id, { pairId }); }
+    const weatherText = d.weather === 'Other' && d.weatherNote?.trim() ? `Other: ${d.weatherNote.trim()}` : d.weather;
+    const allRemarks = [d.remarks.trim(), ...EXTRA.filter((x) => d.extra?.[x]?.trim()).map((x) => `${x}: ${d.extra![x].trim()}`)].filter(Boolean).join('\n\n');
     const notes = [
-      `[${d.type}] ${location || ''}${d.weather ? ` · Weather: ${d.weather}` : ''}`.trim(),
+      `[${d.type}] ${location || ''}${weatherText ? ` · Weather: ${weatherText}` : ''}`.trim(),
       d.description.trim(),
       d.tasks.some((t) => t.done) ? `Work done: ${d.tasks.filter((t) => t.done).map((t) => t.label).join('; ')}` : '',
       d.materials.filter((m) => m.name.trim()).length ? `Materials: ${d.materials.filter((m) => m.name.trim()).map((m) => `${m.name.trim()} ${m.qty} ${m.unit}`.trim()).join('; ')}` : '',
-      d.remarks.trim() ? `Remarks: ${d.remarks.trim()}` : '',
+      allRemarks ? `Remarks: ${allRemarks}` : '',
       `Photos: ${before.length} before, ${after.length} after. Signed by technician${signed.client ? ' and client' : ''}.`,
     ].filter(Boolean).join('\n');
     const details: ReportDetails = {
-      type: d.type as ReportDetails['type'], location: d.location.trim(), area: d.area.trim(), floor: d.floor.trim(), weather: d.weather, description: d.description.trim(),
+      type: d.type as ReportDetails['type'], location: d.location.trim(), area: d.area.trim(), floor: d.floor.trim(), weather: weatherText, description: d.description.trim(),
       tasks: d.tasks.filter((t) => t.label.trim()).map((t) => ({ label: t.label.trim(), done: t.done, ...(t.note?.trim() ? { note: t.note.trim() } : {}) })), materials: d.materials.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), qty: Number(m.qty), unit: m.unit })),
-      remarks: d.remarks.trim(), signers, photos: photos.map((p) => ({ id: p.id, kind: p.kind })),
+      remarks: allRemarks, signers, photos: photos.map((p) => ({ id: p.id, kind: p.kind })),
     };
     const report: FieldReport = { id: uid('rep'), projectId: pid, activityId: d.activityId, date: d.date, actualPct: v, completedQty: null, notes, createdAt: new Date().toISOString(), details };
     addReport(report);
@@ -230,12 +241,10 @@ export default function NewFieldReport() {
   const chip = (on: boolean) => `fr-chip${on ? ' on' : ''}`;
   return (
     <div className="fr-wizard">
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Field operations</div>
-          <h1>New field report</h1>
-        </div>
-        <Link className="btn btn-sm" href="/field-reports">All field reports</Link>
+      <div className="fr-top">
+        <Link href="/field-reports" className="fr-back" aria-label="Back to field reports">‹</Link>
+        <div><b>NEW REPORT</b><span>FIELD ACCESS TASK</span></div>
+        <span className={`fr-online ${online ? '' : 'off'}`}>{online ? 'Online' : 'Offline'}</span>
       </div>
       {sent && (
         <section className={`card fr-card fr-sent ${sent.confirmed ? 'ok' : 'wait'}`} role="status">
@@ -267,18 +276,18 @@ export default function NewFieldReport() {
           <h2>Project information</h2>
           <div className="form-grid">
             <label className="field">Project *<select className="input" value={pid} disabled={!!busy} onChange={(e) => e.target.value && setActiveProject(e.target.value)}>{state.projects.map((p) => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ` : ''}{p.name}</option>)}</select></label>
-            <label className="field">Activity *<select className="input" value={d.activityId} onChange={(e) => set({ activityId: e.target.value })}><option value="">Choose…</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-            <label className="field">Report date *<input className="input" type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} /></label>
+            <label className="field">Activity *<select className="input" value={d.activityId} onChange={(e) => set({ activityId: e.target.value })}><option value="">Choose…</option>{activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>{errFor('activity')}</label>
+            <label className="field">Report date *<input className="input" type="date" value={d.date} onChange={(e) => set({ date: e.target.value })} />{errFor('date')}</label>
           </div>
           <label className="field">Location *
             <span style={{ display: 'flex', gap: 8 }}>
               <input className="input" value={d.location} onChange={(e) => set({ location: e.target.value })} placeholder={project.site || 'e.g. Makati City'} />
               <button type="button" className="btn" onClick={() => navigator.geolocation?.getCurrentPosition((p) => set({ location: `${d.location || project.site || ''}${d.location || project.site ? ' · ' : ''}${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)}` }), () => notify('Location is not available on this device.'), { enableHighAccuracy: true, timeout: 15000 })}>GPS</button>
             </span>
-          </label>
+          {errFor('location')}</label>
           <h3>Report type *</h3>
           <div className="fr-chips">{TYPES.map((t) => <button key={t} type="button" className={`${chip(d.type === t)} fr-ico`} onClick={() => set({ type: t })}><FieldIcon name={t.toLowerCase()} />{t}</button>)}</div>
-          {d.type === 'Progress' && <label className="field">Cumulative % complete *{d.activityId ? <span className="note"> (last: {fmtPct(prev)})</span> : null}<input className="input" inputMode="decimal" value={d.pct} onChange={(e) => set({ pct: e.target.value })} placeholder="e.g. 60" /></label>}
+          {d.type === 'Progress' && <label className="field">Cumulative % complete *{d.activityId ? <span className="note"> (last: {fmtPct(prev)})</span> : null}<input className="input" inputMode="decimal" value={d.pct} onChange={(e) => set({ pct: e.target.value })} placeholder="e.g. 60" />{errFor('pct')}</label>}
           <h3>Work area / floor</h3>
           <div className="form-grid">
             <label className="field">Work area<input className="input" list="fr-areas" value={d.area} onChange={(e) => set({ area: e.target.value })} placeholder="e.g. Gamboa Side" /></label>
@@ -288,7 +297,8 @@ export default function NewFieldReport() {
           <datalist id="fr-locs">{[...new Set(evidence.map((e) => e.locationDetail?.trim()).filter(Boolean))].map((v) => <option key={v} value={v} />)}</datalist>
           <h3>Weather</h3>
           <div className="fr-chips">{WEATHER.map(([w]) => <button key={w} type="button" className={`${chip(d.weather === w)} fr-ico`} onClick={() => set({ weather: w })}><FieldIcon name={w.toLowerCase()} />{w}</button>)}</div>
-          <label className="field">Description *<textarea className="input" rows={4} maxLength={500} value={d.description} onChange={(e) => set({ description: e.target.value })} placeholder="What was done, where, and the result" /><span className="note">{d.description.length}/500</span></label>
+          {d.weather === 'Other' && <label className="field">Weather note<input className="input" maxLength={120} value={d.weatherNote ?? ''} onChange={(e) => set({ weatherNote: e.target.value })} placeholder="e.g. Hazy, light drizzle in the afternoon" /></label>}
+          <label className="field">Description *<textarea className="input" rows={4} maxLength={500} value={d.description} onChange={(e) => set({ description: e.target.value })} placeholder="What was done, where, and the result" /><span className="note">{d.description.length}/500</span>{errFor('description')}</label>
         </section>
       )}
 
@@ -354,11 +364,16 @@ export default function NewFieldReport() {
             <div key={i} className="fr-mat">
               <input className="input" value={m.name} placeholder="Material" onChange={(e) => set({ materials: d.materials.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
               <input className="input" inputMode="decimal" value={m.qty} placeholder="Qty" onChange={(e) => set({ materials: d.materials.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)) })} />
-              <select className="input" value={m.unit} onChange={(e) => set({ materials: d.materials.map((x, j) => (j === i ? { ...x, unit: e.target.value } : x)) })}>{['pcs', 'L', 'kg', 'm', 'm²', 'roll', 'set', 'lot'].map((u) => <option key={u}>{u}</option>)}</select>
+              <select className="input" value={UNITS.includes(m.unit) ? m.unit : 'Other'} onChange={(e) => set({ materials: d.materials.map((x, j) => (j === i ? { ...x, unit: e.target.value === 'Other' ? '' : e.target.value } : x)) })}>{UNITS.map((u) => <option key={u}>{u}</option>)}<option>Other</option></select>
+              {!UNITS.includes(m.unit) && <input className="input" maxLength={20} value={m.unit} placeholder="Unit" aria-label="Other unit" onChange={(e) => set({ materials: d.materials.map((x, j) => (j === i ? { ...x, unit: e.target.value } : x)) })} />}
               <button type="button" className="btn btn-sm" aria-label="Remove material" onClick={() => set({ materials: d.materials.filter((_, j) => j !== i) })}>✕</button>
             </div>
           ))}
           <label className="field">Remarks<textarea className="input" rows={3} maxLength={500} value={d.remarks} onChange={(e) => set({ remarks: e.target.value })} placeholder="e.g. All works completed as per method statement." /><span className="note">{d.remarks.length}/500</span></label>
+          <details className="fr-more">
+            <summary>More remarks (outstanding work, defects, safety, recommendations…)</summary>
+            {EXTRA.map((k) => <label key={k} className="field">{k}<textarea className="input" rows={2} maxLength={500} value={d.extra?.[k] ?? ''} onChange={(e) => set({ extra: { ...(d.extra ?? {}), [k]: e.target.value } })} /></label>)}
+          </details>
         </section>
       )}
 
@@ -372,7 +387,7 @@ export default function NewFieldReport() {
             <dt>Report type</dt><dd>{d.type}{d.type === 'Progress' && d.pct ? ` · ${fmtPct(Number(d.pct))}` : ''}</dd>
             <dt>Location</dt><dd>{d.location || '—'}</dd>
             <dt>Work area</dt><dd>{location || '—'}</dd>
-            <dt>Weather</dt><dd>{d.weather}</dd>
+            <dt>Weather</dt><dd>{d.weather === 'Other' && d.weatherNote?.trim() ? `Other: ${d.weatherNote.trim()}` : d.weather}</dd>
           </dl>
           <div className="card-head"><h3>Photos <span className="note">{before.length} before · {after.length} after · {photos.length} in all</span></h3><button type="button" className="btn btn-sm" onClick={() => go(1)}>Edit</button></div>
           <div className="fr-strip">{photos.slice(0, 4).map((p) => <PhotoThumb key={p.id} id={p.id} storagePath={p.storagePath} alt={p.kind} />)}{photos.length > 4 && <span className="fr-more">+{photos.length - 4}</span>}</div>
