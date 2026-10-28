@@ -11,7 +11,7 @@ import { requestPersistentStorage, unsentSummary, type PersistState } from '@/li
 import { askConfirm } from '@/components/Dialogs';
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
-const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
+const BARE = [/^\/privacy/, /^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
 const MANAGER_ONLY = new Set(['/estimating', '/quotation']);
 
 function CloudPill() {
