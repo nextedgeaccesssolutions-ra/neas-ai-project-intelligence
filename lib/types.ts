@@ -97,7 +97,7 @@ export interface FieldReport {
 export interface ReportDetails {
   type: 'Progress' | 'Inspection' | 'Issue' | 'Other';
   location: string; area: string; floor: string; weather: string; description: string;
-  tasks: { label: string; done: boolean }[];
+  tasks: { label: string; done: boolean; note?: string }[];
   materials: { name: string; qty: number; unit: string }[];
   remarks: string;
   /** signature images are Site evidence photos */

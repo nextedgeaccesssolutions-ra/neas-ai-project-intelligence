@@ -29,7 +29,7 @@ const DEFAULT_TASKS = ['Glass cleaning', 'Frame cleaning', 'Removed water marks'
 interface Material { name: string; qty: string; unit: string }
 interface Draft {
   activityId: string; date: string; type: string; location: string; area: string; floor: string; weather: string; description: string; pct: string; techName: string; clientName: string;
-  tasks: { label: string; done: boolean }[]; materials: Material[]; remarks: string; photoIds: string[];
+  tasks: { label: string; done: boolean; note?: string }[]; materials: Material[]; remarks: string; photoIds: string[];
 }
 const blank = (): Draft => ({
   activityId: '', date: todayLocal(), type: 'Progress', location: '', techName: '', clientName: '', area: '', floor: '', weather: 'Sunny', description: '', pct: '',
@@ -194,7 +194,7 @@ export default function NewFieldReport() {
     ].filter(Boolean).join('\n');
     const details: ReportDetails = {
       type: d.type as ReportDetails['type'], location: d.location.trim(), area: d.area.trim(), floor: d.floor.trim(), weather: d.weather, description: d.description.trim(),
-      tasks: d.tasks.filter((t) => t.label.trim()), materials: d.materials.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), qty: Number(m.qty), unit: m.unit })),
+      tasks: d.tasks.filter((t) => t.label.trim()).map((t) => ({ label: t.label.trim(), done: t.done, ...(t.note?.trim() ? { note: t.note.trim() } : {}) })), materials: d.materials.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), qty: Number(m.qty), unit: m.unit })),
       remarks: d.remarks.trim(), signers, photos: photos.map((p) => ({ id: p.id, kind: p.kind })),
     };
     const report: FieldReport = { id: uid('rep'), projectId: pid, activityId: d.activityId, date: d.date, actualPct: v, completedQty: null, notes, createdAt: new Date().toISOString(), details };
@@ -326,7 +326,12 @@ export default function NewFieldReport() {
               <li key={i}>
                 <input type="checkbox" checked={t.done} onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, done: e.target.checked } : x)) })} aria-label={`Done: ${t.label || 'item'}`} />
                 <input className="input" value={t.label} placeholder="Activity done" onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
-                <button type="button" className="btn btn-sm" aria-label="Remove item" onClick={() => set({ tasks: d.tasks.filter((_, j) => j !== i) })}>✕</button>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  <button type="button" className="btn btn-sm" disabled={i === 0} aria-label="Move up" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i - 1 ? d.tasks[i] : j === i ? d.tasks[i - 1] : x)) })}>↑</button>
+                  <button type="button" className="btn btn-sm" disabled={i === d.tasks.length - 1} aria-label="Move down" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i + 1 ? d.tasks[i] : j === i ? d.tasks[i + 1] : x)) })}>↓</button>
+                  <button type="button" className="btn btn-sm" aria-label="Remove item" onClick={() => set({ tasks: d.tasks.filter((_, j) => j !== i) })}>✕</button>
+                </span>
+                <input className="input input-sm fr-note" value={t.note ?? ''} maxLength={300} placeholder="Note (optional)" onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)) })} aria-label={`Note for ${t.label || 'item'}`} />
               </li>
             ))}
           </ul>
@@ -358,7 +363,7 @@ export default function NewFieldReport() {
           <div className="card-head"><h3>Photos <span className="note">{before.length} before · {after.length} after · {photos.length} in all</span></h3><button type="button" className="btn btn-sm" onClick={() => go(1)}>Edit</button></div>
           <div className="fr-strip">{photos.slice(0, 4).map((p) => <PhotoThumb key={p.id} id={p.id} storagePath={p.storagePath} alt={p.kind} />)}{photos.length > 4 && <span className="fr-more">+{photos.length - 4}</span>}</div>
           <div className="card-head"><h3>Work done</h3><button type="button" className="btn btn-sm" onClick={() => go(2)}>Edit</button></div>
-          <ul>{d.tasks.filter((t) => t.done && t.label.trim()).map((t, i) => <li key={i}>✔ {t.label}</li>)}</ul>
+          <ul>{d.tasks.filter((t) => t.done && t.label.trim()).map((t, i) => <li key={i}>✔ {t.label}{t.note?.trim() ? <span className="note"> · {t.note}</span> : null}</li>)}</ul>
           {d.materials.some((m) => m.name.trim()) && <><h3>Materials used</h3><ul>{d.materials.filter((m) => m.name.trim()).map((m, i) => <li key={i}>{m.name} · {m.qty} {m.unit}</li>)}</ul></>}
           {d.remarks.trim() && <><h3>Remarks</h3><p style={{ margin: 0 }}>{d.remarks}</p></>}
           <h3>Sign &amp; submit</h3>

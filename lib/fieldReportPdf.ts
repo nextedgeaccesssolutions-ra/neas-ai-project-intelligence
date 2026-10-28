@@ -59,9 +59,9 @@ export async function fieldReportPdf(r: FieldReport, opts: {
   para(d?.description || r.notes || '—');
   if (d?.tasks.some((t) => t.label.trim())) {
     heading('Work done / activities');
-    autoTable(pdf, { startY: y, margin: { left: M, right: M }, theme: 'grid', head: [['', 'Activity']], styles: { fontSize: 9.5, cellPadding: 4 },
+    autoTable(pdf, { startY: y, margin: { left: M, right: M }, theme: 'grid', head: [['', 'Activity', 'Note']], styles: { fontSize: 9.5, cellPadding: 4 },
       headStyles: { fillColor: NAVY, textColor: 255 }, columnStyles: { 0: { cellWidth: 26, halign: 'center' } },
-      body: d.tasks.filter((t) => t.label.trim()).map((t) => [t.done ? 'X' : '', t.label]) });
+      body: d.tasks.filter((t) => t.label.trim()).map((t) => [t.done ? 'X' : '', t.label, t.note ?? '']) });
     after();
   }
   if (d?.materials.length) {

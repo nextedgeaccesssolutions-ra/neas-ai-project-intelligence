@@ -1,4 +1,5 @@
 'use client';
+import FieldHome from '@/components/FieldHome';
 import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -41,6 +42,7 @@ export default function Overview() {
 
   return (
     <>
+      <FieldHome />
       <div className="page-head">
         <div>
           <div className="eyebrow">Operations</div>

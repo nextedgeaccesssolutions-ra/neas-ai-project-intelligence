@@ -278,7 +278,10 @@ export default function FieldReports() {
                         )}
                       </td>
                     )}
-                    <td>{(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn btn-sm" onClick={() => { notify('Building PDF…'); void import('@/lib/fieldReportExport').then((m) => m.downloadFieldReportPdf(r, { project, activities, evidence })).catch((e) => notify(`PDF not created: ${(e as Error).message}`)); }}>PDF</button>{' '}
+                      {(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}
+                    </td>
                   </tr>
                 ), CLOUD ? 8 : 7)}
             </table>

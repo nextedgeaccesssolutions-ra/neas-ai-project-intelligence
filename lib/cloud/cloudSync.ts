@@ -51,7 +51,11 @@ export const VIEWS = [
   ['google_sheets', 'Google Sheets setup', '/google-sheets'], ['offline_queue', 'Offline queue', '/offline-queue'],
 ] as const;
 export type ViewKey = (typeof VIEWS)[number][0];
+// pages that show the same data as a module need that module's permission
+const ALIAS: [string, ViewKey][] = [['/photos', 'site_evidence'], ['/map', 'site_evidence'], ['/scan', 'projects']];
 export const viewOfPath = (path: string): ViewKey | null => {
+  const alias = ALIAS.find(([p]) => path.startsWith(p));
+  if (alias) return alias[1];
   const hit = VIEWS.filter(([, , href]) => (href === '/' ? path === '/' : path.startsWith(href)));
   return hit.length ? hit[hit.length - 1][0] : null;
 };
