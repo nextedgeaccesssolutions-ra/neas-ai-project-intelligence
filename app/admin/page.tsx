@@ -258,6 +258,19 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
     setF({ ...empty, code: nextCode([...d.projects, { code } as Project]) });
     await reload();
   };
+  const [codeEdit, setCodeEdit] = useState<{ id: string; value: string } | null>(null);
+  const saveCode = async (p: Project) => {
+    if (!codeEdit) return;
+    const code = codeEdit.value.trim().toUpperCase();
+    if (code === p.code) return setCodeEdit(null);
+    if (!PROJECT_CODE_RE.test(code)) return notify('Project ID: 3–40 capital letters, digits or dashes, e.g. PRJ-2026-003.');
+    if (!(await askConfirm(`Change ${p.code} to ${code}? Team and client links, QR codes and shared bookmarks that use ${p.code} stop working; clients sign in with ${code} from now on.`))) return;
+    const { error } = await withPin(() => sb().from('projects').update({ code }).eq('id', p.id));
+    if (error) return notify(error.message.includes('duplicate') ? `${code} already exists.` : error.message);
+    notify(`Project ID changed to ${code}.`);
+    setCodeEdit(null);
+    await reload();
+  };
   const setStatus = async (p: Project, status: string) => {
     if (!(await askConfirm(`Change ${p.code} to “${status}”? ${status === 'suspended' || status === 'archived' ? 'Members lose access until it is reactivated.' : ''}`, { danger: status !== 'active' }))) return;
     const { error } = await sb().from('projects').update({ status }).eq('id', p.id);
@@ -308,7 +321,20 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                 return (
                   <Fragment key={p.id}>
                     <tr>
-                      <td><b>{p.code}</b><div className="note">{p.name}</div></td>
+                      <td>
+                        {codeEdit?.id === p.id ? (
+                          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                            <input className="input" style={{ maxWidth: 180 }} value={codeEdit.value} autoFocus aria-label="Project ID"
+                              onChange={(e) => setCodeEdit({ id: p.id, value: e.target.value.toUpperCase() })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') void saveCode(p); if (e.key === 'Escape') setCodeEdit(null); }} />
+                            <button className="btn btn-sm btn-primary" onClick={() => saveCode(p)}>Save</button>
+                            <button className="btn btn-sm" onClick={() => setCodeEdit(null)}>Cancel</button>
+                          </span>
+                        ) : (
+                          <><b>{p.code}</b> <button className="btn btn-sm" title="Edit project ID" onClick={() => setCodeEdit({ id: p.id, value: p.code })}>Edit</button></>
+                        )}
+                        <div className="note">{p.name}</div>
+                      </td>
                       <td>{p.client_name || '—'}<div className="note">{p.reference_no}</div></td>
                       <td className="note">{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</td>
                       <td><Pill s={p.status} /></td>
