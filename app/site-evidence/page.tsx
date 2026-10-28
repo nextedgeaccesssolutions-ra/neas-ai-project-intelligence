@@ -2,7 +2,7 @@
 import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import OrgToolbar, { dragSource, GroupHeader, MoveToMenu, UngroupZone } from '@/components/OrgToolbar';
 import { itemKey, useCollapsed, useViewOrg, type ViewGroup } from '@/lib/viewOrg';
-import { useCloudStatus } from '@/lib/cloud/cloudSync';
+import { isClientAccount, useCloudStatus } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
@@ -55,6 +55,8 @@ export default function SiteEvidence() {
   const { pid, activities, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
+  // client accounts see shared photos only and change nothing: no edit, pair, move or delete
+  const client = CLOUD && isClientAccount();
   const [activityId, setActivityId] = useState('');
   const [kind, setKind] = useState<EvidenceKind>('Before');
   // capture form in Cover photo mode: saved photos go straight onto the report cover
@@ -339,8 +341,8 @@ export default function SiteEvidence() {
   const card = (e: Evidence) => {
     const isEditing = editing === e.id;
     const edits = e.editCount ?? 0;
-    const canEdit = !CLOUD || reviewer || edits < 1;
-    const needsApproval = CLOUD && !reviewer && edits >= 1;
+    const canEdit = !client && (!CLOUD || reviewer || edits < 1);
+    const needsApproval = !client && CLOUD && !reviewer && edits >= 1;
     const partner = partnerOf(e);
     const from = pairFrom ? byId.get(pairFrom) : undefined;
     const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
@@ -402,7 +404,7 @@ export default function SiteEvidence() {
                 {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
                 {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
                 {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0)) + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
-                {!showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} currentEditable={(() => { const cur = org.groupOf.get(itemKey('attachment', e.id)); return !cur || cur.scope === 'personal' || reviewer; })()} onMove={(gid) => void movePhotos([e.id], gid)} />}
+                {!client && !showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} currentEditable={(() => { const cur = org.groupOf.get(itemKey('attachment', e.id)); return !cur || cur.scope === 'personal' || reviewer; })()} onMove={(gid) => void movePhotos([e.id], gid)} />}
                 {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                 {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
                 {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
@@ -620,7 +622,7 @@ export default function SiteEvidence() {
           total={listed.length}
           onDelete={async () => {
             // same rule as each photo's own Delete button
-            const ok = pickedIds.map((id) => byId.get(id)).filter((e): e is Evidence => !!e && (!CLOUD || reviewer || (e.editCount ?? 0) < 1));
+            const ok = client ? [] : pickedIds.map((id) => byId.get(id)).filter((e): e is Evidence => !!e && (!CLOUD || reviewer || (e.editCount ?? 0) < 1));
             if (!ok.length) return notify('You cannot delete these photos. Ask a project manager.');
             if (!(await askConfirm(`Delete ${ok.length} photo(s)?${ok.length < pickedIds.length ? ` ${pickedIds.length - ok.length} you may not delete are skipped.` : ''} Photos that have not synced yet are lost.`, { danger: true }))) return;
             for (const e of ok) { const p = partnerOf(e); if (p && !ok.includes(p)) updateEvidence(p.id, { pairId: null }); deleteEvidence(e.id); }
