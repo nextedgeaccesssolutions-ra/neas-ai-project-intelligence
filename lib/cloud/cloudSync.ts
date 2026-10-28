@@ -27,13 +27,15 @@ export interface CloudStatus {
   error: string | null;
 }
 
-let status: CloudStatus = { auth: 'checking', online: true, profile: null, memberships: [], pending: 0, conflicts: 0, rejected: 0, syncing: false, lastSyncAt: null, error: null };
+// what the server renders with; the browser uses it while taking over the server page, so both draw the same first screen
+const INITIAL: CloudStatus = { auth: 'checking', online: true, profile: null, memberships: [], pending: 0, conflicts: 0, rejected: 0, syncing: false, lastSyncAt: null, error: null };
+let status: CloudStatus = INITIAL;
 const subs = new Set<() => void>();
 const set = (p: Partial<CloudStatus>) => {
   status = { ...status, ...p };
   subs.forEach((f) => f());
 };
-export const useCloudStatus = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => status);
+export const useCloudStatus = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => INITIAL);
 export const cloudStatusNow = () => status;
 
 /** Role helpers for the UI (the database enforces the same rules). */

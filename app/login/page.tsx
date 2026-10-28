@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthCard from '@/components/AuthCard';
 import { supabaseBrowser, supabaseLinkClient } from '@/lib/cloud/browser';
 import { CLOUD } from '@/lib/cloud/env';
@@ -19,7 +19,14 @@ export default function LoginPage() {
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [pinHelp, setPinHelp] = useState(false);
-  const online = typeof navigator === 'undefined' || navigator.onLine;
+  // read after the page is taken over, so the server and browser draw the same first screen
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const upd = () => setOnline(navigator.onLine);
+    upd();
+    window.addEventListener('online', upd); window.addEventListener('offline', upd);
+    return () => { window.removeEventListener('online', upd); window.removeEventListener('offline', upd); };
+  }, []);
 
   if (!CLOUD) return <AuthCard title="Sign-in not set up" subtitle="This copy runs in device mode. Connect Supabase to enable accounts."><Link className="btn" href="/">Open the app</Link></AuthCard>;
 
