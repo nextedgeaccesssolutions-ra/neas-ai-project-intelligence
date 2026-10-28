@@ -10,7 +10,7 @@ import { defaultSubject, validEmail } from '@/lib/shareEmail';
 import { fmtDate } from '@/lib/format';
 
 type Tab = 'email' | 'qr' | 'link';
-type Share = { id: string; method: 'link' | 'qr' | 'email'; recipient_email: string | null; label: string; created_at: string; expires_at: string; revoked_at: string | null; open_count: number; last_opened_at: string | null };
+type Share = { id: string; method: 'link' | 'qr' | 'email'; recipient_email: string | null; label: string; created_at: string; expires_at: string; revoked_at: string | null; open_count: number; last_opened_at: string | null; link_token?: string | null };
 type Created = { url: string; expiresAt: string };
 
 const DAYS = [1, 7, 30, 90];
@@ -26,7 +26,7 @@ export default function ShareDialog({ projectId, projectCode, projectName, onClo
 
   const load = useCallback(async () => {
     const { data, error } = await supabaseBrowser()!.from('report_shares')
-      .select('id, method, recipient_email, label, created_at, expires_at, revoked_at, open_count, last_opened_at')
+      .select('id, method, recipient_email, label, created_at, expires_at, revoked_at, open_count, last_opened_at, link_token')
       .eq('project_id', projectId).order('created_at', { ascending: false }).limit(50);
     setListError(error ? 'Could not load the existing links.' : null);
     setShares((data as Share[]) ?? []);
@@ -45,8 +45,12 @@ export default function ShareDialog({ projectId, projectCode, projectName, onClo
       notify(error?.message ?? 'Could not create the link.');
       return null;
     }
+    // keep the link so it can be copied again from the list (managers only; older links were never kept)
+    const made = data as { id: string; token: string };
+    const kept = await supabaseBrowser()!.rpc('remember_share_link', { p_share: made.id, p_token: made.token });
+    if (kept.error) notify('The link works, but it could not be saved for copying later. Copy it now.');
     void load();
-    return { url: `${window.location.origin}/share#${(data as { token: string }).token}`, expiresAt: (data as { expires_at: string }).expires_at };
+    return { url: `${window.location.origin}/share#${made.token}`, expiresAt: (data as { expires_at: string }).expires_at };
   };
 
   const revoke = async (s: Share) => {
@@ -98,13 +102,22 @@ export default function ShareDialog({ projectId, projectCode, projectName, onClo
         {!shares ? <p className="note">Loading…</p> : !shares.length ? <div className="empty">No links yet.</div> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Method</th><th>Sent to / label</th><th>Created</th><th>Expires</th><th className="num">Opened</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Method</th><th>Sent to / label</th><th>Link</th><th>Created</th><th>Expires</th><th className="num">Opened</th><th>Status</th><th></th></tr></thead>
               <tbody>{shares.map((s) => {
                 const st = shareState(s);
                 return (
                   <tr key={s.id}>
                     <td>{s.method === 'email' ? 'Email' : s.method === 'qr' ? 'QR code' : 'Link'}</td>
                     <td>{s.recipient_email ?? s.label}</td>
+                    <td>{s.link_token && st === 'Active' ? (() => {
+                      const url = `${window.location.origin}/share#${s.link_token}`;
+                      return (
+                        <span className="share-link-cell">
+                          <a href={url} target="_blank" rel="noreferrer" className="btn btn-sm">Preview</a>
+                          <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(url).then(() => notify('Link copied.'), () => notify(url))}>Copy</button>
+                        </span>
+                      );
+                    })() : <span className="note">{s.link_token ? '—' : s.method === 'email' ? 'Sent by e-mail' : st === 'Active' ? 'Not saved (made earlier)' : '—'}</span>}</td>
                     <td className="note">{when(s.created_at)}</td>
                     <td className="note">{fmtDate(s.expires_at.slice(0, 10))}</td>
                     <td className="num" title={s.last_opened_at ? `Last opened ${when(s.last_opened_at)}` : undefined}>{s.open_count}</td>
