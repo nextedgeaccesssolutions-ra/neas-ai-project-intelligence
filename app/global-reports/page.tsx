@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { canManage, isClientAccount, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { todayLocal, addDays } from '@/lib/calc';
 import { fmtDate } from '@/lib/format';
 import ShareDialog from '@/components/ShareDialog';
@@ -243,7 +243,7 @@ export default function GlobalReports() {
       </section>
 
       {/* client accounts read their reports in Project reports and the client portal, not the staff library */}
-      {!(CLOUD && cloud.profile?.global_role !== 'super_admin' && isClientViews(cloud.profile?.allowed_views)) && <section className="card" id="report-library">
+      {!(CLOUD && cloud.profile?.global_role !== 'super_admin' && isClientAccount(cloud.profile)) && <section className="card" id="report-library">
         <div className="card-head"><h2>Report library</h2>
           <div className="form-actions" style={{ marginTop: 0 }}>
             <span className="note">{filtered.length} of {rows.length} report(s){groupBy ? ` in ${groups.length} group(s)` : ''}</span>

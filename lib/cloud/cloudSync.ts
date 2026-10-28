@@ -12,7 +12,7 @@ import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
 export interface Membership { project_id: string; role: 'project_manager' | 'employee'; can_approve_reports: boolean }
-export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null; password_set_at?: string | null }
+export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null; password_set_at?: string | null; is_client?: boolean }
 
 export interface CloudStatus {
   auth: AuthState;
@@ -66,7 +66,8 @@ export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
 export const CLIENT_VIEWS: ViewKey[] = ['overview', 'project_management', 'field_reports', 'projects', 'site_evidence', 'offline_queue'];
 export const isClientViews = (v: readonly string[] | null | undefined) => !!v && v.length === CLIENT_VIEWS.length && CLIENT_VIEWS.every((k) => v.includes(k));
 /** The signed-in account is a client (read-only, shared items only). */
-export const isClientAccount = (profile: Profile | null = status.profile) => !!profile && profile.global_role !== 'super_admin' && isClientViews(profile.allowed_views);
+// the database flag decides; the module list is only a fallback for a cached profile from before the flag existed
+export const isClientAccount = (profile: Profile | null = status.profile) => !!profile && profile.global_role !== 'super_admin' && (profile.is_client ?? isClientViews(profile.allowed_views));
 export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
   !view || !profile || (ALWAYS_VIEWS.includes(view) && !isClientViews(profile.allowed_views)) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
@@ -363,7 +364,7 @@ async function loadIdentity(): Promise<void> {
   const sb = supabaseBrowser()!;
   const { data: u } = await sb.auth.getUser();
   if (!u.user) return set({ auth: 'signed_out', profile: null, memberships: [] });
-  const { data: profile } = await sb.from('profiles').select('id, email, full_name, username, global_role, status, email_verified_at, allowed_views, password_set_at').eq('id', u.user.id).single();
+  const { data: profile } = await sb.from('profiles').select('id, email, full_name, username, global_role, status, email_verified_at, allowed_views, password_set_at, is_client').eq('id', u.user.id).single();
   const { data: memberships } = await sb.from('project_memberships').select('project_id, role, can_approve_reports').eq('user_id', u.user.id);
   const active = profile?.status === 'active' && !!profile.email_verified_at;
   await setMeta('identity', { profile, memberships, verified_at: Date.now() });

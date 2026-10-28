@@ -20,7 +20,7 @@ const TABS: [Tab, string][] = [
   ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['recovery', 'Data recovery'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; is_client?: boolean; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
 interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string; deleted_at?: string | null }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; username?: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
@@ -555,7 +555,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   const ql = q.trim().toLowerCase();
   const filtered = d.profiles.filter((u) =>
     (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
-    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : role === 'client' ? u.global_role !== 'super_admin' && isClientViews(u.allowed_views) : membersOf(u.id).some((m) => m.role === role))) &&
+    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : role === 'client' ? u.global_role !== 'super_admin' && !!u.is_client : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
   );
@@ -583,7 +583,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
       columns: ['Full name', 'E-mail', 'E-mail verified', 'Account status', 'Approval', 'Global role', 'Projects (role)', 'Last sign-in', 'Created', 'Password', 'Password reset', 'Modules'].map((label) => ({ key: label, label })),
       rows: rows.map((u) => ({
         'Full name': u.full_name, 'E-mail': u.email, 'E-mail verified': u.email_verified_at ? 'Yes' : 'No', 'Account status': u.status, Approval: approvalOf(u),
-        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : isClientViews(u.allowed_views) ? 'Client' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
+        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : !!u.is_client ? 'Client' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
         Created: fmtDate(u.created_at.slice(0, 10)), Password: passwordOf(u), 'Password reset': resetOf(u), Modules: u.global_role === 'super_admin' || !u.allowed_views ? 'All' : u.allowed_views.join(', '),
       })),
     }],
@@ -648,8 +648,8 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                     </td>
                     <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.pin_locked_at && <> <span className="pill pill-bad">PIN locked</span></>}{u.status_reason && <div className="note">{u.status_reason}</div>}{u.username && <div className="note">@{u.username}</div>}</td>
                     <td onClick={(e) => e.stopPropagation()}>{u.id === selfId || u.status !== 'active'
-                      ? (u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : isClientViews(u.allowed_views) ? <span className="pill">Client</span> : 'Staff')
-                      : <select className="input" style={{ minWidth: 120 }} aria-label="Account role" value={u.global_role === 'super_admin' ? 'super_admin' : isClientViews(u.allowed_views) ? 'client' : 'staff'} onChange={(e) => void changeRole(u, e.target.value)}>
+                      ? (u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : !!u.is_client ? <span className="pill">Client</span> : 'Staff')
+                      : <select className="input" style={{ minWidth: 120 }} aria-label="Account role" value={u.global_role === 'super_admin' ? 'super_admin' : !!u.is_client ? 'client' : 'staff'} onChange={(e) => void changeRole(u, e.target.value)}>
                           <option value="staff">Staff</option><option value="client">Client</option><option value="super_admin">Super Admin</option>
                         </select>}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
@@ -727,14 +727,14 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
     <div>
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <div className="form-actions" style={{ marginTop: 0 }}>
-        {isClientViews(u.allowed_views)
+        {!!u.is_client
           ? <><span className="pill">Client account</span><span className="note">View only, for their projects: Overview, Schedule & Gantt, Field reports, Project register, Site evidence and Offline queue, showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything.</span></>
           : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: view only, shared items only.'); await reload(); }}>Make this a client account (view only)</button>}
       </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
         {VIEWS.map(([k, label]) => {
-          const client = isClientViews(u.allowed_views);
+          const client = !!u.is_client;
           const always = ALWAYS_VIEWS.includes(k) && !client;
           // a client account shows exactly the client view, locked: change the role to Staff to edit modules
           return (
@@ -783,7 +783,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
 
   // Client is an account setting (reports-only modules) on top of an employee membership
   const changeMemberRole = async (m: Member, role: string) => {
-    const client = isClientViews(u.allowed_views);
+    const client = !!u.is_client;
     if (role === 'client' && !client) {
       if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects, on every project they belong to.`))) return;
       const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
@@ -813,7 +813,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
         <UserAvatar name={u.full_name || u.email} role={u.global_role} />
         <div className="user-detail-info">
           <h3>{u.full_name || u.email}</h3>
-          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : isClientViews(u.allowed_views) ? 'Client' : 'Staff'} · <Pill s={u.status} /></div>
+          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : !!u.is_client ? 'Client' : 'Staff'} · <Pill s={u.status} /></div>
         </div>
       </div>
 
@@ -864,7 +864,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
               return (
                 <tr key={m.project_id}>
                   <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
-                  <td><select className="input" value={m.role === 'employee' && isClientViews(u.allowed_views) && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select></td>
+                  <td><select className="input" value={m.role === 'employee' && !!u.is_client && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select></td>
                   <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
                 </tr>
@@ -879,7 +879,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
             <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select>
             <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => {
               // a client is a project member whose account sees only the client report views
-              if (addRole === 'client' && !isClientViews(u.allowed_views)) {
+              if (addRole === 'client' && !!!u.is_client) {
                 if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects; every other module is hidden.`))) return;
                 const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
                 if (error) return notify(error.message);

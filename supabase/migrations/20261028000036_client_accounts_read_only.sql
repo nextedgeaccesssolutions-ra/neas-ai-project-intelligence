@@ -10,6 +10,8 @@ alter table neas.profiles add column if not exists is_client boolean not null de
 update neas.profiles set is_client = true,
   allowed_views = array['overview', 'project_management', 'field_reports', 'projects', 'site_evidence', 'offline_queue']
 where global_role <> 'super_admin' and allowed_views = array['overview'];
+update neas.project_memberships m set role = 'employee', can_approve_reports = false
+  from neas.profiles p where p.id = m.user_id and p.is_client;
 
 create or replace function neas.is_client_account() returns boolean
 language sql stable security definer set search_path = neas, extensions as $$
@@ -92,6 +94,20 @@ begin
     jsonb_build_object('views', coalesce(to_jsonb(p_views), '"all"'::jsonb)));
 end $$;
 
+-- a photo reaches a client only when it is shared and, if it belongs to a report, that report is approved and shared
+create or replace function neas.client_may_see_attachment(p_id uuid) returns boolean
+language sql stable security definer set search_path = neas, extensions as $$
+  select exists (
+    select 1 from neas.report_attachments f
+    where f.id = p_id and f.client_visible and f.deleted_at is null
+      and (f.report_id is null or exists (
+        select 1 from neas.project_reports r
+        where r.id = f.report_id and r.status = 'approved' and r.client_visible and r.deleted_at is null))
+  );
+$$;
+revoke execute on function neas.client_may_see_attachment(uuid) from public, anon;
+grant execute on function neas.client_may_see_attachment(uuid) to authenticated;
+
 -- read rules: staff as before, plus the client's shared view
 drop policy if exists projects_select on neas.projects;
 create policy projects_select on neas.projects for select to authenticated
@@ -106,7 +122,7 @@ create policy reports_select on neas.project_reports for select to authenticated
 drop policy if exists attachments_select on neas.report_attachments;
 create policy attachments_select on neas.report_attachments for select to authenticated
   using (neas.can_review(project_id) or (neas.is_member(project_id) and (uploaded_by = auth.uid() or client_visible))
-    or (neas.is_client(project_id) and client_visible and deleted_at is null));
+    or (neas.is_client(project_id) and neas.client_may_see_attachment(id)));
 drop policy if exists project_calendars_select on neas.project_calendars;
 create policy project_calendars_select on neas.project_calendars for select to authenticated
   using (neas.is_super_admin() or neas.is_member(project_id) or neas.is_client(project_id));
@@ -126,6 +142,6 @@ returns boolean language sql stable security definer set search_path = neas, ext
       select 1 from neas.report_attachments f
       where f.storage_path = p_name and f.deleted_at is null
         and (neas.can_review(f.project_id) or (neas.is_member(f.project_id) and (f.uploaded_by = auth.uid() or f.client_visible))
-          or (neas.is_client(f.project_id) and f.client_visible))
+          or (neas.is_client(f.project_id) and neas.client_may_see_attachment(f.id)))
     );
 $$;

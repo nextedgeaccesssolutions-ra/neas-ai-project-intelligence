@@ -9,7 +9,7 @@ import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { canManage, isSuperAdmin, pullAll } from '@/lib/cloud/cloudSync';
+import { canManage, isClientAccount, isSuperAdmin, pullAll } from '@/lib/cloud/cloudSync';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
@@ -24,6 +24,7 @@ import WalkthroughReport from '@/components/WalkthroughReport';
 
 export default function FieldReports() {
   const { ready, project, addReport, deleteReport, addEvidence, state, replaceAll } = useStore();
+  const client = CLOUD && isClientAccount();
   const { pid, activities, reports, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
@@ -158,16 +159,17 @@ export default function FieldReports() {
           <p className="lead">Record cumulative % complete per activity. Each saved report updates the Overview straight away.</p>
         </div>
         <div className="form-actions" style={{ marginTop: 0 }}>
-          <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
+          {/* client accounts are view only: no import, new report, photo upload or walkthrough */}
+          {!client && <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />}
           {CLOUD && reviewer && <Link className="btn" href="/templates">Import a template from Word / PowerPoint / Excel / PDF</Link>}
-          <Link className="btn btn-sm btn-primary" href="/field-reports/new">+ New field report (step by step)</Link>
-          <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
+          {!client && <Link className="btn btn-sm btn-primary" href="/field-reports/new">+ New field report (step by step)</Link>}
+          {!client && <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>}
           <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
         </div>
       </div>
       <ProjectBar />
 
-      <WalkthroughReport
+      {!client && <WalkthroughReport
         pid={pid}
         projectName={project.name}
         activities={activities}
@@ -179,9 +181,9 @@ export default function FieldReports() {
           setFilter(id);
           document.getElementById('new-report')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }}
-      />
+      />}
 
-      <section className="card" id="new-report">
+      <section className="card" id="new-report" style={client ? { display: 'none' } : undefined}>
         <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
           {activities.length === 0 ? (
             <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>

@@ -9,7 +9,7 @@ import { fetchFromServer } from '@/components/PhotoThumb';
 import { useProjectData, useStore } from '@/lib/store';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { canManage, isClientAccount, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { getPhoto } from '@/lib/photos';
 import { saveFile } from '@/lib/fileio';
 import { fmtDate } from '@/lib/format';
@@ -91,7 +91,7 @@ export default function TemplatesPage() {
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
   if (!CLOUD || !sb) return <div className="card">Report templates are part of the cloud version.</div>;
-  if (isClientViews(cloud.profile?.allowed_views)) return <div className="card">Report templates are for NEAS staff.</div>;
+  if (isClientAccount(cloud.profile)) return <div className="card">Report templates are for NEAS staff.</div>;
 
   const mine = templates.filter((t) => t.project_id === pid);
   const library = templates.filter((t) => t.project_id === null);

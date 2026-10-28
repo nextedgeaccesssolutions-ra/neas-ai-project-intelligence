@@ -2,7 +2,7 @@
 // "More": everything that is not on the phone bottom bar, filtered to what this account may open.
 import Link from 'next/link';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, canView, isClientViews, useCloudStatus, viewOfPath } from '@/lib/cloud/cloudSync';
+import { canManage, canView, isClientAccount, useCloudStatus, viewOfPath } from '@/lib/cloud/cloudSync';
 import { useStore } from '@/lib/store';
 
 const LINKS: [string, string, string][] = [
@@ -24,7 +24,7 @@ export default function More() {
   const { state } = useStore();
   // same rules as the side menu: the module must be allowed, and estimating is for managers
   const links = LINKS.filter(([href]) => !CLOUD || href === '/account'
-    || ((viewOfPath(href) === null ? !isClientViews(cloud.profile?.allowed_views) : canView(viewOfPath(href), cloud.profile)) && (href !== '/estimating' || canManage(state.activeProjectId))));
+    || ((viewOfPath(href) === null ? !isClientAccount(cloud.profile) : canView(viewOfPath(href), cloud.profile)) && (href !== '/estimating' || canManage(state.activeProjectId))));
   return (
     <>
       <div className="page-head"><div><div className="eyebrow">Menu</div><h1>More</h1></div></div>

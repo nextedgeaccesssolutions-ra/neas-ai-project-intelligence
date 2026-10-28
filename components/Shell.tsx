@@ -149,8 +149,8 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
     return <div className="auth-wrap"><div className="auth-card note">{cloud.auth === 'checking' ? 'Checking your access…' : 'Redirecting to sign in…'}</div></div>;
   }
   const isAdmin = CLOUD && cloud.profile?.global_role === 'super_admin';
-  const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile) && !(n.href === '/templates' && isClientViews(cloud.profile?.allowed_views))));
-  const isClient = CLOUD && !isAdmin && isClientViews(cloud.profile?.allowed_views);
+  const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile) && !(n.href === '/templates' && isClientAccount(cloud.profile))));
+  const isClient = CLOUD && !isAdmin && isClientAccount(cloud.profile);
   // report templates are a staff tool: client accounts cannot open them even by address
   const blocked = CLOUD && !pathname.startsWith('/admin') && (!canView(viewOfPath(pathname), cloud.profile) || (isClient && (pathname.startsWith('/templates') || pathname.startsWith('/field-reports/new'))));
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
