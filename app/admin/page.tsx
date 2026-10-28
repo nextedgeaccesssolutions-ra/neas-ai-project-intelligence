@@ -728,7 +728,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <div className="form-actions" style={{ marginTop: 0 }}>
         {!!u.is_client
-          ? <><span className="pill">Client account</span><span className="note">View only, for their projects: Overview, Schedule & Gantt, Field reports, Project register, Site evidence and Offline queue, showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything.</span></>
+          ? <><span className="pill">Client account</span><span className="note">View only, for their projects: Overview, Schedule & Gantt, Field reports, Site evidence, Global reports, Project reports, Report templates (final reports) and Offline queue, showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything.</span></>
           : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: view only, shared items only.'); await reload(); }}>Make this a client account (view only)</button>}
       </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>

@@ -91,7 +91,7 @@ export default function TemplatesPage() {
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
   if (!CLOUD || !sb) return <div className="card">Report templates are part of the cloud version.</div>;
-  if (isClientAccount(cloud.profile)) return <div className="card">Report templates are for NEAS staff.</div>;
+  const client = isClientAccount(cloud.profile);
 
   const mine = templates.filter((t) => t.project_id === pid);
   const library = templates.filter((t) => t.project_id === null);
@@ -149,6 +149,27 @@ export default function TemplatesPage() {
 
       {open ? (
         <ReportForm report={open} evidence={evidence} manager={manager} projectId={pid} projectName={`${project.code ?? ''} · ${project.name}`} onClose={async () => { setOpen(null); await load(); }} />
+      ) : client ? (
+        // client accounts: view only, finished reports of this project (the database returns only final ones)
+        <section className="card">
+          <div className="card-head"><h2>Reports ({reports.length})</h2><span className="note">View only</span></div>
+          {reports.length === 0 ? <div className="empty">No finished reports for this project yet.</div> : (
+            <div className="table-wrap">
+              <table className="tbl">
+                <thead><tr><th>Title</th><th>Updated</th><th /></tr></thead>
+                <tbody>
+                  {reports.map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.title}</td>
+                      <td className="note">{fmtDate(r.updated_at.slice(0, 10))}</td>
+                      <td><button className="btn btn-sm btn-primary" onClick={() => setOpen(r)}>Open</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       ) : editing ? (
         <TemplateEditor row={editing} onClose={async () => { setEditing(null); await load(); }} />
       ) : (

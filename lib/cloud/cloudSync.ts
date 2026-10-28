@@ -63,7 +63,7 @@ export const viewOfPath = (path: string): ViewKey | null => {
 /** Modules every signed-in user always has, whatever their module settings. */
 export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
 /** A client account opens these modules read only and sees only what is shared with the client (enforced in the database). */
-export const CLIENT_VIEWS: ViewKey[] = ['overview', 'project_management', 'field_reports', 'projects', 'site_evidence', 'offline_queue'];
+export const CLIENT_VIEWS: ViewKey[] = ['overview', 'project_management', 'field_reports', 'site_evidence', 'offline_queue'];
 export const isClientViews = (v: readonly string[] | null | undefined) => !!v && v.length === CLIENT_VIEWS.length && CLIENT_VIEWS.every((k) => v.includes(k));
 /** The signed-in account is a client (read-only, shared items only). */
 // the database flag decides; the module list is only a fallback for a cached profile from before the flag existed

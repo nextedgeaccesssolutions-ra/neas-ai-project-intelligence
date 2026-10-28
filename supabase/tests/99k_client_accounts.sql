@@ -41,3 +41,21 @@ select test.check('client: setting modules by hand makes the account staff', not
 reset role;
 update neas.project_memberships set role = 'project_manager', can_approve_reports = true
   where user_id = '00000000-0000-0000-0000-0000000000b1' and project_id = '10000000-0000-0000-0000-00000000000a';
+-- Report templates: a client sees only final template reports of their project, never the library or drafts
+update neas.profiles set status = 'active' where id = '00000000-0000-0000-0000-0000000000c1';
+insert into neas.report_templates (project_id, name, definition) values (null, 'Library test', '{"sections":[]}');
+insert into neas.template_reports (project_id, title, definition, status, created_by) values
+  ('10000000-0000-0000-0000-00000000000a', 'Client final', '{"sections":[]}', 'final', '00000000-0000-0000-0000-0000000000b1'),
+  ('10000000-0000-0000-0000-00000000000a', 'Client draft', '{"sections":[]}', 'draft', '00000000-0000-0000-0000-0000000000b1');
+set role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select neas.admin_set_client('00000000-0000-0000-0000-0000000000c1', true);
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000c1', false);
+select test.check('client: no template library', not exists (select 1 from neas.report_templates where project_id is null));
+select test.check('client: sees the final template report', exists (select 1 from neas.template_reports where title = 'Client final'));
+select test.check('client: no draft template reports', not exists (select 1 from neas.template_reports where status = 'draft'));
+select test.check('client: Project register is not a client module', not (select 'projects' = any (allowed_views) from neas.profiles where id = auth.uid()));
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', false);
+select neas.admin_set_client('00000000-0000-0000-0000-0000000000c1', false);
+reset role;
+update neas.profiles set status = test.v('cl_status')::neas.account_status where id = '00000000-0000-0000-0000-0000000000c1';
