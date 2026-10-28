@@ -641,3 +641,15 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .fh-menu > div a:hover, .fh-menu > div button:hover { background: #f1f4f6; }
 .fr-handle { cursor: grab; color: var(--muted); display: inline-flex; }
 .fr-checks li[draggable] { cursor: default; }
+
+/* nothing may push a page wider than the screen: grid columns can shrink, long lines wrap or cut off */
+.content > * { min-width: 0; max-width: 100%; }
+.fh, .m-list { grid-template-columns: minmax(0, 1fr); }
+.fh > *, .m-list > *, .fh-recent li > a, .m-list li > a, .m-list li > div { min-width: 0; }
+.fh-recent .note, .m-list .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-list .input { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .pill { white-space: normal; max-width: 100%; }
+}
+.fh-recent, .m-list ul { grid-template-columns: minmax(0, 1fr); }
+.fh-recent li, .m-list li { min-width: 0; }
