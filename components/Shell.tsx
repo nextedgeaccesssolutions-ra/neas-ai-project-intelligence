@@ -150,12 +150,14 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   }
   const isAdmin = CLOUD && cloud.profile?.global_role === 'super_admin';
   const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile) && !(n.href === '/templates' && isClientViews(cloud.profile?.allowed_views))));
-  const blocked = CLOUD && !pathname.startsWith('/admin') && !canView(viewOfPath(pathname), cloud.profile);
+  const isClient = CLOUD && !isAdmin && isClientViews(cloud.profile?.allowed_views);
+  // report templates are a staff tool: client accounts cannot open them even by address
+  const blocked = CLOUD && !pathname.startsWith('/admin') && (!canView(viewOfPath(pathname), cloud.profile) || (isClient && pathname.startsWith('/templates')));
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
   const page = pathname.startsWith('/admin') ? { label: 'Control panel', group: 'Administration', href: '/admin' }
     : pathname.startsWith('/offline-queue') ? { label: 'Offline queue', group: 'System', href: '/offline-queue' } : current;
-  const role = !CLOUD ? 'Device mode' : isAdmin ? 'Super Admin' : canManage(state.activeProjectId) ? 'Project manager' : 'Staff';
+  const role = !CLOUD ? 'Device mode' : isAdmin ? 'Super Admin' : isClient ? 'Client' : canManage(state.activeProjectId) ? 'Project manager' : 'Staff';
   const link = (href: string, label: string, icon: string, active: boolean) => (
     <Link key={href} href={href} aria-current={active ? 'page' : undefined} title={mini ? label : undefined} aria-label={mini ? label : undefined}>
       <Icon name={icon} />
@@ -214,7 +216,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             <>
               <Link href="/account" style={{ color: '#fff', textDecoration: 'none' }}><b>{cloud.profile.full_name || cloud.profile.email}</b></Link>
               <br />
-              {isAdmin ? 'Super Admin' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.replace('/login'); })}>Sign out</button>
+              {isAdmin ? 'Super Admin' : isClient ? 'Client' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.replace('/login'); })}>Sign out</button>
             </>
           ) : (
             <>

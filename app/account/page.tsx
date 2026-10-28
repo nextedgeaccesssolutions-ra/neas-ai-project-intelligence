@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import AuthCard from '@/components/AuthCard';
-import { useCloudStatus } from '@/lib/cloud/cloudSync';
+import { isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { signOutChecked } from '@/components/Shell';
 import { useStore } from '@/lib/store';
 
@@ -18,7 +18,7 @@ export default function AccountPage() {
     <AuthCard title="My account" subtitle={p ? `${p.full_name || p.email} · ${p.email}` : undefined}>
       <div className="kv">
         <span className="note">Status</span><span>{p?.status}{p && !p.email_verified_at ? ' · e-mail not verified' : ''}</span>
-        <span className="note">Role</span><span>{p?.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</span>
+        <span className="note">Role</span><span>{p?.global_role === 'super_admin' ? 'Super Admin' : isClientViews(p?.allowed_views) ? 'Client' : 'Staff'}</span>
         <span className="note">Projects</span><span>{c.memberships.length}</span>
       </div>
       {!pending && p && !p.password_set_at && <p className="banner">You have not set a password yet. Set one now so you can sign in with your e-mail and password.</p>}

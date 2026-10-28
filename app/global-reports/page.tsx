@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { canManage, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { canManage, isClientViews, useCloudStatus } from '@/lib/cloud/cloudSync';
 import { todayLocal, addDays } from '@/lib/calc';
 import { fmtDate } from '@/lib/format';
 import ShareDialog from '@/components/ShareDialog';
@@ -242,7 +242,8 @@ export default function GlobalReports() {
         </div>
       </section>
 
-      <section className="card" id="report-library">
+      {/* client accounts read their reports in Project reports and the client portal, not the staff library */}
+      {!(CLOUD && cloud.profile?.global_role !== 'super_admin' && isClientViews(cloud.profile?.allowed_views)) && <section className="card" id="report-library">
         <div className="card-head"><h2>Report library</h2>
           <div className="form-actions" style={{ marginTop: 0 }}>
             <span className="note">{filtered.length} of {rows.length} report(s){groupBy ? ` in ${groups.length} group(s)` : ''}</span>
@@ -319,7 +320,7 @@ export default function GlobalReports() {
           </div>
         )}
         <p className="note">Shares cover a project&apos;s approved client view, so the sharing column counts the project&apos;s active links. Generated PDFs are rebuilt on demand from current data; open them from Project reports.</p>
-      </section>
+      </section>}
 
       <section className="card" id="report-activity">
         <div className="card-head"><h2>Activity</h2><span className="note">Latest 40 events you can see</span></div>
