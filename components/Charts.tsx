@@ -174,7 +174,7 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
         {weekTicks.map((d) => (
           <g key={d}>
             <line x1={x(d)} x2={x(d)} y1={20} y2={H} stroke="#e3e9ee" />
-            <text x={x(d)} y={13} textAnchor="middle" fontSize="11" fill="#5d6f7b">{fmtDate(d, false)}</text>
+            <text x={x(d)} y={13} textAnchor={x(d) > W - 40 ? 'end' : 'middle'} fontSize="11" fill="#5d6f7b">{fmtDate(d, false)}</text>
           </g>
         ))}
         {data.map((orig, i) => {

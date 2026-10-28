@@ -106,9 +106,9 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   const logoH = 86;
   if (logo) pdf.addImage(logo.data, 'PNG', M, y, logoH * (logo.w / logo.h), logoH);
   const tx = M + (logo ? logoH * (logo.w / logo.h) + 16 : 0);
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(...NAVY); pdf.text('NextEdge Access Solutions', tx, y + 22);
-  pdf.setFontSize(10); pdf.setTextColor(...GOLD); pdf.text(r.title.toUpperCase(), tx, y + 40);
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text(`Report reference ${r.reference}`, tx, y + 56);
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(...NAVY); pdf.text('NextEdge Access Solutions', tx, y + 22, { maxWidth: W() - M - 74 - 12 - tx });
+  pdf.setFontSize(10); pdf.setTextColor(...GOLD); pdf.text(r.title.toUpperCase(), tx, y + 40, { maxWidth: W() - M - 74 - 12 - tx });
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text(`Report reference ${r.reference}`, tx, y + 56, { maxWidth: W() - M - 74 - 12 - tx });
   // QR code at the top right: opens this project's client portal (clients sign in with their passcode)
   const code = (r.project as { code?: string }).code;
   if (code && typeof window !== 'undefined') {
@@ -178,8 +178,7 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   }
 
   // ---------------- photo location register: 4 tiles a page at full size, all details (optional)
-  // with one cover photo already printed large on page 1, the register would only repeat it
-  if (r.cover.length && (!single || (r.coverPhoto.register && r.cover.length > 1))) {
+  if (r.cover.length && (!single || r.coverPhoto.register)) {
     for (let i = 0; i < r.cover.length; i += 4) {
       y = newPage('Photo location register');
       r.cover.slice(i, i + 4).forEach((c, k) => {
