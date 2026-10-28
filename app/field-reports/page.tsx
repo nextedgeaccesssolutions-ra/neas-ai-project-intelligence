@@ -169,7 +169,8 @@ export default function FieldReports() {
       </div>
       <ProjectBar />
 
-      {!client && <WalkthroughReport
+      <WalkthroughReport
+        readOnly={client}
         pid={pid}
         projectName={project.name}
         activities={activities}
@@ -181,7 +182,7 @@ export default function FieldReports() {
           setFilter(id);
           document.getElementById('new-report')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }}
-      />}
+      />
 
       <section className="card" id="new-report" style={client ? { display: 'none' } : undefined}>
         <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
