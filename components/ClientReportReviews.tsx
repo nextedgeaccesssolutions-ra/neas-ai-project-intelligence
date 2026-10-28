@@ -13,6 +13,8 @@ export default function ClientReportReviews({ code }: { code: string }) {
   const [name, setName] = useState('');
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  // the list starts hidden; the client opens it with Show
+  const [shown, setShown] = useState(false);
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/client/reports?code=${encodeURIComponent(code)}`, { cache: 'no-store' }).catch(() => null);
@@ -40,8 +42,8 @@ export default function ClientReportReviews({ code }: { code: string }) {
   if (!rows.length) return null;
   return (
     <section className="card">
-      <div className="card-head"><h2>Reports for your review</h2><span className="note">Open the report, then approve it or request changes</span></div>
-      <div style={{ display: 'grid', gap: 12 }}>
+      <div className="card-head"><h2>Reports for your review ({rows.length})</h2><span style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}><span className="note">Open the report, then approve it or request changes</span><button className="btn btn-sm" onClick={() => setShown(!shown)} aria-expanded={shown}>{shown ? 'Hide' : 'Show'}</button></span></div>
+      <div hidden={!shown} style={{ display: shown ? 'grid' : 'none', gap: 12 }}>
         {rows.map((rep) => {
           const [label, tone] = LABEL[rep.status] ?? [rep.status, ''];
           return (
