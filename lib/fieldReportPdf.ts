@@ -59,9 +59,9 @@ export async function fieldReportPdf(r: FieldReport, opts: {
   para(d?.description || r.notes || '—');
   if (d?.tasks.some((t) => t.label.trim())) {
     heading('Work done / activities');
-    autoTable(pdf, { startY: y, margin: { left: M, right: M }, theme: 'grid', head: [['', 'Activity', 'Note']], styles: { fontSize: 9.5, cellPadding: 4 },
-      headStyles: { fillColor: NAVY, textColor: 255 }, columnStyles: { 0: { cellWidth: 26, halign: 'center' } },
-      body: d.tasks.filter((t) => t.label.trim()).map((t) => [t.done ? 'X' : '', t.label, t.note ?? '']) });
+    autoTable(pdf, { startY: y, margin: { left: M, right: M }, theme: 'grid', head: [['Status', 'Activity', 'By', 'Note']], styles: { fontSize: 9.5, cellPadding: 4 },
+      headStyles: { fillColor: NAVY, textColor: 255 }, columnStyles: { 0: { cellWidth: 70 } },
+      body: d.tasks.filter((t) => t.label.trim()).map((t) => [({ done: 'Done', progress: 'In progress', not: 'Not done' } as Record<string, string>)[t.status ?? (t.done ? 'done' : 'not')], t.label, t.by ?? '', t.note ?? '']) });
     after();
   }
   if (d?.materials.length) {
@@ -111,7 +111,8 @@ export async function fieldReportPdf(r: FieldReport, opts: {
 
   if (d?.signers.length) {
     heading('Signatures');
-    const sw = (W - M * 2 - 14) / 2;
+    const per = Math.max(2, d.signers.length);
+    const sw = (W - M * 2 - 14 * (per - 1)) / per;
     room(110);
     for (const [k, s] of d.signers.entries()) {
       const x = M + k * (sw + 14);
@@ -119,10 +120,11 @@ export async function fieldReportPdf(r: FieldReport, opts: {
       const img = e ? await opts.image(e).catch(() => null) : null;
       if (img) { const f = fit(img, sw, 60); pdf.addImage(img.data, 'JPEG', x + f.dx, y + f.dy, f.w, f.h); }
       pdf.setDrawColor(...MUTED); pdf.line(x, y + 66, x + sw, y + 66);
-      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(...NAVY); pdf.text(s.name || '—', x, y + 80);
-      pdf.setFont('helvetica', 'normal'); pdf.setTextColor(...MUTED); pdf.text(`${s.role} · ${new Date(s.at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}`, x, y + 92);
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(...NAVY); pdf.text((pdf.splitTextToSize(s.name || '—', sw) as string[])[0], x, y + 80);
+      pdf.setFont('helvetica', 'normal'); pdf.setTextColor(...MUTED); pdf.text((pdf.splitTextToSize(s.role, sw) as string[])[0], x, y + 92);
+      pdf.text(new Date(s.at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }), x, y + 103);
     }
-    y += 104;
+    y += 116;
     para('Signatures are drawn on the device and are not independently verified.', 8);
   }
 

@@ -667,3 +667,16 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .fr-top + .fr-sent, .fr-top + .fr-steps, .fr-top ~ .fr-steps { border-radius: 0 0 12px 12px; }
 .fr-err { display: block; font-size: 12.5px; margin-top: 4px; }
 .fr-more summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+
+/* activity status, full-screen photo */
+.fr-task-more { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 6px; }
+.fr-open { all: unset; cursor: zoom-in; display: block; }
+.fr-viewer { display: grid; place-items: center; padding: 16px; }
+.fr-viewer figure { margin: 0; max-width: min(96vw, 1100px); background: #000; border-radius: 12px; overflow: hidden; }
+.fr-viewer img { display: block; max-width: 100%; max-height: 80vh; object-fit: contain; margin: 0 auto; }
+.fr-viewer figcaption { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 12px; color: #fff; font-size: 13px; }
+
+.m-filters { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.fr-history { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+.fr-history li { display: grid; }
+.map-frame { z-index: 0; position: relative; }

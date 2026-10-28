@@ -26,14 +26,20 @@ const WEATHER = [['Sunny', '☀'], ['Cloudy', '☁'], ['Rainy', '☂'], ['Windy'
 const UNITS = ['pcs', 'L', 'kg', 'm', 'm²', 'sets', 'set', 'roll', 'lot'];
 // optional remark sections, written into the remarks under their own headings
 const EXTRA = ['Outstanding work', 'Defects and observations', 'Corrective actions', 'Safety concerns', 'Recommendations', 'Client instructions'] as const;
+type TaskStatus = 'done' | 'progress' | 'not';
+const STATUS_LABEL: Record<TaskStatus, string> = { done: 'Done', progress: 'In progress', not: 'Not done' };
+type Who = 'tech' | 'sup' | 'client';
+const WHO: Who[] = ['tech', 'sup', 'client'];
+const ROLE: Record<Who, 'Technician / Inspector' | 'Supervisor' | 'Client'> = { tech: 'Technician / Inspector', sup: 'Supervisor', client: 'Client' };
+const NONE = { tech: false, sup: false, client: false };
 const CATEGORIES = ['Before', 'After', 'During', 'Defect', 'Safety'] as const;
 type Cat = (typeof CATEGORIES)[number];
 const DEFAULT_TASKS = ['Glass cleaning', 'Frame cleaning', 'Removed water marks', 'Applied sealant (if any)', 'Inspection and final check'];
 
 interface Material { name: string; qty: string; unit: string }
 interface Draft {
-  activityId: string; date: string; type: string; location: string; area: string; floor: string; weather: string; description: string; pct: string; techName: string; clientName: string; weatherNote?: string; extra?: Record<string, string>;
-  tasks: { label: string; done: boolean; note?: string }[]; materials: Material[]; remarks: string; photoIds: string[];
+  activityId: string; date: string; type: string; location: string; area: string; floor: string; weather: string; description: string; pct: string; techName: string; clientName: string; supName?: string; hashes?: Record<string, string>; weatherNote?: string; extra?: Record<string, string>;
+  tasks: { label: string; done: boolean; note?: string; status?: TaskStatus; by?: string }[]; materials: Material[]; remarks: string; photoIds: string[];
 }
 const blank = (): Draft => ({
   activityId: '', date: todayLocal(), type: 'Progress', location: '', techName: '', clientName: '', area: '', floor: '', weather: 'Sunny', description: '', pct: '',
@@ -59,9 +65,10 @@ export default function NewFieldReport() {
   // confirmation needs the report to have been queued first: it is queued a moment after it is saved
   const queued = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [signer, setSigner] = useState<'tech' | 'client'>('tech');
-  const [signed, setSigned] = useState<{ tech: boolean; client: boolean }>({ tech: false, client: false });
-  const canvas = useRef<{ tech: HTMLCanvasElement | null; client: HTMLCanvasElement | null }>({ tech: null, client: null });
+  const [signer, setSigner] = useState<Who>('tech');
+  const [signed, setSigned] = useState<Record<Who, boolean>>(NONE);
+  const canvas = useRef<Record<Who, HTMLCanvasElement | null>>({ tech: null, sup: null, client: null });
+  const [viewing, setViewing] = useState<Evidence | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // kept outside render: the pad redraws while signing, and a stroke must survive that
   const drawing = useRef(false);
@@ -75,7 +82,7 @@ export default function NewFieldReport() {
   useEffect(() => { if (loaded === pid) try { localStorage.setItem(key, JSON.stringify(d)); } catch { /* storage full */ } }, [d, key, loaded, pid]);
 
   // a signature belongs to the report of one project: switching project clears it
-  useEffect(() => { setSigned({ tech: false, client: false }); for (const c of [canvas.current.tech, canvas.current.client]) c?.getContext('2d')?.clearRect(0, 0, c.width, c.height); }, [pid]);
+  useEffect(() => { setSigned(NONE); for (const w of WHO) { const c = canvas.current[w]; c?.getContext('2d')?.clearRect(0, 0, c.width, c.height); } }, [pid]);
   // a submitted report is confirmed once nothing for it (report or its photos) waits in the offline queue
   useEffect(() => {
     if (!sent || sent.confirmed || !CLOUD) return;
@@ -108,9 +115,14 @@ export default function NewFieldReport() {
     if (!d.activityId) return notify('Choose the activity in step 1 first.');
     setBusy('Saving photos…');
     const ids: string[] = [];
+    const seen: Record<string, string> = { ...(d.hashes ?? {}) };
+    const dups: string[] = [];
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
+        // the same picture added twice to this report is skipped (compared by content, not by name)
+        const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))).map((b) => b.toString(16).padStart(2, '0')).join('');
+        if (seen[hash] && d.photoIds.concat(ids).includes(seen[hash])) { dups.push(file.name); continue; }
         const gps = await locatePhoto(file, { enabled: true });
         const blob = await compressImage(file);
         const id = uid('ev');
@@ -119,12 +131,15 @@ export default function NewFieldReport() {
         addEvidence({ id, projectId: pid, activityId: d.activityId, kind: tab, caption: `${tab.toUpperCase()} ${d.floor || ''} ${file.name.replace(/\.[^.]+$/, '')}`.replace(/\s+/g, ' ').trim(), takenAt, bytes: blob.size,
           gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), workArea: d.area.trim(), locationDetail: d.floor.trim(), pairId: null, ref: photoRef(tab, takenAt, id) });
         ids.push(id);
+        seen[hash] = id;
       } catch { /* skipped: not readable */ }
     }
-    setD((x) => ({ ...x, photoIds: [...x.photoIds, ...ids] }));
+    setD((x) => ({ ...x, photoIds: [...x.photoIds, ...ids], hashes: { ...(x.hashes ?? {}), ...seen } }));
     setBusy(null);
     if (fileRef.current) fileRef.current.value = '';
-    if (ids.length) notify(`${ids.length} ${tab} photo(s) saved to Site evidence.`);
+    // one message for the whole batch: what was saved and what was skipped as a repeat
+    const skipped = dups.length ? `${dups.length} already in this report, not added again: ${dups.slice(0, 3).join(', ')}${dups.length > 3 ? '…' : ''}.` : '';
+    if (ids.length || skipped) notify([ids.length ? `${ids.length} ${tab} photo(s) saved to Site evidence.` : '', skipped].filter(Boolean).join(' '));
   };
   const removePhoto = async (e: Evidence) => {
     if (!(await askConfirm('Remove this photo from the report and from Site evidence?'))) return;
@@ -159,7 +174,7 @@ export default function NewFieldReport() {
   };
 
   // signature pad: pointer drawing on a canvas
-  const pad = (who: 'tech' | 'client') => {
+  const pad = (who: Who) => {
     const pos = (c: HTMLCanvasElement, e: React.PointerEvent) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * (c.width / r.width), (e.clientY - r.top) * (c.height / r.height)]; };
     return {
       ref: (c: HTMLCanvasElement | null) => { canvas.current[who] = c; },
@@ -168,7 +183,7 @@ export default function NewFieldReport() {
       onPointerUp: () => { drawing.current = false; },
     };
   };
-  const clearPad = (who: 'tech' | 'client') => { const c = canvas.current[who]; c?.getContext('2d')?.clearRect(0, 0, c.width, c.height); setSigned((s) => ({ ...s, [who]: false })); };
+  const clearPad = (who: Who) => { const c = canvas.current[who]; c?.getContext('2d')?.clearRect(0, 0, c.width, c.height); setSigned((s) => ({ ...s, [who]: false })); };
 
   const submit = async () => {
     for (let k = 0; k < 3; k++) { const e = check(k); if (e) { setStep(k); return notify(e); } }
@@ -182,7 +197,7 @@ export default function NewFieldReport() {
     try {
     // signatures are kept with the photos as inspection records
     const signers: ReportDetails['signers'] = [];
-    for (const who of ['tech', 'client'] as const) {
+    for (const who of WHO) {
       const c = canvas.current[who];
       if (!c || !signed[who]) continue;
       const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/jpeg', 0.9));
@@ -190,9 +205,9 @@ export default function NewFieldReport() {
       const id = uid('ev');
       const takenAt = new Date().toISOString();
       await putPhoto(id, blob);
-      addEvidence({ id, projectId: pid, activityId: d.activityId, kind: 'Inspection', caption: `Signature - ${who === 'tech' ? 'Technician / Inspector' : 'Client'} - ${fmtDate(d.date)}`, takenAt, bytes: blob.size,
+      addEvidence({ id, projectId: pid, activityId: d.activityId, kind: 'Inspection', caption: `Signature - ${ROLE[who]} - ${fmtDate(d.date)}`, takenAt, bytes: blob.size,
         gps: null, gpsStatus: 'unavailable', gpsSource: null, workArea: d.area.trim(), locationDetail: d.floor.trim(), pairId: null, ref: photoRef('Inspection', takenAt, id) });
-      signers.push({ role: who === 'tech' ? 'Technician / Inspector' : 'Client', name: (who === 'tech' ? d.techName : d.clientName).trim(), photoId: id, at: takenAt });
+      signers.push({ role: ROLE[who], name: (who === 'tech' ? d.techName : who === 'sup' ? d.supName ?? '' : d.clientName).trim(), photoId: id, at: takenAt });
     }
     // the photos follow the final activity, work area and floor chosen in step 1
     for (const p of photos) updateEvidence(p.id, { activityId: d.activityId, workArea: d.area.trim(), locationDetail: d.floor.trim() });
@@ -204,19 +219,20 @@ export default function NewFieldReport() {
       `[${d.type}] ${location || ''}${weatherText ? ` · Weather: ${weatherText}` : ''}`.trim(),
       d.description.trim(),
       d.tasks.some((t) => t.done) ? `Work done: ${d.tasks.filter((t) => t.done).map((t) => t.label).join('; ')}` : '',
+      d.tasks.some((t) => t.status === 'progress') ? `In progress: ${d.tasks.filter((t) => t.status === 'progress').map((t) => t.label).join('; ')}` : '',
       d.materials.filter((m) => m.name.trim()).length ? `Materials: ${d.materials.filter((m) => m.name.trim()).map((m) => `${m.name.trim()} ${m.qty} ${m.unit}`.trim()).join('; ')}` : '',
       allRemarks ? `Remarks: ${allRemarks}` : '',
-      `Photos: ${before.length} before, ${after.length} after. Signed by technician${signed.client ? ' and client' : ''}.`,
+      `Photos: ${before.length} before, ${after.length} after. Signed by ${WHO.filter((w) => signed[w]).map((w) => ROLE[w].toLowerCase()).join(', ')}.`,
     ].filter(Boolean).join('\n');
     const details: ReportDetails = {
       type: d.type as ReportDetails['type'], location: d.location.trim(), area: d.area.trim(), floor: d.floor.trim(), weather: weatherText, description: d.description.trim(),
-      tasks: d.tasks.filter((t) => t.label.trim()).map((t) => ({ label: t.label.trim(), done: t.done, ...(t.note?.trim() ? { note: t.note.trim() } : {}) })), materials: d.materials.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), qty: Number(m.qty), unit: m.unit })),
+      tasks: d.tasks.filter((t) => t.label.trim()).map((t) => ({ label: t.label.trim(), done: t.done, status: t.status ?? (t.done ? 'done' : 'not'), ...(t.by?.trim() ? { by: t.by.trim() } : {}), ...(t.note?.trim() ? { note: t.note.trim() } : {}) })), materials: d.materials.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), qty: Number(m.qty), unit: m.unit })),
       remarks: allRemarks, signers, photos: photos.map((p) => ({ id: p.id, kind: p.kind })),
     };
     const report: FieldReport = { id: uid('rep'), projectId: pid, activityId: d.activityId, date: d.date, actualPct: v, completedQty: null, notes, createdAt: new Date().toISOString(), details };
     addReport(report);
     try { localStorage.removeItem(key); } catch { /* storage blocked */ }
-    setD(blank()); setStep(0); setSigned({ tech: false, client: false });
+    setD(blank()); setStep(0); setSigned(NONE);
     queued.current = false;
     setSent({ report, confirmed: !CLOUD });
     } catch (e) { notify(`Not submitted: ${(e as Error).message}. Your entries are kept; try again.`); } finally { setBusy(null); }
@@ -311,7 +327,7 @@ export default function NewFieldReport() {
           <div className="fr-grid">
             {inTab.map((p, i) => (
               <figure key={p.id} className="fr-photo">
-                <PhotoThumb id={p.id} storagePath={p.storagePath} alt={`${tab} ${i + 1}`} />
+                <button type="button" className="fr-open" onClick={() => setViewing(p)} aria-label={`View ${tab} ${i + 1} full screen`}><PhotoThumb id={p.id} storagePath={p.storagePath} alt={`${tab} ${i + 1}`} /></button>
                 <button type="button" className="fr-x" aria-label={`Remove ${tab} ${i + 1}`} onClick={() => void removePhoto(p)}>✕</button>
                 <figcaption>
                   <b>{tab} {i + 1}</b><span className="note">{[p.workArea, p.locationDetail].filter(Boolean).join(' - ')}</span>
@@ -345,7 +361,7 @@ export default function NewFieldReport() {
               <li key={i}
                 onDragOver={(e) => { if (dragFrom.current != null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
                 onDrop={(e) => { const from = dragFrom.current; dragFrom.current = null; if (from == null) return; e.preventDefault(); if (from === i) return; const t2 = [...d.tasks]; const [m] = t2.splice(from, 1); t2.splice(i, 0, m); set({ tasks: t2 }); }}>
-                <input type="checkbox" checked={t.done} onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, done: e.target.checked } : x)) })} aria-label={`Done: ${t.label || 'item'}`} />
+                <input type="checkbox" checked={t.done} onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, done: e.target.checked, status: e.target.checked ? 'done' : 'not' } : x)) })} aria-label={`Done: ${t.label || 'item'}`} />
                 <input className="input" value={t.label} placeholder="Activity done" onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
                 <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                   <span className="fr-handle" title="Drag to reorder (or use the arrows)" aria-hidden="true" draggable
@@ -354,6 +370,12 @@ export default function NewFieldReport() {
                   <button type="button" className="btn btn-sm" disabled={i === 0} aria-label="Move up" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i - 1 ? d.tasks[i] : j === i ? d.tasks[i - 1] : x)) })}>↑</button>
                   <button type="button" className="btn btn-sm" disabled={i === d.tasks.length - 1} aria-label="Move down" onClick={() => set({ tasks: d.tasks.map((x, j) => (j === i + 1 ? d.tasks[i] : j === i ? d.tasks[i + 1] : x)) })}>↓</button>
                   <button type="button" className="btn btn-sm" aria-label="Remove item" onClick={() => set({ tasks: d.tasks.filter((_, j) => j !== i) })}>✕</button>
+                </span>
+                <span className="fr-task-more">
+                  <select className="input input-sm" value={t.status ?? (t.done ? 'done' : 'not')} aria-label={`Status of ${t.label || 'item'}`} onChange={(e) => { const st = e.target.value as TaskStatus; set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, status: st, done: st === 'done' } : x)) }); }}>
+                    {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
+                  </select>
+                  <input className="input input-sm" maxLength={80} value={t.by ?? ''} placeholder="Done by (optional)" aria-label={`Person responsible for ${t.label || 'item'}`} onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, by: e.target.value } : x)) })} />
                 </span>
                 <input className="input input-sm fr-note" value={t.note ?? ''} maxLength={300} placeholder="Note (optional)" onChange={(e) => set({ tasks: d.tasks.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)) })} aria-label={`Note for ${t.label || 'item'}`} />
               </li>
@@ -392,29 +414,36 @@ export default function NewFieldReport() {
           <div className="card-head"><h3>Photos <span className="note">{before.length} before · {after.length} after · {photos.length} in all</span></h3><button type="button" className="btn btn-sm" onClick={() => go(1)}>Edit</button></div>
           <div className="fr-strip">{photos.slice(0, 4).map((p) => <PhotoThumb key={p.id} id={p.id} storagePath={p.storagePath} alt={p.kind} />)}{photos.length > 4 && <span className="fr-more">+{photos.length - 4}</span>}</div>
           <div className="card-head"><h3>Work done</h3><button type="button" className="btn btn-sm" onClick={() => go(2)}>Edit</button></div>
-          <ul>{d.tasks.filter((t) => t.done && t.label.trim()).map((t, i) => <li key={i}>✔ {t.label}{t.note?.trim() ? <span className="note"> · {t.note}</span> : null}</li>)}</ul>
+          <ul>{d.tasks.filter((t) => t.label.trim() && (t.status ?? (t.done ? 'done' : 'not')) !== 'not').map((t, i) => <li key={i}>{(t.status ?? 'done') === 'progress' ? '◐' : '✔'} {t.label}{t.by?.trim() ? <span className="note"> · {t.by}</span> : null}{t.note?.trim() ? <span className="note"> · {t.note}</span> : null}</li>)}</ul>
           {d.materials.some((m) => m.name.trim()) && <><h3>Materials used</h3><ul>{d.materials.filter((m) => m.name.trim()).map((m, i) => <li key={i}>{m.name} · {m.qty} {m.unit}</li>)}</ul></>}
           {d.remarks.trim() && <><h3>Remarks</h3><p style={{ margin: 0 }}>{d.remarks}</p></>}
           <h3>Sign &amp; submit</h3>
           <div className="fr-tabs">
-            <button type="button" className={chip(signer === 'tech')} onClick={() => setSigner('tech')}>Technician / Inspector{signed.tech ? ' ✔' : ''}</button>
-            <button type="button" className={chip(signer === 'client')} onClick={() => setSigner('client')}>Client (optional){signed.client ? ' ✔' : ''}</button>
+            {WHO.map((w) => <button key={w} type="button" className={chip(signer === w)} onClick={() => setSigner(w)}>{ROLE[w]}{w === 'tech' ? '' : ' (optional)'}{signed[w] ? ' ✔' : ''}</button>)}
           </div>
-          {(['tech', 'client'] as const).map((who) => (
+          {WHO.map((who) => (
             <div key={who} className="fr-sign" hidden={signer !== who}>
-              <canvas width={900} height={300} aria-label={`Signature: ${who === 'tech' ? 'technician or inspector' : 'client'}`} {...pad(who)} />
+              <canvas width={900} height={300} aria-label={`Signature: ${ROLE[who]}`} {...pad(who)} />
               <button type="button" className="btn btn-sm" onClick={() => clearPad(who)}>Clear</button>
             </div>
           ))}
           <div className="form-grid">
-            <label className="field">{signer === 'tech' ? 'Technician / inspector name *' : 'Client representative name'}
-              <input className="input" value={signer === 'tech' ? d.techName : d.clientName} onChange={(e) => set(signer === 'tech' ? { techName: e.target.value } : { clientName: e.target.value })} />
+            <label className="field">{signer === 'tech' ? 'Technician / inspector name *' : signer === 'sup' ? 'Supervisor name' : 'Client representative name'}
+              <input className="input" value={signer === 'tech' ? d.techName : signer === 'sup' ? d.supName ?? '' : d.clientName} onChange={(e) => set(signer === 'tech' ? { techName: e.target.value } : signer === 'sup' ? { supName: e.target.value } : { clientName: e.target.value })} />
             </label>
           </div>
           <p className="note">By signing you confirm the report is accurate. The signature is drawn on this device; it is not independently verified.</p>
         </section>
       )}
 
+      {viewing && (
+        <div className="modal-backdrop fr-viewer" role="dialog" aria-modal="true" aria-label="Photo" onClick={() => setViewing(null)}>
+          <figure onClick={(e) => e.stopPropagation()}>
+            <PhotoThumb id={viewing.id} storagePath={viewing.storagePath} alt={viewing.caption || viewing.kind} />
+            <figcaption><b>{viewing.ref} · {viewing.kind}</b> {viewing.caption}<button type="button" className="btn btn-sm" onClick={() => setViewing(null)}>Close</button></figcaption>
+          </figure>
+        </div>
+      )}
       <div className="fr-actions">
         {step === 0 ? <button type="button" className="btn" onClick={() => notify('Draft kept on this device.')}>Save draft</button> : <button type="button" className="btn" onClick={() => go(step - 1)}>← Back</button>}
         {step < 3 ? <button type="button" className="btn btn-primary" onClick={() => go(step + 1)}>Next: {STEPS[step + 1]} →</button>

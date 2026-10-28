@@ -64,14 +64,23 @@ export function MobileReports({ projectId }: { projectId: string }) {
   const { state } = useStore();
   const [q, setQ] = useState('');
   const [f, setF] = useState('');
+  const [type, setType] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const all = state.reports.filter((r) => r.projectId === projectId).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const act = (id: string) => state.activities.find((a) => a.id === id)?.name ?? '';
   const t = q.trim().toLowerCase();
-  const list = all.filter((r) => (!f || (r.status ?? 'approved') === f) && (!t || `${reportNo(r)} ${act(r.activityId)} ${r.notes}`.toLowerCase().includes(t)));
+  const list = all.filter((r) => (!f || (r.status ?? 'approved') === f) && (!type || (r.details?.type ?? 'Progress') === type)
+    && (!from || r.date >= from) && (!to || r.date <= to) && (!t || `${reportNo(r)} ${act(r.activityId)} ${r.notes}`.toLowerCase().includes(t)));
   const count = (s: string) => all.filter((r) => (r.status ?? 'approved') === s).length;
   return (
     <section className="m-list mobile-only" aria-label="Reports">
       <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search reports…" aria-label="Search reports" />
+      <div className="m-filters">
+        <select className="input" value={type} onChange={(e) => setType(e.target.value)} aria-label="Report type"><option value="">All types</option>{['Progress', 'Inspection', 'Issue', 'Other'].map((x) => <option key={x}>{x}</option>)}</select>
+        <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+        <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+      </div>
       <div className="m-chips">
         <button type="button" className={!f ? 'on' : ''} onClick={() => setF('')}>All ({all.length})</button>
         {['submitted', 'approved', 'rejected', 'draft'].filter((s) => count(s)).map((s) => <button key={s} type="button" className={f === s ? 'on' : ''} onClick={() => setF(s)}>{LABEL[s]} ({count(s)})</button>)}

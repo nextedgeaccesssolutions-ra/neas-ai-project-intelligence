@@ -97,11 +97,11 @@ export interface FieldReport {
 export interface ReportDetails {
   type: 'Progress' | 'Inspection' | 'Issue' | 'Other';
   location: string; area: string; floor: string; weather: string; description: string;
-  tasks: { label: string; done: boolean; note?: string }[];
+  tasks: { label: string; done: boolean; note?: string; status?: 'done' | 'progress' | 'not'; by?: string }[];
   materials: { name: string; qty: number; unit: string }[];
   remarks: string;
   /** signature images are Site evidence photos */
-  signers: { role: 'Technician / Inspector' | 'Client'; name: string; photoId: string; at: string }[];
+  signers: { role: 'Technician / Inspector' | 'Supervisor' | 'Client'; name: string; photoId: string; at: string }[];
   /** report photos in their order, with their category */
   photos: { id: string; kind: string }[];
 }

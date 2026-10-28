@@ -1,4 +1,5 @@
 'use client';
+import ReportHistory from '@/components/ReportHistory';
 import { MobileReports } from '@/components/MobileLists';
 import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
@@ -8,7 +9,7 @@ import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { canManage, pullAll } from '@/lib/cloud/cloudSync';
+import { canManage, isSuperAdmin, pullAll } from '@/lib/cloud/cloudSync';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
@@ -26,6 +27,7 @@ export default function FieldReports() {
   const { pid, activities, reports, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
   const review = async (id: string, patch: Record<string, unknown>, label: string) => {
     const sb = supabaseBrowser()!;
     const { data: rv, error: err } = await sb.from('project_reports').update(patch).eq('id', id).select('id, version');
@@ -233,6 +235,7 @@ export default function FieldReports() {
           )}
       </section>
 
+      {historyFor && <ReportHistory reportId={historyFor} onClose={() => setHistoryFor(null)} />}
       <MobileReports projectId={pid} />
       <section className="card" id="reports-card">
         <div className="card-head">
@@ -281,6 +284,7 @@ export default function FieldReports() {
                       </td>
                     )}
                     <td style={{ whiteSpace: 'nowrap' }}>
+                      {CLOUD && isSuperAdmin() && <><button className="btn btn-sm" onClick={() => setHistoryFor(r.id)}>History</button>{' '}</>}
                       <button className="btn btn-sm" onClick={() => { notify('Building PDF…'); void import('@/lib/fieldReportExport').then((m) => m.downloadFieldReportPdf(r, { project, activities, evidence })).catch((e) => notify(`PDF not created: ${(e as Error).message}`)); }}>PDF</button>{' '}
                       {(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}
                     </td>
