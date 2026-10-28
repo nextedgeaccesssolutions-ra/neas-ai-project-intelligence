@@ -5,6 +5,7 @@ import { COVER_TILE_PT } from './coverPhotos';
 import { photoCaption } from './evidenceReport';
 import { fit, makePdfSafe, toImage, type ReportImage } from './evidenceExport';
 import type { ProjectReport } from './projectReport';
+import { drawCompanyFooter } from './companyFooter';
 
 export type LoadImage = (id: string) => Promise<Blob | null>;
 const NAVY = [7, 29, 41] as const, GOLD = [202, 147, 50] as const, GOLD_SOFT = [235, 192, 126] as const;
@@ -49,6 +50,7 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...MUTED);
     pdf.text(`${r.project.code} · ${r.title} · ${r.reference}`, M, H() - 16);
     pdf.text(`Page ${page}`, W() - M, H() - 16, { align: 'right' });
+    drawCompanyFooter(pdf, H() - 25);
   };
   const head = (title: string) => {
     pdf.setFillColor(...NAVY); pdf.rect(0, 0, W(), 40, 'F');
@@ -106,9 +108,22 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
   const logoH = 86;
   if (logo) pdf.addImage(logo.data, 'PNG', M, y, logoH * (logo.w / logo.h), logoH);
   const tx = M + (logo ? logoH * (logo.w / logo.h) + 16 : 0);
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(...NAVY); pdf.text('NextEdge Access Solutions', tx, y + 22);
-  pdf.setFontSize(10); pdf.setTextColor(...GOLD); pdf.text(r.title.toUpperCase(), tx, y + 40);
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text(`Report reference ${r.reference}`, tx, y + 56);
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(...NAVY); pdf.text('NextEdge Access Solutions', tx, y + 22, { maxWidth: W() - M - 74 - 12 - tx });
+  pdf.setFontSize(10); pdf.setTextColor(...GOLD); pdf.text(r.title.toUpperCase(), tx, y + 40, { maxWidth: W() - M - 74 - 12 - tx });
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text(`Report reference ${r.reference}`, tx, y + 56, { maxWidth: W() - M - 74 - 12 - tx });
+  // QR code at the top right: opens this project's client portal (clients sign in with their passcode)
+  const code = (r.project as { code?: string }).code;
+  if (code && typeof window !== 'undefined') {
+    try {
+      const portal = `${window.location.origin}/client/${encodeURIComponent(code)}`;
+      const QR = (await import('qrcode')).default;
+      const qr = await QR.toDataURL(portal, { margin: 1, width: 360, color: { dark: '#071D29', light: '#FFFFFF' } });
+      const q = 74, qx = W() - M - q;
+      pdf.addImage(qr, 'PNG', qx, y, q, q);
+      pdf.link(qx, y, q, q, { url: portal });
+      pdf.setFontSize(6.5); pdf.setTextColor(...MUTED); pdf.text('Scan for the client portal', qx + q / 2, y + q + 9, { align: 'center' });
+    } catch { /* the report is still made without the code */ }
+  }
   y += logoH + 18;
   pdf.setFillColor(...GOLD); pdf.rect(M, y - 8, W() - M * 2, 2, 'F');
   pdf.setFont('helvetica', 'bold'); pdf.setTextColor(...INK);
@@ -127,10 +142,33 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     y += lines.length * 10.5 + 2;
   }
   const T = COVER_TILE_PT, gap = W() - M * 2 - 2 * T;
-  const coverOnFirst = r.cover.slice(0, 2);
+  const single = r.coverPhoto?.single ?? false;
+  const coverOnFirst = single ? [] : r.cover.slice(0, 2);
   // tiles keep their exact size: if they do not fit under the details, they start on page 2
   const tileBlock = T + 11 + 20 + 5 * 9.2;
-  if (coverOnFirst.length && y + 10 + tileBlock <= H() - 34) {
+  if (single && r.cover.length) {
+    // one cover photo, centred, sized as a share of the page width and fitted to the space left on page 1
+    const c = r.cover[0];
+    // too little room under long cover details: the photo starts a page of its own instead of spilling off
+    if (H() - 34 - (y + 12) - (c.mapUrl ? 32 : 20) < 140) y = newPage('Cover photo') - 12;
+    const img = images.get(c.item.id);
+    const below = c.mapUrl ? 32 : 20;
+    const boxW = (W() - M * 2) * (r.coverPhoto.sizePct / 100);
+    const boxH = H() - 34 - (y + 12) - below;
+    if (img) {
+      const f = fit(img, boxW, boxH);
+      const ix = (W() - f.w) / 2, iy = y + 12;
+      pdf.addImage(img.data, 'JPEG', ix, iy, f.w, f.h);
+      y = iy + f.h + 12;
+    } else {
+      pdf.setFillColor(241, 244, 246); pdf.rect((W() - boxW) / 2, y + 12, boxW, Math.min(boxH, boxW * 0.6), 'F');
+      pdf.setFontSize(9); pdf.setTextColor(...MUTED); pdf.text('Photo not available', W() / 2, y + 12 + Math.min(boxH, boxW * 0.6) / 2, { align: 'center' });
+      y += 12 + Math.min(boxH, boxW * 0.6) + 12;
+    }
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(...INK);
+    pdf.text(pdf.splitTextToSize(c.title, W() - M * 2)[0], W() / 2, y, { align: 'center' });
+    if (c.mapUrl) { pdf.setFontSize(7.5); pdf.setTextColor(...GOLD); const t = 'VIEW PHOTO LOCATION ON MAP'; pdf.textWithLink(t, (W() - pdf.getTextWidth(t)) / 2, y + 11, { url: c.mapUrl }); }
+  } else if (coverOnFirst.length && y + 10 + tileBlock <= H() - 34) {
     y += 10;
     coverOnFirst.forEach((c, i) => coverTile(c, M + i * (T + gap), y, 5));
   } else if (r.cover.length) {
@@ -141,8 +179,9 @@ export async function projectReportPdf(r: ProjectReport, images: Map<string, Rep
     pdf.text('No project cover photos have been selected for this report.', M, y + 18);
   }
 
-  // ---------------- photo location register: 4 tiles a page at full size, all details
-  if (r.cover.length) {
+  // ---------------- photo location register: 4 tiles a page at full size, all details (optional)
+  // one cover photo already printed on page 1 (with its map link): no register page repeating it
+  if (r.cover.length && (!single || (r.coverPhoto.register && r.cover.length > 1))) {
     for (let i = 0; i < r.cover.length; i += 4) {
       y = newPage('Photo location register');
       r.cover.slice(i, i + 4).forEach((c, k) => {

@@ -53,7 +53,7 @@ describe('project report', () => {
     expect(r.summary[0]).toContain('As of');
   });
   it('never invents approvals', () => {
-    expect(Object.fromEntries(r.approval)).toMatchObject({ 'Reviewed by': 'Not recorded', 'Approval status': 'Not recorded' });
+    expect(Object.fromEntries(r.approval)).toMatchObject({ 'Reviewed by (name / date)': '________________________________', 'Approval status': '________________________________' });
   });
   it('client reports use the published progress instead of recomputing', () => {
     const c = buildProjectReport(base({ audience: 'client', overall: { planned: 47.2, actual: 4.1 }, series: [] }));

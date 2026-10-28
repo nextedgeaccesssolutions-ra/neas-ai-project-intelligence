@@ -1,7 +1,8 @@
 'use client';
-import OrgToolbar, { GroupHeader } from '@/components/OrgToolbar';
+import { noteServerVersions } from '@/lib/cloud/cloudSync';
+import OrgToolbar, { dragSource, GroupHeader, MoveToMenu, UngroupZone } from '@/components/OrgToolbar';
 import { itemKey, useCollapsed, useViewOrg, type ViewGroup } from '@/lib/viewOrg';
-import { useCloudStatus } from '@/lib/cloud/cloudSync';
+import { isClientAccount, useCloudStatus } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
@@ -54,8 +55,12 @@ export default function SiteEvidence() {
   const { pid, activities, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
+  // client accounts see shared photos only and change nothing: no edit, pair, move or delete
+  const client = CLOUD && isClientAccount();
   const [activityId, setActivityId] = useState('');
   const [kind, setKind] = useState<EvidenceKind>('Before');
+  // capture form in Cover photo mode: saved photos go straight onto the report cover
+  const [coverMode, setCoverMode] = useState(false);
   const [caption, setCaption] = useState('');
   const [workArea, setWorkArea] = useState('');
   const [coverCategory, setCoverCategory] = useState<CoverCategory>('main_building');
@@ -96,6 +101,8 @@ export default function SiteEvidence() {
   }, []);
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
+  const [moveArea, setMoveArea] = useState('');
+  const [moveLoc, setMoveLoc] = useState('');
   const [editKind, setEditKind] = useState<EvidenceKind>('Before');
   const [editCaption, setEditCaption] = useState('');
   const [editActivity, setEditActivity] = useState('');
@@ -137,8 +144,9 @@ export default function SiteEvidence() {
   if (!project) return <NoProject />;
 
   const toggleClientVisible = async (id: string, val: boolean) => {
-    const { error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id);
+    const { data, error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).eq('id', id).select('id, version');
     if (err) return setError(`Could not update: ${err.message}`);
+    await noteServerVersions('report_attachments', data ?? []);
     setClientVisible((prev) => ({ ...prev, [id]: val }));
     notify(val ? 'Shared with client.' : 'Hidden from client.');
   };
@@ -148,8 +156,12 @@ export default function SiteEvidence() {
   const partnerOf = (e: Evidence) => (e.pairId ? evidence.find((x) => x.pairId === e.pairId && x.id !== e.id) : undefined);
 
   /** Compress and store photos with capture time, GPS (when allowed) and work-area location. */
-  const addPhotos = async (files: File[]) => {
-    if (!activityId) return setError('Choose an activity first.');
+  const addPhotos = async (files: File[], opts?: { cover?: boolean; caption?: string }) => {
+    const asCover = !!opts?.cover || coverMode;
+    // continue after the highest existing cover position, so a removed photo never leaves a duplicate number
+    let coverNext = Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0));
+    const actId = activityId || (asCover ? activities[0]?.id ?? '' : '');
+    if (!actId) return setError('Choose an activity first.');
     if (!files.length) return setError('Choose or capture a photo.');
     let manual = null;
     if (manualLoc) {
@@ -176,8 +188,10 @@ export default function SiteEvidence() {
         const takenAt = new Date(file.lastModified || Date.now()).toISOString();
         await putPhoto(id, blob);
         addEvidence({
-          id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
+          id, projectId: pid, activityId: actId, kind, caption: (opts?.caption || caption).trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
           gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), coverCategory: kind === 'Reference' ? coverCategory : null, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
+          // a cover upload is a building / site reference photo placed straight on the report cover
+          ...(asCover ? { kind: 'Reference' as const, coverCategory: coverCategory, isCover: true, coverOrder: ++coverNext, ref: photoRef('Reference', takenAt, id) } : {}),
         });
         ok++;
       } catch (e) {
@@ -206,6 +220,37 @@ export default function SiteEvidence() {
     const other = partnerOf(e);
     updateEvidence(e.id, { pairId: null });
     if (other) updateEvidence(other.id, { pairId: null });
+  };
+
+  // client visibility for many photos at once: the selected ones, or every photo in the current view
+  const setClientVisibleMany = async (ids: string[], val: boolean) => {
+    if (!ids.length) return;
+    if (!(await askConfirm(`${val ? 'Show' : 'Hide'} ${ids.length} photo(s) ${val ? 'to' : 'from'} the client?`, { danger: false }))) return;
+    const { data, error: err } = await supabaseBrowser()!.from('report_attachments').update({ client_visible: val }).in('id', ids).select('id, version');
+    if (err) return setError(`Could not update: ${err.message}`);
+    await noteServerVersions('report_attachments', data ?? []);
+    setClientVisible((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, val])) }));
+    notify(`${ids.length} photo(s) ${val ? 'shared with' : 'hidden from'} the client.`);
+  };
+
+  // pair unpaired BEFORE and AFTER photos that share activity, work area and location (in capture order)
+  const detailKey = (e: Evidence) => [e.activityId, (e.workArea ?? '').trim().toLowerCase(), (e.locationDetail ?? '').trim().toLowerCase()].join('|');
+  const autoPairs = (() => {
+    const open = evidence.filter((e) => pairable(e.kind) && !partnerOf(e) && (e.workArea ?? '').trim());
+    const out: [Evidence, Evidence][] = [];
+    const groups = new Map<string, Evidence[]>();
+    for (const e of open) groups.set(detailKey(e), [...(groups.get(detailKey(e)) ?? []), e]);
+    for (const list of groups.values()) {
+      const bs = list.filter((e) => e.kind === 'Before').sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+      const as = list.filter((e) => e.kind === 'After').sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+      for (let i = 0; i < Math.min(bs.length, as.length); i++) out.push([bs[i], as[i]]);
+    }
+    return out;
+  })();
+  const runAutoPair = async () => {
+    if (!(await askConfirm(`Pair ${autoPairs.length} BEFORE/AFTER set(s) that share the same activity, work area and location? You can re-pair or unpair any of them afterwards.`, { danger: false }))) return;
+    for (const [b, a] of autoPairs) { const pairId = uid('pair'); updateEvidence(b.id, { pairId }); updateEvidence(a.id, { pairId }); }
+    notify(`Paired ${autoPairs.length} set(s) by details.`);
   };
 
   const ql = q.trim().toLowerCase();
@@ -239,6 +284,31 @@ export default function SiteEvidence() {
   const projGroups = org.groups.filter((g) => g.project_id === pid);
   const sections = showHidden ? [] : projGroups.map((g) => ({ g, items: listed.filter((e) => org.groupOf.get(itemKey('attachment', e.id))?.id === g.id) })).filter((x) => x.items.length);
   const ungrouped = showHidden ? listed : listed.filter((e) => !org.groupOf.get(itemKey('attachment', e.id)) || !projGroups.some((g) => g.id === org.groupOf.get(itemKey('attachment', e.id))!.id));
+  // drag-and-drop and "Move to": into a group of this project, or back to the main list
+  const movePhotos = async (ids: string[], gid: string | null) => {
+    // only photos shown here, and only out of groups this person may change
+    const canChange = (i: string) => { const cur = org.groupOf.get(itemKey('attachment', i)); return !cur || cur.scope === 'personal' || reviewer; };
+    const keep = ids.filter((i) => listed.some((e) => e.id === i)).filter(canChange);
+    if (keep.length < ids.length) notify(`${ids.length - keep.length} photo(s) are in a shared group only a project manager can change, and were left where they are.`);
+    if (!keep.length) return;
+    if (gid === null) { done(await org.ungroup('attachment', keep), 'Moved back to the main list.'); return; }
+    const g = projGroups.find((x) => x.id === gid);
+    if (!g || !(g.scope === 'personal' || reviewer)) { notify('You cannot add photos to that group.'); return; }
+    done(!!(await org.group(pid, 'attachment', keep, { id: g.id })), `Moved ${keep.length} photo(s) to “${g.name}”. The photos themselves did not change.`);
+  };
+  // change the work area / location of the selected photos (e.g. a photo filed under the wrong floor); a blank field keeps each photo's own value
+  const moveLocation = async () => {
+    const area = moveArea.trim(), loc = moveLoc.trim();
+    if (!area && !loc) return notify('Type the new work area or location.');
+    if (!(await askConfirm(`Move ${pickedIds.length} photo(s) to ${[area, loc].filter(Boolean).join(' · ')}? A BEFORE/AFTER pair stays paired.`, { danger: false }))) return;
+    for (const id of pickedIds) {
+      const e = byId.get(id);
+      if (e) updateEvidence(id, { ...(area ? { workArea: area } : {}), ...(loc ? { locationDetail: loc } : {}) });
+    }
+    done(true, `Moved ${pickedIds.length} photo(s) to ${[area, loc].filter(Boolean).join(' · ')}.`);
+    setMoveArea(''); setMoveLoc('');
+  };
+  const photoNo = new Map(listed.map((e, i) => [e.id, i]));
   const togglePick = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickedIds = [...picked].filter((id) => listed.some((e) => e.id === id));
   const done = (ok: boolean, msg: string) => { if (ok) { notify(msg); setPicked(new Set()); } };
@@ -271,13 +341,13 @@ export default function SiteEvidence() {
   const card = (e: Evidence) => {
     const isEditing = editing === e.id;
     const edits = e.editCount ?? 0;
-    const canEdit = !CLOUD || reviewer || edits < 1;
-    const needsApproval = CLOUD && !reviewer && edits >= 1;
+    const canEdit = !client && (!CLOUD || reviewer || edits < 1);
+    const needsApproval = !client && CLOUD && !reviewer && edits >= 1;
     const partner = partnerOf(e);
     const from = pairFrom ? byId.get(pairFrom) : undefined;
     const canPairHere = !!from && from.id !== e.id && pairable(e.kind) && from.kind !== e.kind;
     return (
-      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }}>
+      <figure key={e.id} className={`photo ${picked.has(e.id) ? 'picked' : ''}`} style={{ margin: 0, outline: pairFrom === e.id ? '3px solid var(--gold)' : undefined }} {...(showHidden || pairFrom || isEditing ? {} : dragSource(e.id, picked))}>
       <input type="checkbox" className="pick" checked={picked.has(e.id)} onChange={() => togglePick(e.id)} aria-label={`Select ${e.ref || e.kind} ${e.caption}`} />
         <PhotoThumb id={e.id} storagePath={e.storagePath} alt={`${e.kind}: ${e.caption || name(e.activityId)}`} />
         <figcaption className="meta">
@@ -292,8 +362,8 @@ export default function SiteEvidence() {
                 </select>
               </div>
               <input className="input" value={editCaption} onChange={(ev) => setEditCaption(ev.target.value)} placeholder="Description" />
-              <input className="input" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
-              <input className="input" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+              <input className="input" list="ev-areas" value={editArea} onChange={(ev) => setEditArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+              <input className="input" list="ev-locs" value={editLoc} onChange={(ev) => setEditLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
               <p className="note" style={{ margin: 0 }}>Capture time and GPS are kept as recorded.</p>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn btn-sm btn-primary" onClick={() => {
@@ -306,11 +376,11 @@ export default function SiteEvidence() {
             </>
           ) : (
             <>
-              <span><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span> <b>{e.ref || '—'}</b></span>
-              <span>{name(e.activityId)}{e.workArea ? ` · ${e.workArea}` : ''}</span>
-              {e.locationDetail && <span className="note">{e.locationDetail}</span>}
+              {/* same three lines as the photo captions in reports: Photo n · ref · kind / description / date · activity · area · location */}
+              <span><b>{[`Photo ${(photoNo.get(e.id) ?? 0) + 1}`, e.ref].filter(Boolean).join(' · ')} · </b><span className={`pill ${KIND_TONE[e.kind]}`}>{e.kind}</span></span>
               <span>{e.caption || <span className="note">No description</span>}</span>
-              <span className="note">Captured {new Date(e.takenAt).toLocaleString()} · {(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
+              <span>{[new Date(e.takenAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }), name(e.activityId), e.workArea, e.locationDetail].filter(Boolean).join(' · ')}</span>
+              <span className="note">{(e.bytes / 1024).toFixed(0)} KB{edits > 0 && ` · edited ${edits}×`}</span>
               <span className="note" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                 📍 {gpsLabel(e)}
                 {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
@@ -333,7 +403,8 @@ export default function SiteEvidence() {
                 {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
                 {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
                 {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
-                {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: evidence.filter((x) => x.isCover).length + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
+                {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: Math.max(0, ...evidence.filter((x) => x.isCover).map((x) => x.coverOrder ?? 0)) + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
+                {!client && !showHidden && !pairFrom && <MoveToMenu groups={projGroups.filter((g) => g.scope === 'personal' || reviewer)} current={org.groupOf.get(itemKey('attachment', e.id))?.id ?? null} currentEditable={(() => { const cur = org.groupOf.get(itemKey('attachment', e.id)); return !cur || cur.scope === 'personal' || reviewer; })()} onMove={(gid) => void movePhotos([e.id], gid)} />}
                 {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                 {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
                 {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
@@ -390,8 +461,9 @@ export default function SiteEvidence() {
                 </select>
               </label>
               <label className="field">Photo type
-                <select className="input" value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
+                <select className="input" value={coverMode ? '__cover' : kind} onChange={(e) => { const v = e.target.value; setCoverMode(v === '__cover'); setKind(v === '__cover' ? 'Reference' : v as EvidenceKind); }}>
                   {KINDS.map((k) => <option key={k} value={k}>{k === 'Reference' ? 'Reference (building / site, for the report cover)' : k}</option>)}
+                  {reviewer && <option value="__cover">Cover photo (goes straight on the report cover)</option>}
                 </select>
               </label>
               {kind === 'Reference' && (
@@ -471,6 +543,7 @@ export default function SiteEvidence() {
           updateEvidence={updateEvidence}
           syncState={(id) => (!CLOUD ? 'Saved on this device' : pendingIds.has(id) ? 'Waiting to sync' : 'Synced')}
           onAdd={() => { setKind('Reference'); document.getElementById('capture-card')?.scrollIntoView({ behavior: 'smooth' }); }}
+          onUpload={(files, cap) => addPhotos(files, { cover: true, caption: cap })}
         />
       )}
 
@@ -506,6 +579,25 @@ export default function SiteEvidence() {
           <label className="field">GPS<select className="input" value={fGps} onChange={(e) => { setFGps(e.target.value); setPage(0); }}><option value="">Any</option><option value="with">With location</option><option value="without">Without GPS</option><option value="manual">Manually entered</option><option value="warning">Accuracy warning</option></select></label>
           <label className="field">Pairing<select className="input" value={fPair} onChange={(e) => { setFPair(e.target.value); setPage(0); }}><option value="">Any</option><option value="paired">Paired</option><option value="unpaired">Missing a match</option></select></label>
         </div>
+        {(!CLOUD || reviewer) && !showHidden && listed.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            {CLOUD && <>
+              <button className="btn btn-sm" onClick={() => setClientVisibleMany(pickedIds.length ? pickedIds : listed.map((e) => e.id), true)}>Show {pickedIds.length ? `${pickedIds.length} selected` : `all ${listed.length}`} to client</button>
+              <button className="btn btn-sm" onClick={() => setClientVisibleMany(pickedIds.length ? pickedIds : listed.map((e) => e.id), false)}>Hide {pickedIds.length ? `${pickedIds.length} selected` : `all ${listed.length}`} from client</button>
+            </>}
+            <button className="btn btn-sm btn-primary" disabled={!autoPairs.length} onClick={runAutoPair} title="Matches unpaired BEFORE and AFTER photos with the same activity, work area and location">Auto-pair by details ({autoPairs.length})</button>
+          </div>
+        )}
+        {(!CLOUD || reviewer) && pickedIds.length > 0 && (
+          <div className="form-actions" style={{ marginTop: 0, marginBottom: 10, alignItems: 'center' }}>
+            <span className="note">Move {pickedIds.length} selected photo(s) to another location:</span>
+            <input className="input" style={{ width: 160 }} list="ev-areas" value={moveArea} onChange={(ev) => setMoveArea(ev.target.value)} maxLength={200} placeholder="Work area" />
+            <input className="input" style={{ width: 220 }} list="ev-locs" value={moveLoc} onChange={(ev) => setMoveLoc(ev.target.value)} maxLength={300} placeholder="Building / floor / elevation / grid" />
+            <button className="btn btn-sm btn-primary" onClick={() => void moveLocation()}>Move</button>
+          </div>
+        )}
+        <datalist id="ev-areas">{[...new Set(evidence.map((e) => (e.workArea ?? '').trim()).filter(Boolean))].sort().map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="ev-locs">{[...new Set(evidence.map((e) => (e.locationDetail ?? '').trim()).filter(Boolean))].sort().map((v) => <option key={v} value={v} />)}</datalist>
         {pairFrom && byId.get(pairFrom) && (
           <div className="banner" style={{ marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             Pairing {byId.get(pairFrom)!.ref || byId.get(pairFrom)!.kind}: choose the matching {byId.get(pairFrom)!.kind === 'Before' ? 'AFTER' : 'BEFORE'} photo.
@@ -528,6 +620,14 @@ export default function SiteEvidence() {
           onSelectAll={() => setPicked(new Set(listed.map((e) => e.id)))}
           allSelected={listed.length > 0 && listed.every((e) => picked.has(e.id))}
           total={listed.length}
+          onDelete={async () => {
+            // same rule as each photo's own Delete button
+            const ok = client ? [] : pickedIds.map((id) => byId.get(id)).filter((e): e is Evidence => !!e && (!CLOUD || reviewer || (e.editCount ?? 0) < 1));
+            if (!ok.length) return notify('You cannot delete these photos. Ask a project manager.');
+            if (!(await askConfirm(`Delete ${ok.length} photo(s)?${ok.length < pickedIds.length ? ` ${pickedIds.length - ok.length} you may not delete are skipped.` : ''} Photos that have not synced yet are lost.`, { danger: true }))) return;
+            for (const e of ok) { const p = partnerOf(e); if (p && !ok.includes(p)) updateEvidence(p.id, { pairId: null }); deleteEvidence(e.id); }
+            done(true, `Deleted ${ok.length} photo(s).`);
+          }}
         />
         {org.error && <p className="bad" role="alert">{org.error} <button className="linklike" onClick={org.clearError}>Dismiss</button></p>}
         {showHidden && <p className="note">Hidden only from your own view. Hiding never deletes a photo or changes who can see it; other people and reports still include it.</p>}
@@ -542,6 +642,7 @@ export default function SiteEvidence() {
           return (
             <div key={g.id}>
               <GroupHeader label={g.name} count={items.length} open={sectionsOpen.isOpen(g.id)} onToggle={() => sectionsOpen.toggle(g.id)} badge={g.scope === 'project' ? 'Shared with project' : 'Only you'}
+                onDropItems={editable ? (ids) => void movePhotos(ids, g.id) : undefined}
                 onRename={editable ? () => setRenaming(g) : undefined}
                 onRemove={editable ? () => askConfirm(`Remove the group "${g.name}"? Its ${items.length} photo(s) go back to the main list. No photo is deleted.`, { danger: false }).then(async (ok) => { if (ok && await org.remove(g)) notify('Group removed. The photos are back in the main list.'); }) : undefined} />
               {sectionsOpen.isOpen(g.id) && <div className={`evidence-grid layout-${layout}`}>{items.map(card)}</div>}
@@ -555,6 +656,7 @@ export default function SiteEvidence() {
           </form>
         )}
         {sections.length > 0 && slots > 0 && <h3 className="share-sub">Not in a group ({ungrouped.length})</h3>}
+        {sections.length > 0 && !showHidden && <UngroupZone label="Drag photos here to take them out of their group · or drag them onto a group name above" onDrop={(ids) => void movePhotos(ids, null)} />}
         {slots === 0 ? (sections.length ? null : <div className="empty">{showHidden ? 'You have not hidden any photos.' : evidence.length ? 'No photos match these filters.' : 'No field evidence captured yet.'}</div>) : (
           <>{pager}
           <div className={`evidence-grid layout-${layout}`}>

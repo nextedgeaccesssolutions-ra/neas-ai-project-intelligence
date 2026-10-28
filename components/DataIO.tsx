@@ -91,13 +91,34 @@ export default function DataIO({ doc, capture, importColumns, importSheet, onImp
       if (images.length === files.length) return;
     }
     const file = files.find((f) => !f.type.startsWith('image/'));
+    // a Word file or NEAS PDF with a matching data table imports as data; any other report document becomes a template
+    if (file && /\.(docx|pdf)$/i.test(file.name)) setBusy(`Reading ${file.name}…`);
+    const firstRead = file && /\.(docx|pdf)$/i.test(file.name) && importColumns && onImport
+      ? await importTable(file, importColumns, importSheet).catch(() => null)
+      : null;
+    const dataTable = !!firstRead?.rows.some((r) => Object.values(r).filter((v) => String(v ?? '').trim()).length >= 2);
+    if (file && !dataTable && /\.(docx?|pptx?|pdf)$/i.test(file.name)) {
+      setBusy(`Reading ${file.name}…`);
+      try {
+        const { templateFromFile } = await import('@/lib/templateImport');
+        const def = await templateFromFile(file);
+        const { setMeta } = await import('@/lib/offline/outbox');
+        await setMeta('imported-template', { name: file.name.replace(/\.[^.]+$/, '').slice(0, 100), definition: def });
+        window.location.href = '/templates?imported=1';
+      } catch (e) {
+        setBusy(null);
+        const m = (e as Error).message;
+        notify(/dynamically imported module|Failed to fetch/i.test(m) ? 'Reading Word or PowerPoint files needs a connection the first time. Try again when you are online.' : m);
+      }
+      return;
+    }
     if (!file || !importColumns || !onImport) {
       if (file) notify('Only photos can be imported here.');
       return;
     }
     setBusy(`Reading ${file.name}…`);
     try {
-      const { rows, source } = await importTable(file, importColumns, importSheet);
+      const { rows, source } = firstRead ?? await importTable(file, importColumns, importSheet);
       if (!rows.length) throw new Error('No rows found. Check that the first row holds the column names.');
       const plan = onImport(rows);
       setBusy(null);

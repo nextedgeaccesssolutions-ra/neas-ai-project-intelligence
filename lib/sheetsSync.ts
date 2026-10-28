@@ -64,14 +64,15 @@ export function saveSettings(s: SyncSettings) {
 
 // ---------- status store ----------
 let settings: SyncSettings = { auto: true, scriptUrl: '', token: '' };
-let status: SyncStatus = { state: 'checking', transport: null, at: null, message: null, code: null };
+const INITIAL: SyncStatus = { state: 'checking', transport: null, at: null, message: null, code: null };
+let status: SyncStatus = INITIAL;
 const subs = new Set<() => void>();
 function set(p: Partial<SyncStatus>) {
   status = { ...status, ...p };
   subs.forEach((f) => f());
 }
 export function useSyncStatus(): SyncStatus {
-  return useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => status);
+  return useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => INITIAL);
 }
 
 // ---------- transports ----------

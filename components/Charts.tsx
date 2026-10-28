@@ -112,7 +112,7 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
     return p ? { ...a, start: p.start ?? a.start, end: p.end ?? a.end } : a;
   };
   const lo = (a: Activity) => [a.start, a.baselineStart, a.actualStart].filter(Boolean).sort()[0] as string;
-  const hi = (a: Activity) => [a.end, a.baselineEnd, a.actualFinish].filter(Boolean).sort().reverse()[0] as string;
+  const hi = (a: Activity) => [a.end, a.baselineEnd, a.actualFinish, a.rescheduleEnd].filter(Boolean).sort().reverse()[0] as string;
   const start = data.reduce((m, a) => (lo(a) < m ? lo(a) : m), lo(data[0]));
   const end = addDays(data.reduce((m, a) => (hi(a) > m ? hi(a) : m), hi(data[0])), 1);
   const total = Math.max(1, daysBetween(start, end));
@@ -122,7 +122,9 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
   const span = W - LW - 10;
   const x = (d: string) => LW + (daysBetween(start, d) / total) * span;
   const weekTicks: string[] = [];
-  for (let d = start; d <= end; d = addDays(d, 7)) weekTicks.push(d);
+  // a date about every tenth of the chart: daily for a short job, weekly or monthly for long ones
+  const tickStep = [1, 2, 3, 7, 14, 30, 61, 91].find((n) => total / n <= 12) ?? 182;
+  for (let d = start; d <= end; d = addDays(d, tickStep)) weekTicks.push(d);
   const clip = (s: string) => (s.length > 34 ? s.slice(0, 33) + '…' : s);
 
   const svgX = (clientX: number) => {
@@ -172,7 +174,7 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
         {weekTicks.map((d) => (
           <g key={d}>
             <line x1={x(d)} x2={x(d)} y1={20} y2={H} stroke="#e3e9ee" />
-            <text x={x(d)} y={13} textAnchor="middle" fontSize="11" fill="#5d6f7b">{fmtDate(d, false)}</text>
+            <text x={x(d)} y={13} textAnchor={x(d) > W - 40 ? 'end' : 'middle'} fontSize="11" fill="#5d6f7b">{fmtDate(d, false)}</text>
           </g>
         ))}
         {data.map((orig, i) => {
@@ -201,6 +203,15 @@ export function Gantt({ rows, asOf, actualOf, stops = [], selected, onSelect, ed
               <rect x={xs} y={y0 + 4} width={Math.max(3, xe - xs)} height={18} rx="4" fill="var(--planned-soft)"
                 stroke={changed ? 'var(--gold)' : undefined} strokeWidth={changed ? 2 : undefined}
                 style={{ cursor: editable ? 'grab' : undefined }} onPointerDown={(e) => begin(e, orig, 'move')} />
+              {a.rescheduleStart && a.rescheduleEnd && (
+                <g>
+                  <line x1={xe} y1={y0 + 13} x2={x(a.rescheduleStart)} y2={y0 + 13} stroke="#b9770e" strokeDasharray="2 3" />
+                  <rect x={x(a.rescheduleStart)} y={y0 + 4} width={Math.max(3, x(addDays(a.rescheduleEnd, 1)) - x(a.rescheduleStart))} height={18} rx="4"
+                    fill="#fdebd0" stroke="#b9770e" strokeWidth={1.5}>
+                    <title>{`Rescheduled ${fmtDate(a.rescheduleStart)} – ${fmtDate(a.rescheduleEnd)}${a.delayReason ? `: ${a.delayReason}` : ''}`}</title>
+                  </rect>
+                </g>
+              )}
               {mine.map((s) => {
                 const from = localDay(s.stoppedAt);
                 const to = s.restartedAt ? localDay(s.restartedAt) : asOf;

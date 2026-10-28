@@ -1,4 +1,7 @@
 'use client';
+import ReportHistory from '@/components/ReportHistory';
+import { MobileReports } from '@/components/MobileLists';
+import { noteServerVersions } from '@/lib/cloud/cloudSync';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -6,7 +9,7 @@ import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import { CLOUD } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
-import { pullAll } from '@/lib/cloud/cloudSync';
+import { canManage, isClientAccount, isSuperAdmin, pullAll } from '@/lib/cloud/cloudSync';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
@@ -21,15 +24,19 @@ import WalkthroughReport from '@/components/WalkthroughReport';
 
 export default function FieldReports() {
   const { ready, project, addReport, deleteReport, addEvidence, state, replaceAll } = useStore();
+  const client = CLOUD && isClientAccount();
   const { pid, activities, reports, evidence } = useProjectData();
   const actParam = useQueryParam('activity');
   const reviewer = useCanManage();
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
   const review = async (id: string, patch: Record<string, unknown>, label: string) => {
     const sb = supabaseBrowser()!;
-    const { error: err } = await sb.from('project_reports').update(patch).eq('id', id);
+    const { data: rv, error: err } = await sb.from('project_reports').update(patch).eq('id', id).select('id, version');
     if (err) return setError(`${label} failed: ${err.message}. Reviews need an internet connection.`);
+    await noteServerVersions('project_reports', rv ?? []);
     if ('client_visible' in patch) {
-      await sb.from('report_attachments').update({ client_visible: patch.client_visible }).eq('report_id', id);
+      const { data: av } = await sb.from('report_attachments').update({ client_visible: patch.client_visible }).eq('report_id', id).select('id, version');
+      await noteServerVersions('report_attachments', av ?? []);
     }
     await pullAll().catch(() => undefined);
     setMsg(`${label}.`);
@@ -53,6 +60,45 @@ export default function FieldReports() {
   }, [ready, actParam, pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const o = useOrgList({ list: 'field_reports', kind: 'field_report', items: filter ? reports.filter((r) => r.activityId === filter) : reports, id: (r) => r.id, project: (r) => r.projectId, noun: 'report' });
+
+  const shareMany = async (share: boolean) => {
+    const pool = reports.filter((r) => r.status === 'approved' && o.listed.some((x) => x.id === r.id));
+    const chosen = pool.filter((r) => o.picked.has(r.id));
+    const target = (chosen.length ? chosen : pool).filter((r) => !!r.clientVisible !== share);
+    if (!target.length) return setMsg(share ? 'Those reports are already shared with the client.' : 'Those reports are already hidden from the client.');
+    if (!(await askConfirm(`${share ? 'Share' : 'Hide'} ${target.length} approved report(s) ${share ? 'with' : 'from'} the client? Their photos follow.`, { danger: false }))) return;
+    const sb = supabaseBrowser()!;
+    let ok = 0, photoFail = 0;
+    const failed: string[] = [];
+    // one report at a time, only on projects this person manages, so every result is exact
+    for (const r of target) {
+      if (!canManage(r.projectId)) { failed.push('not a project you manage'); continue; }
+      const { data, error: err } = await sb.from('project_reports').update({ client_visible: share }).eq('id', r.id).select('id, version');
+      await noteServerVersions('project_reports', data ?? []);
+      if (err || !data?.length) { failed.push(err?.message ?? 'not changed'); continue; }
+      ok++;
+      const { data: av, error: pe } = await sb.from('report_attachments').update({ client_visible: share }).eq('report_id', r.id).select('id, version');
+      await noteServerVersions('report_attachments', av ?? []);
+      if (pe) photoFail++;
+    }
+    await pullAll().catch(() => undefined);
+    setMsg(`${ok} report(s) ${share ? 'shared with' : 'hidden from'} the client.${failed.length ? ` ${failed.length} not changed (${[...new Set(failed)].join('; ')}).` : ''}${photoFail ? ` The photos of ${photoFail} report(s) did not follow; try again.` : ''}`);
+  };
+  const approveSelected = async () => {
+    const ids = reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').map((r) => r.id);
+    if (!ids.length) return setMsg('None of the selected reports is waiting for approval.');
+    if (!(await askConfirm(`Approve ${ids.length} submitted report(s)?`, { danger: false }))) return;
+    let ok = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      const { data, error: err } = await supabaseBrowser()!.from('project_reports').update({ status: 'approved' }).eq('id', id).eq('status', 'submitted').select('id, version');
+      await noteServerVersions('project_reports', data ?? []);
+      if (!err && data?.length) ok++;
+      else failed.push(err?.message ?? 'already reviewed or not yours to approve');
+    }
+    await pullAll().catch(() => undefined);
+    setMsg(`${ok} report(s) approved.${failed.length ? ` ${failed.length} not approved (${[...new Set(failed)].join('; ')}).` : ''}`);
+  };
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -113,14 +159,18 @@ export default function FieldReports() {
           <p className="lead">Record cumulative % complete per activity. Each saved report updates the Overview straight away.</p>
         </div>
         <div className="form-actions" style={{ marginTop: 0 }}>
-          <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
-          <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
+          {/* client accounts are view only: no import, new report, photo upload or walkthrough */}
+          {!client && <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />}
+          {CLOUD && reviewer && <Link className="btn" href="/templates">Import a template from Word / PowerPoint / Excel / PDF</Link>}
+          {!client && <Link className="btn btn-sm btn-primary" href="/field-reports/new">+ New field report (step by step)</Link>}
+          {!client && <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>}
           <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
         </div>
       </div>
       <ProjectBar />
 
       <WalkthroughReport
+        readOnly={client}
         pid={pid}
         projectName={project.name}
         activities={activities}
@@ -134,7 +184,7 @@ export default function FieldReports() {
         }}
       />
 
-      <section className="card" id="new-report">
+      <section className="card" id="new-report" style={client ? { display: 'none' } : undefined}>
         <div className="card-head"><h2>New field report</h2><span className="note">Saved on this device; works offline.</span></div>
           {activities.length === 0 ? (
             <div className="empty">This project has no activities. <Link href="/project-management">Add activities first</Link>.</div>
@@ -188,6 +238,8 @@ export default function FieldReports() {
           )}
       </section>
 
+      {historyFor && <ReportHistory reportId={historyFor} onClose={() => setHistoryFor(null)} />}
+      <MobileReports projectId={pid} />
       <section className="card" id="reports-card">
         <div className="card-head">
           <h2>Saved reports ({shown.length})</h2>
@@ -197,6 +249,15 @@ export default function FieldReports() {
           </select>
         </div>
         {o.toolbar}
+        {CLOUD && reviewer && !o.showHidden && (
+          <div className="form-actions" style={{ marginTop: 0 }}>
+            {reports.some((r) => o.picked.has(r.id) && r.status === 'submitted') && <button className="btn btn-sm btn-primary" onClick={approveSelected}>Approve selected ({reports.filter((r) => o.picked.has(r.id) && r.status === 'submitted').length} waiting)</button>}
+            {reports.some((r) => r.status === 'approved') && <>
+              <button className="btn btn-sm" onClick={() => shareMany(true)}>Share {reports.some((r) => o.picked.has(r.id) && r.status === 'approved') ? 'selected' : 'all approved'} with client</button>
+              <button className="btn btn-sm" onClick={() => shareMany(false)}>Hide {reports.some((r) => o.picked.has(r.id) && r.status === 'approved') ? 'selected' : 'all'} from client</button>
+            </>}
+          </div>
+        )}
         {o.listed.length === 0 ? (
           <div className="empty">{o.showHidden ? 'You have not hidden any field reports.' : 'No field reports yet.'}</div>
         ) : (
@@ -225,7 +286,11 @@ export default function FieldReports() {
                         )}
                       </td>
                     )}
-                    <td>{(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {CLOUD && isSuperAdmin() && <><button className="btn btn-sm" onClick={() => setHistoryFor(r.id)}>History</button>{' '}</>}
+                      <button className="btn btn-sm" onClick={() => { notify('Building PDF…'); void import('@/lib/fieldReportExport').then((m) => m.downloadFieldReportPdf(r, { project, activities, evidence })).catch((e) => notify(`PDF not created: ${(e as Error).message}`)); }}>PDF</button>{' '}
+                      {(!CLOUD || r.status !== 'approved') && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this field report?').then((ok) => ok && deleteReport(r.id))}>Delete</button>}
+                    </td>
                   </tr>
                 ), CLOUD ? 8 : 7)}
             </table>

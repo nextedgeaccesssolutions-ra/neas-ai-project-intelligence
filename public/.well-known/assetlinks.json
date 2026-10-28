@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.nextedge.neas",
+      "sha256_cert_fingerprints": ["88:94:7E:8E:0B:05:23:19:3B:D9:1D:AD:A3:E4:CC:51:40:FA:1A:FE:7A:77:FE:CD:48:A5:04:08:86:1F:39:B9"]
+    }
+  }
+]

@@ -19,7 +19,7 @@ const latestPhoto = (activityId: string, evidence: Evidence[]) =>
  * Walkthrough → report: site photos on the left, the draft progress report they feed on the right.
  */
 export default function WalkthroughReport({
-  pid, projectName, activities, reports, evidence, addEvidence, onPick,
+  pid, projectName, activities, reports, evidence, addEvidence, onPick, readOnly = false,
 }: {
   pid: string;
   projectName: string;
@@ -28,6 +28,8 @@ export default function WalkthroughReport({
   evidence: Evidence[];
   addEvidence: (e: Evidence) => void;
   onPick: (activityId: string) => void;
+  /** client accounts: progress and photos only, no photo taking or progress recording */
+  readOnly?: boolean;
 }) {
   const day = todayLocal();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -96,18 +98,18 @@ export default function WalkthroughReport({
                 {photo ? (
                   <PhotoThumb id={photo.id} storagePath={photo.storagePath} alt={`${a.name}: ${photo.caption}`} className="wt-img" />
                 ) : (
-                  <button type="button" className="wt-img wt-empty" onClick={() => takePhoto(a.id)}>No photo yet · tap to add</button>
+                  readOnly ? <span className="wt-img wt-empty">No photo yet</span> : <button type="button" className="wt-img wt-empty" onClick={() => takePhoto(a.id)}>No photo yet · tap to add</button>
                 )}
-                <button type="button" className="wt-addsmall" onClick={() => takePhoto(a.id)} disabled={busy} aria-label={`Add photo for ${a.name}`}>＋</button>
+                {!readOnly && <button type="button" className="wt-addsmall" onClick={() => takePhoto(a.id)} disabled={busy} aria-label={`Add photo for ${a.name}`}>＋</button>}
               </figure>
             ))}
           </div>
-          <div className="wt-phone-foot">
+          {!readOnly && <div className="wt-phone-foot">
             <button type="button" className="wt-cam" onClick={() => takePhoto(target || activities[0].id)} disabled={busy} aria-label="Add photo">
               <span aria-hidden>📷</span>
             </button>
             <span>{busy ? 'Saving…' : 'Add photo'}</span>
-          </div>
+          </div>}
         </div>
 
         <div className="wt-arrows" aria-hidden><span>➜</span><span>➜</span><span>➜</span></div>
@@ -123,7 +125,7 @@ export default function WalkthroughReport({
           <ul className="wt-items">
             {withStatus.map(({ a, s, photo }) => (
               <li key={a.id}>
-                <button type="button" className="wt-item" onClick={() => onPick(a.id)} title="Record progress for this activity">
+                <button type="button" className="wt-item" onClick={() => onPick(a.id)} disabled={readOnly} title={readOnly ? undefined : 'Record progress for this activity'}>
                   {photo ? <PhotoThumb id={photo.id} storagePath={photo.storagePath} alt="" className="wt-mini" /> : <span className="wt-mini wt-mini-empty" aria-hidden>📷</span>}
                   <span className="wt-item-body">
                     <strong>{a.name}</strong>
@@ -139,10 +141,10 @@ export default function WalkthroughReport({
       </div>
 
       <div className="wt-features">
-        <div><span className="wt-ic" aria-hidden>📷</span><span>Photo →<br />Report</span></div>
-        <div><span className="wt-ic" aria-hidden>📄</span><span>Exports to PDF,<br />Word &amp; Excel</span></div>
-        <div><span className="wt-ic" aria-hidden>🏢</span><span>Organized<br />by project</span></div>
-        <Link className="wt-cta" href="#new-report">Record progress <span aria-hidden>›</span></Link>
+        <Link className="wt-tile" href="/site-evidence"><span className="wt-ic" aria-hidden>📷</span><span>Photo →<br />Report</span></Link>
+        <Link className="wt-tile" href="/reports#project-report"><span className="wt-ic" aria-hidden>📄</span><span>Exports to PDF,<br />Word &amp; Excel</span></Link>
+        <Link className="wt-tile" href="/projects"><span className="wt-ic" aria-hidden>🏢</span><span>Organized<br />by project</span></Link>
+        {!readOnly && <Link className="wt-cta" href="#new-report">Record progress <span aria-hidden>›</span></Link>}
       </div>
     </section>
   );

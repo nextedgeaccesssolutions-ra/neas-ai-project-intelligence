@@ -39,6 +39,9 @@ export interface Activity {
   delayReason?: string;
   /** number of evidence photos this scope must have (optional) */
   requiredPhotos?: number | null;
+  /** remaining work moved to new dates (second Gantt bar); the planned dates above stay the plan */
+  rescheduleStart?: string | null;
+  rescheduleEnd?: string | null;
 }
 
 export type StopReason = 'weather' | 'wind' | 'client_instruction' | 'site_access' | 'safety' | 'equipment' | 'manpower' | 'material' | 'other';
@@ -87,6 +90,20 @@ export interface FieldReport {
   /** cloud mode: review state */
   status?: 'draft' | 'submitted' | 'approved' | 'rejected';
   clientVisible?: boolean;
+  /** step-by-step field report: the structured details (stored in project_reports.data) */
+  details?: ReportDetails;
+}
+
+export interface ReportDetails {
+  type: 'Progress' | 'Inspection' | 'Issue' | 'Other';
+  location: string; area: string; floor: string; weather: string; description: string;
+  tasks: { label: string; done: boolean; note?: string; status?: 'done' | 'progress' | 'not'; by?: string }[];
+  materials: { name: string; qty: number; unit: string }[];
+  remarks: string;
+  /** signature images are Site evidence photos */
+  signers: { role: 'Technician / Inspector' | 'Supervisor' | 'Client'; name: string; photoId: string; at: string }[];
+  /** report photos in their order, with their category */
+  photos: { id: string; kind: string }[];
 }
 
 export type BoqCategory = 'Labor' | 'Materials' | 'Equipment' | 'Subcontract' | 'Other';

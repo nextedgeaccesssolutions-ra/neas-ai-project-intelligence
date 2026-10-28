@@ -1,0 +1,330 @@
+{
+ "title": "Quarterly Wind Measuring Mast Inspection & Preventive Maintenance Report",
+ "division": "NEAS | Wind Resource Assessment Division",
+ "cover": [
+  {
+   "key": "period_label",
+   "label": "Quarter (e.g. Q2 - April to June 2025)"
+  },
+  {
+   "key": "location",
+   "label": "Location"
+  },
+  {
+   "key": "mast",
+   "label": "Mast"
+  },
+  {
+   "key": "inspection_period",
+   "label": "Inspection period"
+  },
+  {
+   "key": "report_date",
+   "label": "Report date"
+  },
+  {
+   "key": "team",
+   "label": "Inspection team"
+  },
+  {
+   "key": "prepared_by",
+   "label": "Prepared by",
+   "default": "NextEdge Access Solutions (NEAS)"
+  }
+ ],
+ "sections": [
+  {
+   "id": "summary",
+   "title": "Executive Summary",
+   "kind": "text"
+  },
+  {
+   "id": "status",
+   "title": "Status at a glance",
+   "kind": "status",
+   "items": [
+    "Overall condition",
+    "Maintenance required",
+    "Guy-wire adjustment",
+    "Sensor status"
+   ]
+  },
+  {
+   "id": "highlights",
+   "title": "Management Highlights",
+   "kind": "bullets"
+  },
+  {
+   "id": "findings",
+   "title": "Inspection Findings & Compliance Matrix",
+   "kind": "table",
+   "columns": [
+    "Inspection Element",
+    "Evidence / Check",
+    "Action / Result",
+    "Status"
+   ],
+   "rows": [
+    [
+     "Vertical alignment of mast/sensors",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Guy-wire tension & alignment",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Anchors & foundations",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Boom direction/orientation",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Mast cables",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Bolts & nuts",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Lightning protection",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Measuring equipment",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Steel cabinet / logger system",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Corrosion control",
+     "",
+     "",
+     ""
+    ],
+    [
+     "Ground / vegetation clearance",
+     "",
+     "",
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "activities",
+   "title": "Maintenance Activity Summary",
+   "kind": "table",
+   "columns": [
+    "Activity",
+    "Area / Scope",
+    "Work Performed",
+    "Close-Out"
+   ],
+   "rows": [
+    [
+     "Minor corrosion treatment",
+     "Guy wires / anchors / steelwork",
+     "",
+     ""
+    ],
+    [
+     "Vegetation control",
+     "Mast and anchor vicinity",
+     "",
+     ""
+    ],
+    [
+     "Guy-wire system check",
+     "Guy-wire orientations (3)",
+     "",
+     ""
+    ],
+    [
+     "Boom alignment check",
+     "Side booms / top structure",
+     "",
+     ""
+    ],
+    [
+     "Cabling inspection",
+     "Lightning and sensor cables",
+     "",
+     ""
+    ],
+    [
+     "Control / data equipment",
+     "Logger, OVPs, terminals, battery, controller",
+     "",
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "charts",
+   "title": "Summary Chart Reports",
+   "kind": "text"
+  },
+  {
+   "id": "recommendations",
+   "title": "Recommendations & Forward Maintenance Plan",
+   "kind": "table",
+   "columns": [
+    "ID",
+    "Recommendation",
+    "Rationale",
+    "Timing",
+    "Type",
+    "Priority"
+   ],
+   "rows": [
+    [
+     "R-01",
+     "Continue Quarterly Visual Inspections",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "R-02",
+     "Corrosion Monitoring & Preventive Repainting",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "R-03",
+     "Maintain Vegetation Clearance",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "R-04",
+     "Monitor Adjacent Construction Activity",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "R-05",
+     "Standardize Photo Documentation",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "R-06",
+     "Equipment Condition Trending",
+     "",
+     "",
+     "",
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "conclusion",
+   "title": "Conclusion",
+   "kind": "text"
+  },
+  {
+   "id": "approval",
+   "title": "Report Approval & Record",
+   "kind": "table",
+   "columns": [
+    "Role",
+    "Name / Designation",
+    "Signature / Date"
+   ],
+   "rows": [
+    [
+     "Inspection Team",
+     "",
+     ""
+    ],
+    [
+     "Prepared / Reviewed",
+     "NextEdge Access Solutions (NEAS)",
+     ""
+    ],
+    [
+     "Client Representative",
+     "To be completed by client",
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "photos",
+   "title": "Annex A - Photographic Record",
+   "kind": "photos"
+  },
+  {
+   "id": "traceability",
+   "title": "Annex B - Source Record Traceability",
+   "kind": "table",
+   "columns": [
+    "Field",
+    "Detail"
+   ],
+   "rows": [
+    [
+     "Inspection Date & Time",
+     ""
+    ],
+    [
+     "Location",
+     ""
+    ],
+    [
+     "Inspection Team",
+     ""
+    ],
+    [
+     "Measurement Start",
+     ""
+    ],
+    [
+     "Overall Condition",
+     ""
+    ],
+    [
+     "Adjacent Construction",
+     ""
+    ],
+    [
+     "Photo Annex Coverage",
+     ""
+    ]
+   ]
+  }
+ ]
+}

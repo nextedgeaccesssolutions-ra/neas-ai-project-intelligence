@@ -1,4 +1,5 @@
 'use client';
+import FieldHome from '@/components/FieldHome';
 import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -10,6 +11,9 @@ import GanttControls from '@/components/GanttControls';
 import { useCanManage } from '@/components/RoleGate';
 import ShareDialog from '@/components/ShareDialog';
 import { CLOUD } from '@/lib/cloud/env';
+import { canView, isSuperAdmin, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { supabaseBrowser } from '@/lib/cloud/browser';
+import { notify } from '@/components/Dialogs';
 import { useProjectData, useStore } from '@/lib/store';
 import { actualPct, plannedPct, projectProgress, projectSpan, sCurve, todayLocal, totalWeight } from '@/lib/calc';
 import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
@@ -17,7 +21,9 @@ import { fmtDate, fmtPct, fmtPHP, fmtPP } from '@/lib/format';
 const tone = (v: number) => (v >= 0 ? 'ok' : v > -10 ? 'warn' : 'bad');
 
 export default function Overview() {
-  const { ready, project, state } = useStore();
+  const { ready, project, state, upsertProject } = useStore();
+  useCloudStatus();
+  const [cvEdit, setCvEdit] = useState<string | null>(null);
   const { activities, reports, evidence, stops } = useProjectData();
   const canManage = useCanManage();
   const [asOf, setAsOf] = useState<string>(() => todayLocal());
@@ -36,6 +42,7 @@ export default function Overview() {
 
   return (
     <>
+      <FieldHome />
       <div className="page-head">
         <div>
           <div className="eyebrow">Operations</div>
@@ -76,8 +83,31 @@ export default function Overview() {
       <section className="grid kpis">
         <div className="card">
           <div className="kpi-label">Contract value</div>
-          <div className="kpi-val">{fmtPHP(project.contractValue)}</div>
-          <div className="kpi-sub">{project.contractValue == null ? <Link href={`/projects?edit=${encodeURIComponent(project.id)}`}>Add in Project register</Link> : project.status}</div>
+          {cvEdit == null ? <>
+            <div className="kpi-val">{fmtPHP(project.contractValue)}</div>
+            <div className="kpi-sub">
+              {project.contractValue == null && !(!CLOUD || isSuperAdmin()) ? <Link href={`/projects?edit=${encodeURIComponent(project.id)}`}>Add in Project register</Link> : project.status}
+              {(!CLOUD || isSuperAdmin()) && <> · <button className="linklike" onClick={() => setCvEdit(project.contractValue == null ? '' : String(project.contractValue))}>Edit</button></>}
+            </div>
+          </> : (
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const v = cvEdit.trim() === '' ? null : Number(cvEdit.replace(/,/g, ''));
+              if (v != null && (!Number.isFinite(v) || v < 0 || v > 1e12)) return notify('Enter a valid amount in PHP.');
+              const value = v == null ? null : Math.round(v * 100) / 100;
+              // projects are not in the offline queue: in cloud mode save straight to the database (Super Admin only there)
+              if (CLOUD) {
+                const { error } = await supabaseBrowser()!.from('projects').update({ contract_value: value }).eq('id', project.id);
+                if (error) return notify(`Contract value not saved: ${error.message}`);
+              }
+              upsertProject({ ...project, contractValue: value });
+              setCvEdit(null);
+              notify('Contract value saved.');
+            }} style={{ display: 'grid', gap: 6 }}>
+              <input className="input" inputMode="decimal" autoFocus aria-label="Contract value in PHP" value={cvEdit} onChange={(e) => setCvEdit(e.target.value)} placeholder="e.g. 473214.29" />
+              <div className="form-actions" style={{ marginTop: 0 }}><button className="btn btn-sm btn-primary">Save</button><button type="button" className="btn btn-sm" onClick={() => setCvEdit(null)}>Cancel</button></div>
+            </form>
+          )}
         </div>
         <div className="card">
           <div className="kpi-label">Planned progress</div>
@@ -93,7 +123,7 @@ export default function Overview() {
           <div className="kpi-label">Activities / reports</div>
           <div className="kpi-val">{activities.length} / {reports.length}</div>
           <div className="kpi-sub">
-            <Link href="/field-reports">Saved records</Link> · <Link href="/site-evidence">{evidence.length} photos</Link>
+            {canView('field_reports') ? <Link href="/field-reports">Saved records</Link> : 'Saved records'} · {canView('site_evidence') ? <Link href="/site-evidence">{evidence.length} photos</Link> : `${evidence.length} photos`}
           </div>
         </div>
       </section>
@@ -156,7 +186,7 @@ export default function Overview() {
                       <td><div className="bar"><span style={{ width: `${act}%` }} /></div></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <Link className="btn btn-sm" href={`/project-management?edit=${a.id}`}>Edit</Link>{' '}
-                        <Link className="btn btn-sm" href={`/field-reports?activity=${a.id}`}>Report</Link>
+                        {canView('field_reports') && <Link className="btn btn-sm" href={`/field-reports?activity=${a.id}`}>Report</Link>}
                       </td>
                     </tr>
                   );

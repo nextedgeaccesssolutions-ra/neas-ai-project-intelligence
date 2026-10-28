@@ -1,21 +1,31 @@
 'use client';
 // Project cover / building reference photos: shown in exact 9.21 cm tiles, the same size the
 // project report prints. Project managers and Super Admins choose, order and set the primary photo.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PhotoThumb from '@/components/PhotoThumb';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
+import { COVER_CATEGORIES } from '@/lib/types';
 import { coverPhotos, coverReference, reorderCover, COVER_TILE_CM } from '@/lib/coverPhotos';
 import type { Evidence, Project } from '@/lib/types';
 
-export default function CoverPhotos({ project, evidence, canManage, updateEvidence, onAdd, syncState }: {
+export default function CoverPhotos({ project, evidence, canManage, updateEvidence, onAdd, onUpload, syncState }: {
   project: Project; evidence: Evidence[]; canManage: boolean;
   updateEvidence: (id: string, patch: Partial<Evidence>) => void;
   onAdd: () => void;
+  /** upload photos straight onto the cover */
+  onUpload?: (files: File[], caption: string) => void | Promise<void>;
   /** per-photo sync label, e.g. "Waiting to sync" */
   syncState?: (id: string) => string | null;
 }) {
   const [loc, setLoc] = useState<LocationInfo | null>(null);
   const [pick, setPick] = useState('');
+  // the photos can be folded away; remembered on this device
+  const [shown, setShown] = useState(true);
+  useEffect(() => { try { setShown(localStorage.getItem('neas-cover-photos-hidden') !== '1'); } catch { /* storage blocked */ } }, []);
+  const toggle = () => setShown((v) => { try { localStorage.setItem('neas-cover-photos-hidden', v ? '1' : '0'); } catch { /* storage blocked */ } return !v; });
+  const [upCaption, setUpCaption] = useState('');
+  // inline edit of a cover photo's heading details (category, description, work area, location)
+  const [edit, setEdit] = useState<{ id: string; coverCategory: string; caption: string; workArea: string; locationDetail: string } | null>(null);
   const cover = coverPhotos(evidence);
   const candidates = evidence.filter((e) => !e.isCover).sort((a, b) => Number(b.kind === 'Reference') - Number(a.kind === 'Reference') || b.takenAt.localeCompare(a.takenAt));
 
@@ -36,10 +46,18 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
     <section className="card" id="cover-photos">
       <div className="card-head">
         <h2>Project cover photos ({cover.length})</h2>
+        <button type="button" className="btn btn-sm" aria-expanded={shown} onClick={toggle}>{shown ? 'Hide photos' : 'Show photos'}</button>
         <span className="note">Printed on the project report cover at exactly {COVER_TILE_CM} cm × {COVER_TILE_CM} cm; the first 2 go on page 1</span>
       </div>
       <div className="form-actions" style={{ marginTop: 0, flexWrap: 'wrap' }}>
-        <button className="btn btn-sm" onClick={onAdd}>Upload building / site photo</button>
+        {onUpload && canManage ? (
+          <label className="btn btn-sm btn-primary" style={{ cursor: 'pointer' }}>
+            Upload cover photo(s)
+            <input type="file" accept="image/*" multiple hidden onChange={(ev) => { const f = Array.from(ev.target.files ?? []); ev.target.value = ''; if (f.length) { void onUpload(f, upCaption.trim()); setUpCaption(''); } }} />
+          </label>
+        ) : null}
+        {onUpload && canManage && <input className="input" style={{ maxWidth: 280 }} maxLength={200} value={upCaption} onChange={(e) => setUpCaption(e.target.value)} placeholder="Description (e.g. Century Spire, east facade)" aria-label="Cover photo description" />}
+        <button className="btn btn-sm" onClick={onAdd}>Upload with full details</button>
         {canManage && candidates.length > 0 && (
           <>
             <select className="input" style={{ width: 'auto', maxWidth: 320 }} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Photo to put on the cover">
@@ -51,7 +69,7 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
         )}
         {!canManage && <span className="note">The project manager chooses which photos appear on the report cover.</span>}
       </div>
-      {cover.length === 0 ? (
+      {!shown ? null : cover.length === 0 ? (
         <div className="empty">No cover photos yet. Upload a building or site photo (type “Reference”), then add it to the cover.</div>
       ) : (
         <div className="cover-grid">
@@ -59,10 +77,30 @@ export default function CoverPhotos({ project, evidence, canManage, updateEviden
             const ref = coverReference(e, i + 1, project.name);
             const sync = syncState?.(e.id);
             return (
-              <figure key={e.id} className="cover-tile" style={{ width: `calc(${COVER_TILE_CM}cm + 2px)` }}>
+              <figure key={e.id} className="cover-tile" style={{ width: cover.length === 1 ? 'min(100%, 560px)' : `min(100%, calc(${COVER_TILE_CM}cm + 120px))` }}>
                 <div className="cover-square"><PhotoThumb id={e.id} storagePath={e.storagePath} alt={ref.title} /></div>
                 <figcaption className="cover-ref">
-                  <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}
+                  {edit?.id === e.id ? (
+                    <form style={{ display: 'grid', gap: 6 }} onSubmit={(ev) => {
+                      ev.preventDefault();
+                      updateEvidence(e.id, { ...(canManage ? { coverCategory: (edit.coverCategory || null) as Evidence['coverCategory'] } : {}), caption: edit.caption.trim(), workArea: edit.workArea.trim(), locationDetail: edit.locationDetail.trim() });
+                      setEdit(null);
+                    }}>
+                      {canManage && <label className="field">Category
+                        <select className="input" value={edit.coverCategory} onChange={(x) => setEdit({ ...edit, coverCategory: x.target.value })}>
+                          <option value="">(none — use the description)</option>
+                          {COVER_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </label>}
+                      <label className="field">Description<input className="input" maxLength={300} value={edit.caption} onChange={(x) => setEdit({ ...edit, caption: x.target.value })} /></label>
+                      <label className="field">Work area<input className="input" maxLength={200} value={edit.workArea} onChange={(x) => setEdit({ ...edit, workArea: x.target.value })} placeholder="e.g. North facade" /></label>
+                      <label className="field">Building / floor / location<input className="input" maxLength={200} value={edit.locationDetail} onChange={(x) => setEdit({ ...edit, locationDetail: x.target.value })} placeholder="e.g. Tower 1 · L12" /></label>
+                      <div className="form-actions" style={{ marginTop: 0 }}><button className="btn btn-sm btn-primary">Save</button><button type="button" className="btn btn-sm" onClick={() => setEdit(null)}>Cancel</button></div>
+                    </form>
+                  ) : <>
+                    <b>{ref.title}</b>{e.coverPrimary && <span className="pill pill-ok" style={{ marginLeft: 6 }}>Primary</span>}{' '}
+                    {canManage && <button className="btn btn-sm" onClick={() => setEdit({ id: e.id, coverCategory: e.coverCategory ?? '', caption: e.caption ?? '', workArea: e.workArea ?? '', locationDetail: e.locationDetail ?? '' })}>Edit details</button>}
+                  </>}
                   <dl>{ref.lines.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
                   <span className="note">{sync ?? 'Saved'}</span>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
