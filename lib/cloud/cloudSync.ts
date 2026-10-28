@@ -62,9 +62,11 @@ export const viewOfPath = (path: string): ViewKey | null => {
 /** null allowed_views = every module. Super Admins always see everything. */
 /** Modules every signed-in user always has, whatever their module settings. */
 export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
-/** A client account sees Overview and reports only: field reports and site evidence stay hidden. */
-export const CLIENT_VIEWS: ViewKey[] = ['overview'];
+/** A client account opens these modules read only and sees only what is shared with the client (enforced in the database). */
+export const CLIENT_VIEWS: ViewKey[] = ['overview', 'project_management', 'field_reports', 'projects', 'site_evidence', 'offline_queue'];
 export const isClientViews = (v: readonly string[] | null | undefined) => !!v && v.length === CLIENT_VIEWS.length && CLIENT_VIEWS.every((k) => v.includes(k));
+/** The signed-in account is a client (read-only, shared items only). */
+export const isClientAccount = (profile: Profile | null = status.profile) => !!profile && profile.global_role !== 'super_admin' && isClientViews(profile.allowed_views);
 export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
   !view || !profile || (ALWAYS_VIEWS.includes(view) && !isClientViews(profile.allowed_views)) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
@@ -210,6 +212,8 @@ async function queueCollection<T extends { id: string; projectId: string }>(enti
 /** Called by the store after every local change in cloud mode. */
 export async function cloudOnChange(prev: AppState, next: AppState) {
   if (status.auth !== 'active' && status.auth !== 'offline_grace') return;
+  // client accounts are read only: local changes are never sent (the database refuses them anyway)
+  if (isClientAccount()) return;
   const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
   // device-mode ids (e.g. "act_x1") are converted: cloud records always use UUIDs
   await queueCollection('activities', prev.activities, next.activities.filter((a) => isUuid(a.id)), M.activityToDb);

@@ -500,7 +500,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
       if (role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_admin', hours: 24 });
       else {
         if (u.global_role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_staff', hours: 24 });
-        const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: role === 'client' ? [...CLIENT_VIEWS] : null }));
+        const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: role === 'client' }));
         if (error) throw new Error(error.message);
       }
       notify('Role changed. Recorded in the audit log.');
@@ -728,8 +728,8 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
       <div className="form-actions" style={{ marginTop: 0 }}>
         {isClientViews(u.allowed_views)
-          ? <><span className="pill">Client account</span><span className="note">Sees Overview, Global reports and Project reports for their projects only. Field reports, Site evidence and every other module are hidden.</span></>
-          : <button className="btn btn-sm" disabled={saving} onClick={() => save([...CLIENT_VIEWS])}>Make this a client account (reports only)</button>}
+          ? <><span className="pill">Client account</span><span className="note">View only, for their projects: Overview, Schedule & Gantt, Field reports, Project register, Site evidence and Offline queue, showing only approved, client-shared reports and photos. They cannot submit, upload or edit anything.</span></>
+          : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: view only, shared items only.'); await reload(); }}>Make this a client account (view only)</button>}
       </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
@@ -786,11 +786,11 @@ function UserPanel({ u, d, self, act, review, reload }: {
     const client = isClientViews(u.allowed_views);
     if (role === 'client' && !client) {
       if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects, on every project they belong to.`))) return;
-      const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: [...CLIENT_VIEWS] }));
+      const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
       if (error) return notify(error.message);
     } else if (role !== 'client' && client) {
       if (!(await askConfirm(`Make ${u.full_name || u.email} staff again? Their account gets every module (narrow it under Module access).`))) return;
-      const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: null }));
+      const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: false }));
       if (error) return notify(error.message);
     }
     await setMember(m.project_id, role === 'client' ? 'employee' : role, role === 'client' ? false : m.can_approve_reports);
@@ -864,7 +864,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
               return (
                 <tr key={m.project_id}>
                   <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
-                  <td><select className="input" value={m.role === 'employee' && isClientViews(u.allowed_views) && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (reports only)</option>}</select></td>
+                  <td><select className="input" value={m.role === 'employee' && isClientViews(u.allowed_views) && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select></td>
                   <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
                 </tr>
@@ -876,12 +876,12 @@ function UserPanel({ u, d, self, act, review, reload }: {
         {u.status === 'active' && free.length > 0 && (
           <div className="form-actions">
             <select className="input" style={{ maxWidth: 240 }} value={addProject} onChange={(e) => setAddProject(e.target.value)} aria-label="Project to add"><option value="">Add to project…</option>{free.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select>
-            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client (reports only)</option>}</select>
+            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client (view only)</option>}</select>
             <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => {
               // a client is a project member whose account sees only the client report views
               if (addRole === 'client' && !isClientViews(u.allowed_views)) {
                 if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects; every other module is hidden.`))) return;
-                const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: [...CLIENT_VIEWS] }));
+                const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
                 if (error) return notify(error.message);
               }
               await setMember(addProject, addRole === 'client' ? 'employee' : addRole, false); setAddProject('');

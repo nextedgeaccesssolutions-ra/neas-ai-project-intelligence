@@ -6,7 +6,7 @@ import { useStore } from '@/lib/store';
 import DialogHost, { IS_ARTIFACT } from '@/components/Dialogs';
 import { useSyncStatus } from '@/lib/sheetsSync';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, canView, isClientViews, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
+import { canManage, canView, isClientAccount, isClientViews, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
 import { requestPersistentStorage, unsentSummary, type PersistState } from '@/lib/offline/persist';
 import { askConfirm } from '@/components/Dialogs';
 
@@ -152,7 +152,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile) && !(n.href === '/templates' && isClientViews(cloud.profile?.allowed_views))));
   const isClient = CLOUD && !isAdmin && isClientViews(cloud.profile?.allowed_views);
   // report templates are a staff tool: client accounts cannot open them even by address
-  const blocked = CLOUD && !pathname.startsWith('/admin') && (!canView(viewOfPath(pathname), cloud.profile) || (isClient && pathname.startsWith('/templates')));
+  const blocked = CLOUD && !pathname.startsWith('/admin') && (!canView(viewOfPath(pathname), cloud.profile) || (isClient && (pathname.startsWith('/templates') || pathname.startsWith('/field-reports/new'))));
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
   const page = pathname.startsWith('/admin') ? { label: 'Control panel', group: 'Administration', href: '/admin' }
@@ -166,7 +166,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   );
 
   return (
-    <div className={`shell${mini ? ' mini' : ''}`}>
+    <div className={`shell${mini ? ' mini' : ''}${isClient ? ' client-readonly' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       {open && <div className="side-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />}
       <aside className={`side${open ? ' open' : ''}`} aria-label="Main navigation">
@@ -265,6 +265,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
           </div>
         </header>
         <main className="content" id="main-content" tabIndex={-1}>
+          {isClient && !blocked && <p className="client-banner" role="note">View only: you see the reports, photos and schedule shared with you. Changes are made by NEAS.</p>}
           {CLOUD && persist !== 'persisted' && unsentSummary(cloud) && (
             <div className="banner" role="status">
               {unsentSummary(cloud)} This browser has not agreed to keep them permanently, so they could be cleared if the phone runs low on space or the site is not opened for several days.
@@ -290,7 +291,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
               ...(has('/projects') ? [{ href: '/projects', label: 'Projects', icon: 'table' }] : []),
               { href: '/more', label: 'More', icon: 'list' },
             ];
-            const plus = has('/field-reports')
+            const plus = has('/field-reports') && !isClient
               ? <Link key="new-report" href="/field-reports/new" className="bottom-plus" aria-label="New field report" aria-current={pathname === '/field-reports/new' ? 'page' : undefined}><span aria-hidden="true">+</span></Link> : null;
             const cut = Math.ceil(tabs.length / 2);
             const link = (n: (typeof tabs)[number]) => {
