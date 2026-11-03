@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#071d29"><title>NEAS JARVIS | Agent Command Center</title>
+<style>
+:root{--bg:#061522;--cyan:#00d9f2;--gold:#e5a52f;--text:#dceaf2;--muted:#718a9b;--panel:#0a2030}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 48%,#0b2b40 0,#061a2a 48%,#030d18 100%);color:var(--text);font:15px/1.4 Inter,Segoe UI,Arial,sans-serif;min-height:100vh;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.24;background:repeating-linear-gradient(0deg,transparent 0 79px,rgba(0,217,242,.08) 80px),repeating-linear-gradient(90deg,transparent 0 79px,rgba(0,217,242,.06) 80px)}
+header{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:18px 28px;z-index:5}.eyebrow{font-size:10px;letter-spacing:.28em;color:#6b9daf}.brand{font-weight:800;letter-spacing:.16em}.brand b{color:var(--gold)}.github{border:1px solid #425666;border-radius:30px;padding:8px 16px;color:#a9bbc6;text-decoration:none;font-size:10px;letter-spacing:.18em}
+.clock{position:absolute;top:75px;left:28px;color:#e7f0f5}.clock strong{font-size:29px;font-weight:300}.clock span{display:block;font-size:10px;color:var(--muted);letter-spacing:.14em}.clock .temp{color:var(--cyan);display:inline;margin-left:12px;font-size:17px}
+main{max-width:1500px;margin:auto;padding:140px 22px 28px}.title{text-align:center;font-size:11px;letter-spacing:.34em;color:#7faabd}.title strong{display:block;font-size:clamp(20px,3vw,32px);letter-spacing:.12em;color:#e8f4fa;margin-top:8px}
+.network{height:min(67vh,680px);min-height:490px;position:relative;max-width:1300px;margin:0 auto}.links{position:absolute;inset:0;width:100%;height:100%;overflow:visible}.links path{fill:none;stroke:rgba(0,202,238,.2);stroke-width:1.4}.links path.pulse{stroke:rgba(0,217,242,.6);stroke-dasharray:5 12;animation:flow 5s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-170}}.core{position:absolute;left:50%;top:49%;transform:translate(-50%,-50%);width:clamp(160px,21vw,280px);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,#16465a 0,#0c3449 48%,rgba(4,19,31,.7) 70%);border:3px solid #e8ad3e;box-shadow:0 0 12px #ffc45a,0 0 45px rgba(255,173,48,.58),inset 0 0 35px rgba(0,217,242,.28);z-index:2}
+.core:before,.core:after{content:"";position:absolute;inset:-15px;border:1px solid rgba(0,217,242,.36);border-radius:50%;animation:spin 22s linear infinite}.core:after{inset:-31px;border-color:rgba(234,171,57,.3);transform:rotateX(65deg);animation-duration:30s}
+@keyframes spin{to{transform:rotate(360deg)}}.particles{width:60%;height:60%;border-radius:50%;background-image:radial-gradient(circle,#00d9f2 1px,transparent 2px);background-size:9px 9px;mask-image:radial-gradient(circle,#000 0 30%,transparent 72%);animation:breathe 3s ease-in-out infinite}
+@keyframes breathe{50%{transform:scale(1.13);filter:brightness(1.8)}}.corelabel{position:absolute;bottom:-57px;text-align:center;font-size:11px;letter-spacing:.34em;color:var(--gold);white-space:nowrap}
+.agent{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:11px;z-index:3;cursor:pointer;background:transparent;border:0;color:var(--text);font:inherit;text-align:left}.agent .dot{width:19px;height:19px;border:3px solid var(--cyan);border-radius:50%;box-shadow:0 0 12px rgba(0,217,242,.45);flex:none}.agent.gold .dot{border-color:var(--gold);box-shadow:0 0 12px rgba(229,165,47,.5)}.agent.dim{opacity:.48}.agent .name{font-size:clamp(11px,1.3vw,17px);white-space:nowrap;text-shadow:0 1px 8px #03101a}.agent:hover .dot,.agent.active .dot{background:rgba(0,217,242,.3);transform:scale(1.25)}
+.a1{left:50%;top:10%}.a2{left:28%;top:20%}.a3{left:39%;top:36%}.a4{left:64%;top:20%}.a5{left:79%;top:39%}.a6{left:28%;top:55%}.a7{left:22%;top:66%}.a8{left:38%;top:79%}.a9{left:50%;top:87%}.a10{left:67%;top:78%}.a11{left:72%;top:58%}.a12{left:64%;top:49%}.a13{left:80%;top:18%}.a14{left:83%;top:73%}.a15{left:58%;top:91%}
+.status{position:absolute;left:50%;bottom:3px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;color:var(--gold);font-size:10px;letter-spacing:.34em}.status i{width:34px;height:34px;border:1px solid var(--gold);border-radius:50%;box-shadow:0 0 15px rgba(229,165,47,.5);display:grid;place-items:center;font-style:normal}
+.detail{max-width:850px;margin:0 auto 20px;border:1px solid rgba(0,217,242,.2);background:rgba(5,22,34,.78);padding:14px 18px;display:flex;justify-content:space-between;gap:16px;align-items:center}.detail strong{color:var(--cyan);font-size:12px;letter-spacing:.15em}.detail p{margin:4px 0 0;color:#91a9b6;font-size:12px}.pill{font-size:9px;letter-spacing:.15em;color:var(--gold);border:1px solid rgba(229,165,47,.45);padding:6px 9px;white-space:nowrap}
+.legend{text-align:center;color:#607d8d;font-size:9px;letter-spacing:.16em;margin:6px 0 20px}.legend b{color:var(--cyan);font-weight:500}.legend span{margin:0 12px}
+@media(max-width:700px){header{padding:14px}.clock{left:15px;top:68px}.network{min-height:520px;height:65vh}.agent .name{font-size:10px}.agent .dot{width:13px;height:13px;border-width:2px}.a2{left:20%}.a3{left:35%}.a4{left:69%}.a5{left:87%}.a6{left:18%}.a7{left:12%}.a8{left:31%}.a10{left:72%}.a11{left:85%}.a12{left:70%}.a13{left:88%}.a14{left:88%}.detail{margin-left:10px;margin-right:10px}}
+</style></head>
+<body>
+<header><div><div class="brand">NEXTEDGE <b>ACCESS SOLUTIONS</b></div><div class="eyebrow">NEAS INTELLIGENCE NETWORK</div></div><a class="github" href="https://github.com/nextedgeaccesssolutions-ra/neas-ai-project-intelligence/tree/feature/neas-jarvis-ai-brain" target="_blank" rel="noreferrer">VIEW ON GITHUB ↗</a></header>
+<div class="clock"><strong id="time">--:--</strong><span id="date">PHILIPPINES · LOCAL TIME</span></div>
+<main><div class="title">CENTRALIZED AI COMMAND NETWORK<strong>NEAS J.A.R.V.I.S.</strong></div>
+<section class="network" aria-label="NEAS AI agent network">
+<svg class="links" viewBox="0 0 1300 680" preserveAspectRatio="none" aria-hidden="true">
+<path d="M650 330 L650 68 M650 330 L360 140 M650 330 L500 245 M650 330 L830 140 M650 330 L1030 260 M650 330 L300 375 M650 330 L240 450 M650 330 L470 540 M650 330 L650 590 M650 330 L850 530 M650 330 L940 395 M650 330 L820 330 M650 330 L1040 120 M650 330 L1080 500 M650 330 L760 610"/>
+<path class="pulse" d="M650 330 L360 140 M650 330 L830 140 M650 330 L240 450 M650 330 L850 530 M650 330 L1040 120"/>
+</svg>
+<div class="core"><div class="particles"></div><div class="corelabel">NEAS JARVIS · CENTRAL BRAIN</div></div>
+<button class="agent a1" data-name="Strategist" data-desc="Business strategy, planning, priorities and executive decision support."><i class="dot"></i><span class="name">Strategist</span></button>
+<button class="agent a2" data-name="Researcher" data-desc="Web research, market intelligence, competitor and opportunity analysis."><i class="dot"></i><span class="name">Researcher</span></button>
+<button class="agent a3" data-name="Chief of Staff" data-desc="Task coordination, agent routing, planning and follow-through."><i class="dot"></i><span class="name">Chief of Staff</span></button>
+<button class="agent a4" data-name="Finance" data-desc="Budgeting, cash flow, project costing, billing and financial analysis."><i class="dot"></i><span class="name">Finance</span></button>
+<button class="agent a5" data-name="Editor" data-desc="Document drafting, review, formatting and quality control."><i class="dot"></i><span class="name">Editor</span></button>
+<button class="agent a6 gold" data-name="Sales" data-desc="Lead qualification, proposals, pipeline and client follow-up."><i class="dot"></i><span class="name">Sales</span></button>
+<button class="agent a7 gold" data-name="Marketing" data-desc="SEO, campaigns, social content and worldwide brand growth."><i class="dot"></i><span class="name">Marketing</span></button>
+<button class="agent a8 gold" data-name="Operations" data-desc="Manpower, procurement, logistics, field execution and delivery."><i class="dot"></i><span class="name">Operations</span></button>
+<button class="agent a9 gold" data-name="Social" data-desc="Social media planning, publishing workflows and performance review."><i class="dot"></i><span class="name">Social</span></button>
+<button class="agent a10 gold" data-name="Engineering" data-desc="Technical workpacks, engineering coordination and project support."><i class="dot"></i><span class="name">Engineering</span></button>
+<button class="agent a11 gold" data-name="Design" data-desc="Brand assets, visual concepts, presentations and creative direction."><i class="dot"></i><span class="name">Design</span></button>
+<button class="agent a12" data-name="Memory" data-desc="Approved NEAS knowledge, project context and retrieval controls."><i class="dot"></i><span class="name">Memory</span></button>
+<button class="agent a13 dim" data-name="Drive" data-desc="Planned document storage integration; not connected."><i class="dot"></i><span class="name">Drive</span></button>
+<button class="agent a14 dim" data-name="Calendar" data-desc="Planned scheduling integration; not connected."><i class="dot"></i><span class="name">Calendar</span></button>
+<button class="agent a15 dim" data-name="CRM" data-desc="Planned customer relationship integration; not connected."><i class="dot"></i><span class="name">CRM</span></button>
+<div class="status"><i>●</i><span>STANDBY</span></div>
+</section>
+<div class="legend"><b>CYAN · CORE AGENTS</b><span>GOLD · BUSINESS SPECIALISTS</span><span>DIM · PLANNED INTEGRATIONS</span></div>
+<section class="detail" aria-live="polite"><div><strong id="agentTitle">SELECT AN AGENT</strong><p id="agentDesc">Choose a node in the network to view its planned responsibilities and skill domain.</p></div><span class="pill" id="agentState">BLUEPRINT</span></section>
+</main>
+<script>
+function tick(){const d=new Date();document.getElementById('time').textContent=new Intl.DateTimeFormat('en-PH',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Manila'}).format(d);document.getElementById('date').textContent=new Intl.DateTimeFormat('en-PH',{weekday:'short',month:'short',day:'numeric',timeZone:'Asia/Manila'}).format(d).toUpperCase()+' · MANILA'}
+tick();setInterval(tick,1000);
+document.querySelectorAll('.agent').forEach(function(btn){btn.addEventListener('click',function(){document.querySelectorAll('.agent').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');document.getElementById('agentTitle').textContent=btn.dataset.name.toUpperCase();document.getElementById('agentDesc').textContent=btn.dataset.desc;document.getElementById('agentState').textContent=btn.classList.contains('dim')?'NOT CONNECTED':'PLANNED AGENT'})});
+</script></body></html>
