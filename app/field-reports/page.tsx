@@ -18,6 +18,7 @@ import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
 import { compressImage, putPhoto } from '@/lib/photos';
+import { isLinkPhoto, photoFromUrl } from '@/lib/photoFromUrl';
 import { locatePhoto, photoRef, gpsSourceOf } from '@/lib/geo';
 import type { Evidence } from '@/lib/types';
 import WalkthroughReport from '@/components/WalkthroughReport';
@@ -51,6 +52,7 @@ export default function FieldReports() {
   const [filter, setFilter] = useState('');
   const [photoKind, setPhotoKind] = useState<Evidence['kind']>('Before');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [photoUrl, setPhotoUrl] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
 
   useEffect(() => {
@@ -128,13 +130,16 @@ export default function FieldReports() {
   const attachPhoto = async () => {
     const files = Array.from(fileRef.current?.files ?? []);
     if (!activityId) return setError('Choose an activity first.');
-    if (!files.length) return setError('Choose or capture a photo.');
+    if (!files.length && !photoUrl.trim()) return setError('Choose or capture a photo, or paste a photo link.');
     setPhotoBusy(true);
+    if (photoUrl.trim()) {
+      try { files.push(await photoFromUrl(photoUrl)); setPhotoUrl(''); } catch (e) { setPhotoBusy(false); return setError((e as Error).message); }
+    }
     let ok = 0;
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
-        const gps = await locatePhoto(file, { enabled: true });
+        const gps = await locatePhoto(file, { enabled: !isLinkPhoto(file) });
         const blob = await compressImage(file);
         const id = uid('ev');
         const takenAt = new Date(file.lastModified || Date.now()).toISOString();
@@ -230,6 +235,7 @@ export default function FieldReports() {
                       <option>Before</option><option>During</option><option>After</option>
                     </select>
                     <input ref={fileRef} type="file" accept="image/*" multiple className="input" style={{ width: 'auto' }} />
+                    <input className="input" type="url" inputMode="url" style={{ width: 'auto', minWidth: 220 }} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="or paste a photo link (URL)" aria-label="Photo link (URL)" />
                     <button className="btn" onClick={attachPhoto} disabled={photoBusy}>{photoBusy ? 'Saving…' : 'Add photo'}</button>
                   </>
                 )}

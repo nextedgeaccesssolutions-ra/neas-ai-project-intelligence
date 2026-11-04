@@ -691,3 +691,4 @@ th.pick-col, td.pick-col { width: 34px; padding-right: 0; }
 .client-readonly a[href="/field-reports/new"],
 .client-readonly a[href="/site-evidence"].fh-act { display: none !important; }
 .client-banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: #fff7e6; color: #6b4a00; font-size: 13px; }
+.client-readonly input[type="url"][placeholder*="photo link"], .client-readonly input[aria-label="Photo link (URL)"] { display: none !important; }

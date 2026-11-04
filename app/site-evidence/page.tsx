@@ -9,6 +9,7 @@ import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { compressImage, getPhoto, putPhoto } from '@/lib/photos';
+import { isLinkPhoto, photoFromUrl } from '@/lib/photoFromUrl';
 import DataIO from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
@@ -109,6 +110,7 @@ export default function SiteEvidence() {
   const [editArea, setEditArea] = useState('');
   const [editLoc, setEditLoc] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [photoUrl, setPhotoUrl] = useState('');
   const [gpsTrack, setGpsTrack] = useState<GpsTrack>({ state: 'off', fix: null });
   const [online, setOnline] = useState(true);
 
@@ -179,7 +181,7 @@ export default function SiteEvidence() {
       try {
         // Per photo: the camera's own GPS first, else the live fix for a just-taken photo. A slow or refused fix never blocks saving.
         setBusy(manual ? 'Saving…' : 'Reading location…');
-        const gps: GpsResult = manual ? { status: 'manual', fix: manual } : await locatePhoto(file, { enabled: recordGps });
+        const gps: GpsResult = manual ? { status: 'manual', fix: manual } : await locatePhoto(file, { enabled: recordGps && !isLinkPhoto(file) });
         results.push(gps);
         setBusy('Saving…');
         const blob = await compressImage(file);
@@ -205,7 +207,16 @@ export default function SiteEvidence() {
     setGpsNote(summarizeGps(results));
     if (ok) notify(`${ok} photo(s) added to ${name(activityId)}.`);
   };
-  const attach = () => addPhotos(Array.from(fileRef.current?.files ?? []));
+  const attach = async () => {
+    const files = Array.from(fileRef.current?.files ?? []);
+    // a pasted link is fetched by the app server and saved like any other photo
+    if (photoUrl.trim()) {
+      setBusy('Fetching photo…');
+      try { files.push(await photoFromUrl(photoUrl)); setPhotoUrl(''); } catch (e) { setBusy(null); return setError((e as Error).message); }
+      setBusy(null);
+    }
+    return addPhotos(files);
+  };
 
   const pair = (a: Evidence, b: Evidence) => {
     if (!pairable(a.kind) || !pairable(b.kind) || a.kind === b.kind) return notify('Pair one BEFORE photo with one AFTER photo.');
@@ -484,6 +495,9 @@ export default function SiteEvidence() {
               </label>
               <label className="field">Description
                 <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="What the photo shows" />
+              </label>
+              <label className="field">Or paste a photo link (URL)
+                <input className="input" type="url" inputMode="url" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://… (image, Google Drive or Dropbox link)" />
               </label>
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
