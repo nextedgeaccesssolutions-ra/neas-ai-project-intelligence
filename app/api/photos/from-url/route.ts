@@ -23,23 +23,60 @@ async function safeUrl(raw: string): Promise<URL> {
   return u;
 }
 
-export const POST = handle(async (req) => {
-  assertSameOrigin(req);
-  await requireUser();
-  const b = await readJson<{ url?: string }>(req, 4096);
-  let url = direct(await safeUrl(String(b.url ?? '')));
+/** Google Images / Bing result links carry the real image address in a parameter. */
+function unwrapSearchLink(u: URL): URL {
+  for (const k of ['imgurl', 'mediaurl', 'image_url']) {
+    const v = u.searchParams.get(k);
+    if (v) { try { return new URL(v); } catch { /* keep the original */ } }
+  }
+  return u;
+}
+
+async function follow(start: URL): Promise<{ res: Response; url: URL }> {
+  let url = start;
   let res: Response | null = null;
   for (let hop = 0; hop < 4; hop++) {
     await safeUrl(url.toString());
-    res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { Accept: 'image/*', 'User-Agent': 'NEAS-Project-Control/1.0 (photo import)' } })
+    res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { Accept: 'image/*,text/html;q=0.5', 'User-Agent': 'NEAS-Project-Control/1.0 (photo import)' } })
       .catch(() => { throw new HttpError(502, 'The website did not answer. Check the link and try again.'); });
     const next = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
     if (!next) break;
     url = new URL(next, url);
   }
   if (!res || !res.ok) throw new HttpError(400, `The website refused the photo (${res?.status ?? 'no answer'}). Use a direct, public image link.`);
-  const type = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
-  if (!type.startsWith('image/')) throw new HttpError(400, 'That link is a web page, not an image. Open the image itself and copy its address.');
+  return { res, url };
+}
+
+const typeOf = (r: Response) => (r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+
+/** The main picture a web page names for link previews (og:image / twitter:image / image_src). */
+async function pageImage(res: Response, base: URL): Promise<URL | null> {
+  const html = (await res.text().catch(() => '')).slice(0, 1_000_000);
+  const pats = [
+    /<meta[^>]+(?:property|name)=["'](?:og:image(?::secure_url)?|og:image:url|twitter:image(?::src)?)["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image(?::secure_url)?|og:image:url|twitter:image(?::src)?)["']/i,
+    /<link[^>]+rel=["']image_src["'][^>]*href=["']([^"']+)["']/i,
+  ];
+  for (const p of pats) {
+    const m = p.exec(html);
+    if (m) { try { return new URL(m[1].replace(/&amp;/g, '&'), base); } catch { /* try next */ } }
+  }
+  return null;
+}
+
+export const POST = handle(async (req) => {
+  assertSameOrigin(req);
+  await requireUser();
+  const b = await readJson<{ url?: string }>(req, 4096);
+  let { res, url } = await follow(direct(unwrapSearchLink(await safeUrl(String(b.url ?? '')))));
+  let type = typeOf(res);
+  if (type === 'text/html' || type === 'application/xhtml+xml') {
+    const img = await pageImage(res, url);
+    if (!img) throw new HttpError(400, 'That link is a web page with no photo we can find. Open the image itself (right-click → Open image in new tab) and copy that address.');
+    ({ res, url } = await follow(direct(img)));
+    type = typeOf(res);
+  }
+  if (!type.startsWith('image/')) throw new HttpError(400, 'That link is a web page, not an image. Open the image itself (right-click → Open image in new tab) and copy that address.');
   if (Number(res.headers.get('content-length') ?? 0) > MAX_BYTES) throw new HttpError(400, 'That image is over 20 MB.');
   const reader = res.body?.getReader();
   if (!reader) throw new HttpError(400, 'The image could not be read.');
