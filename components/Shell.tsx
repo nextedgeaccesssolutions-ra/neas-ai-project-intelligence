@@ -6,12 +6,12 @@ import { useStore } from '@/lib/store';
 import DialogHost, { IS_ARTIFACT } from '@/components/Dialogs';
 import { useSyncStatus } from '@/lib/sheetsSync';
 import { CLOUD } from '@/lib/cloud/env';
-import { canManage, canView, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
+import { canManage, canView, isClientAccount, isClientViews, cloudSignOut, cloudStatusNow, useCloudStatus, VIEWS, viewOfPath } from '@/lib/cloud/cloudSync';
 import { requestPersistentStorage, unsentSummary, type PersistState } from '@/lib/offline/persist';
 import { askConfirm } from '@/components/Dialogs';
 
 /** Pages that render without the workspace frame (sign-in flows and the client portal). */
-const BARE = [/^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
+const BARE = [/^\/privacy/, /^\/login/, /^\/activate/, /^\/register/, /^\/auth\//, /^\/client\//, /^\/share/, /^\/account/];
 const MANAGER_ONLY = new Set(['/estimating', '/quotation']);
 
 function CloudPill() {
@@ -60,6 +60,7 @@ export const NAV = [
   { href: '/site-evidence', label: 'Site evidence', icon: 'camera', group: 'Field operations' },
   { href: '/global-reports', label: 'Global reports', icon: 'chart', group: 'Reports' },
   { href: '/reports', label: 'Project reports', icon: 'doc', group: 'Reports' },
+  { href: '/templates', label: 'Report templates', icon: 'doc', group: 'Reports' },
   { href: '/google-sheets', label: 'Google Sheets sync', icon: 'sheet', group: 'Reports' },
   { href: '/estimating', label: 'Estimating & BOQ', icon: 'list', group: 'Commercial' },
   { href: '/quotation', label: 'Quotation preview', icon: 'quote', group: 'Commercial' },
@@ -149,12 +150,14 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   }
   const isAdmin = CLOUD && cloud.profile?.global_role === 'super_admin';
   const nav = NAV.filter((n) => !CLOUD || ((!MANAGER_ONLY.has(n.href) || canManage(state.activeProjectId)) && canView(viewOfPath(n.href), cloud.profile)));
-  const blocked = CLOUD && !pathname.startsWith('/admin') && !canView(viewOfPath(pathname), cloud.profile);
+  const isClient = CLOUD && !isAdmin && isClientAccount(cloud.profile);
+  // report templates are a staff tool: client accounts cannot open them even by address
+  const blocked = CLOUD && !pathname.startsWith('/admin') && (!canView(viewOfPath(pathname), cloud.profile) || (isClient && pathname.startsWith('/field-reports/new')));
   const allowedLinks = VIEWS.filter(([k]) => canView(k, cloud.profile));
 
   const page = pathname.startsWith('/admin') ? { label: 'Control panel', group: 'Administration', href: '/admin' }
     : pathname.startsWith('/offline-queue') ? { label: 'Offline queue', group: 'System', href: '/offline-queue' } : current;
-  const role = !CLOUD ? 'Device mode' : isAdmin ? 'Super Admin' : canManage(state.activeProjectId) ? 'Project manager' : 'Staff';
+  const role = !CLOUD ? 'Device mode' : isAdmin ? 'Super Admin' : isClient ? 'Client' : canManage(state.activeProjectId) ? 'Project manager' : 'Staff';
   const link = (href: string, label: string, icon: string, active: boolean) => (
     <Link key={href} href={href} aria-current={active ? 'page' : undefined} title={mini ? label : undefined} aria-label={mini ? label : undefined}>
       <Icon name={icon} />
@@ -163,7 +166,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
   );
 
   return (
-    <div className={`shell${mini ? ' mini' : ''}`}>
+    <div className={`shell${mini ? ' mini' : ''}${isClient ? ' client-readonly' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       {open && <div className="side-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />}
       <aside className={`side${open ? ' open' : ''}`} aria-label="Main navigation">
@@ -213,7 +216,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             <>
               <Link href="/account" style={{ color: '#fff', textDecoration: 'none' }}><b>{cloud.profile.full_name || cloud.profile.email}</b></Link>
               <br />
-              {isAdmin ? 'Super Admin' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.replace('/login'); })}>Sign out</button>
+              {isAdmin ? 'Super Admin' : isClient ? 'Client' : 'Staff'} · <button className="linklike" style={{ color: 'var(--sand)' }} onClick={() => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.replace('/login'); })}>Sign out</button>
             </>
           ) : (
             <>
@@ -276,6 +279,27 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
             </section>
           ) : children}
         </main>
+        {/* phones: the field pages one thumb-tap away; only pages this account may open are shown */}
+        <nav className="bottom-bar" aria-label="Quick navigation">
+          {/* Home · Reports · + · Projects · More; only pages this account may open */}
+          {(() => {
+            const has = (h: string) => nav.some((x) => x.href === h);
+            const tabs = [
+              ...(has('/') ? [{ href: '/', label: 'Home', icon: 'grid' }] : []),
+              ...(has('/field-reports') ? [{ href: '/field-reports', label: 'Reports', icon: 'doc' }] : []),
+              ...(has('/projects') ? [{ href: '/projects', label: 'Projects', icon: 'table' }] : []),
+              { href: '/more', label: 'More', icon: 'list' },
+            ];
+            const plus = has('/field-reports') && !isClient
+              ? <Link key="new-report" href="/field-reports/new" className="bottom-plus" aria-label="New field report" aria-current={pathname === '/field-reports/new' ? 'page' : undefined}><span aria-hidden="true">+</span></Link> : null;
+            const cut = Math.ceil(tabs.length / 2);
+            const link = (n: (typeof tabs)[number]) => {
+              const on = n.href === '/' ? pathname === '/' : pathname.startsWith(n.href) && pathname !== '/field-reports/new';
+              return <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined}><Icon name={n.icon} /><span>{n.label}</span></Link>;
+            };
+            return [...tabs.slice(0, cut).map(link), plus, ...tabs.slice(cut).map(link)];
+          })()}
+        </nav>
         <DialogHost />
       </div>
     </div>

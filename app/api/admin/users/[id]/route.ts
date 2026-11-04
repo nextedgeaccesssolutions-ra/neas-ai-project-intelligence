@@ -5,7 +5,7 @@ import { UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
 
-type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete' | 'set_username' | 'unlock_pin';
+type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete' | 'set_username' | 'unlock_pin' | 'delete_forever';
 
 export const POST = handle(async (req, { params }) => {
   assertSameOrigin(req);
@@ -73,6 +73,14 @@ export const POST = handle(async (req, { params }) => {
       const { error } = await sb.rpc('admin_delete_user', { p_user: params.id, p_reason: reason });
       if (error) throw new HttpError(400, error.message);
       await svc.auth.admin.updateUserById(params.id, { ban_duration: '876000h' });
+      break;
+    }
+    case 'delete_forever': {
+      // frees the e-mail and username of a deleted account; the renamed record keeps reports and history attributed
+      const { data, error } = await sb.rpc('admin_release_deleted_user', { p_user: params.id });
+      if (error) throw new HttpError(400, error.message);
+      const { error: aErr } = await svc.auth.admin.updateUserById(params.id, { email: String(data), email_confirm: true, ban_duration: '876000h' });
+      if (aErr) throw new HttpError(500, `The account was released in the app, but the sign-in e-mail could not be freed: ${aErr.message}`);
       break;
     }
     case 'make_admin':

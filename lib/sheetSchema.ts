@@ -138,19 +138,49 @@ export function rowsToGrid(tab: TabName, rows: Row[]): Cell[][] {
 }
 
 /** Map a header cell (key or label, any case) to a column key. */
+/** Header text compared loosely: no BOM or invisible characters, case, punctuation, units in brackets or spacing. */
+export const normHeader = (v: unknown) => s(v).replace(/[\uFEFF\u200B-\u200D\u00A0]/g, ' ').toLowerCase()
+  .replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9#%]+/g, ' ').trim();
+
+/** Other names people commonly give the same column (only for columns that exist in the table being imported). */
+const ALIASES: Record<string, string[]> = {
+  description: ['item description', 'work description', 'description of work', 'description of works', 'scope of work', 'scope of works', 'scope', 'particulars', 'details', 'product description', 'work item', 'item of work', 'items of work', 'line description'],
+  item: ['item no', 'item number', 'item #', 'no', 'no.', '#', 'ref', 'ref no', 'line no', 'item code', 'code'],
+  unit: ['uom', 'unit of measure', 'unit of measurement', 'units'],
+  qty: ['quantity', 'qty', 'quantities', 'no of units'],
+  unit_cost_php: ['unit cost', 'unit price', 'unit rate', 'rate', 'price', 'cost per unit', 'unit cost php'],
+  amount_php: ['amount', 'total', 'total amount', 'total cost', 'line total'],
+  category: ['type', 'cost type', 'cost category', 'group'],
+  notes: ['remarks', 'note', 'comments', 'comment'],
+};
+
 export function matchColumn(cols: Column[], header: unknown): string | null {
-  const h = s(header).trim().toLowerCase();
+  const h = normHeader(header);
   if (!h) return null;
-  const hit = cols.find((c) => c.key.toLowerCase() === h || c.label.toLowerCase() === h || c.label.toLowerCase().replace(/\s*\(.*\)$/, '') === h);
+  const hit = cols.find((c) => normHeader(c.key.replace(/_/g, ' ')) === h || normHeader(c.label) === h)
+    ?? cols.find((c) => (ALIASES[c.key] ?? []).some((a) => normHeader(a) === h));
   return hit ? hit.key : null;
 }
 
-/** 2D grid (first row headers) → rows keyed by column key; unknown columns dropped. */
+/** The header row: the first of the top rows that names the most known columns (a title row above it is skipped). */
+export function headerRowIndex(cols: Column[], grid: unknown[][]): number {
+  const hitsOf = (row: unknown[]) => new Set(row.map((h) => matchColumn(cols, h)).filter(Boolean)).size;
+  const top = grid.slice(0, 15).map(hitsOf);
+  const max = Math.max(0, ...top);
+  // the first row stays the header unless a lower row is clearly better (a title above the real headers)
+  if (top[0] >= 1 && top[0] >= max - 1) return 0;
+  return Math.max(0, top.indexOf(max));
+}
+
+/** 2D grid → rows keyed by column key; the header row is found automatically, unknown columns dropped. */
 export function gridToRows(cols: Column[], grid: unknown[][]): Row[] {
   if (!grid.length) return [];
-  const keys = grid[0].map((h) => matchColumn(cols, h));
+  const at = headerRowIndex(cols, grid);
+  const seen = new Set<string>();
+  // the first column with a given meaning wins; a second "Description" column is ignored rather than overwriting it
+  const keys = grid[at].map((h) => { const k = matchColumn(cols, h); if (!k || seen.has(k)) return null; seen.add(k); return k; });
   return grid
-    .slice(1)
+    .slice(at + 1)
     .filter((line) => line.some((v) => s(v).trim() !== ''))
     .map((line) => {
       const r: Row = {};

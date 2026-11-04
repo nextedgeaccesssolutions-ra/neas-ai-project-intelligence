@@ -118,7 +118,7 @@ export default function GanttControls({ pid, activities, reports, stops, asOf, c
         stops={stops} selected={sel} onSelect={pick} editable={canManage} proposal={proposal} onPropose={propose} />
       <p className="note">
         {canManage ? 'Drag a bar to move it, its ends to change start or finish, or the round marker to propose progress. ' : ''}
-        Select a scope for its details, stop/restart history and actions. Hatched red = work stopped; ▼ green = restart.
+        Select a scope for its details, stop/restart history and actions. Hatched red = work stopped; ▼ green = restart; orange bar = rescheduled remaining work (set New start / New finish in Edit activity).
       </p>
 
       {proposed && proposal && (

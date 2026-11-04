@@ -6,12 +6,13 @@ import type { AppState, Evidence } from '../types';
 import { supabaseBrowser } from './browser';
 import { FILES_BUCKET, OFFLINE_GRACE_HOURS } from './env';
 import * as M from './mapping';
-import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
+import { forgetOfflineLogin, recentOfflineUnlock } from '../offlineLogin';
+import { allOps, enqueue, getMeta, onOutboxChange, processOutbox, rebaseOps, resolveConflict, setMeta, uuid, type ApplyResult, type Entity, type Operation } from '../offline/outbox';
 import { getPhoto } from '../photos';
 
 export type AuthState = 'checking' | 'signed_out' | 'pending' | 'active' | 'offline_grace' | 'expired';
 export interface Membership { project_id: string; role: 'project_manager' | 'employee'; can_approve_reports: boolean }
-export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null; password_set_at?: string | null }
+export interface Profile { id: string; email: string; full_name: string; global_role: 'super_admin' | 'staff'; status: string; email_verified_at: string | null; allowed_views?: string[] | null; password_set_at?: string | null; is_client?: boolean }
 
 export interface CloudStatus {
   auth: AuthState;
@@ -26,13 +27,15 @@ export interface CloudStatus {
   error: string | null;
 }
 
-let status: CloudStatus = { auth: 'checking', online: true, profile: null, memberships: [], pending: 0, conflicts: 0, rejected: 0, syncing: false, lastSyncAt: null, error: null };
+// what the server renders with; the browser uses it while taking over the server page, so both draw the same first screen
+const INITIAL: CloudStatus = { auth: 'checking', online: true, profile: null, memberships: [], pending: 0, conflicts: 0, rejected: 0, syncing: false, lastSyncAt: null, error: null };
+let status: CloudStatus = INITIAL;
 const subs = new Set<() => void>();
 const set = (p: Partial<CloudStatus>) => {
   status = { ...status, ...p };
   subs.forEach((f) => f());
 };
-export const useCloudStatus = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => status);
+export const useCloudStatus = () => useSyncExternalStore((f) => (subs.add(f), () => subs.delete(f)), () => status, () => INITIAL);
 export const cloudStatusNow = () => status;
 
 /** Role helpers for the UI (the database enforces the same rules). */
@@ -48,15 +51,25 @@ export const VIEWS = [
   ['google_sheets', 'Google Sheets setup', '/google-sheets'], ['offline_queue', 'Offline queue', '/offline-queue'],
 ] as const;
 export type ViewKey = (typeof VIEWS)[number][0];
+// pages that show the same data as a module need that module's permission
+const ALIAS: [string, ViewKey][] = [['/photos', 'site_evidence'], ['/map', 'site_evidence'], ['/scan', 'projects']];
 export const viewOfPath = (path: string): ViewKey | null => {
+  const alias = ALIAS.find(([p]) => path.startsWith(p));
+  if (alias) return alias[1];
   const hit = VIEWS.filter(([, , href]) => (href === '/' ? path === '/' : path.startsWith(href)));
   return hit.length ? hit[hit.length - 1][0] : null;
 };
 /** null allowed_views = every module. Super Admins always see everything. */
 /** Modules every signed-in user always has, whatever their module settings. */
 export const ALWAYS_VIEWS: readonly ViewKey[] = ['field_reports'];
+/** A client account opens these modules read only and sees only what is shared with the client (enforced in the database). */
+export const CLIENT_VIEWS: ViewKey[] = VIEWS.map(([k]) => k);
+export const isClientViews = (v: readonly string[] | null | undefined) => !!v && v.length === CLIENT_VIEWS.length && CLIENT_VIEWS.every((k) => v.includes(k));
+/** The signed-in account is a client (read-only, shared items only). */
+// the database flag decides; the module list is only a fallback for a cached profile from before the flag existed
+export const isClientAccount = (profile: Profile | null = status.profile) => !!profile && profile.global_role !== 'super_admin' && (profile.is_client ?? isClientViews(profile.allowed_views));
 export const canView = (view: ViewKey | null, profile: Profile | null = status.profile) =>
-  !view || !profile || ALWAYS_VIEWS.includes(view) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
+  !view || !profile || (ALWAYS_VIEWS.includes(view) && !isClientViews(profile.allowed_views)) || profile.global_role === 'super_admin' || !profile.allowed_views || profile.allowed_views.includes(view);
 
 // ---------------------------------------------------------------------------
 type Versions = Record<string, { id: string; version: number }>;
@@ -132,8 +145,10 @@ async function flushStops() {
 export async function pullAll(): Promise<void> {
   const sb = supabaseBrowser();
   if (!sb || !apply || !read) return;
-  const { data: projects, error } = await sb.from('projects').select('*').order('code');
+  const { data: all, error } = await sb.from('projects').select('*').order('code');
   if (error) throw error;
+  // projects deleted in the Control panel are hidden everywhere else
+  const projects = (all ?? []).filter((p: { deleted_at?: string | null }) => !p.deleted_at);
   const bundle: M.DbBundle = { projects: projects as M.DbProject[], activities: [], reports: [], boq: [], costs: [], quotes: [], attachments: [] };
   for (const p of projects ?? []) {
     const { data, error: e2 } = await sb.rpc('pull_changes', { p_project: p.id });
@@ -198,6 +213,8 @@ async function queueCollection<T extends { id: string; projectId: string }>(enti
 /** Called by the store after every local change in cloud mode. */
 export async function cloudOnChange(prev: AppState, next: AppState) {
   if (status.auth !== 'active' && status.auth !== 'offline_grace') return;
+  // client accounts are read only: local changes are never sent (the database refuses them anyway)
+  if (isClientAccount()) return;
   const isUuid = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
   // device-mode ids (e.g. "act_x1") are converted: cloud records always use UUIDs
   await queueCollection('activities', prev.activities, next.activities.filter((a) => isUuid(a.id)), M.activityToDb);
@@ -278,6 +295,8 @@ export function scheduleSync(ms = 0) {
 export async function syncNow(): Promise<void> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return set({ online: false });
   if (status.auth !== 'active' && status.auth !== 'offline_grace') return;
+  // signed in offline with a passcode only: nothing can be sent until a real online sign-in
+  if (!(await supabaseBrowser()?.auth.getSession())?.data.session) return;
   set({ syncing: true });
   try {
     const rep = await processOutbox(send, upload);
@@ -289,17 +308,41 @@ export async function syncNow(): Promise<void> {
       }
     }
     await setMeta('versions', versions);
+    // conflicts are not kept: the server copy wins and the device's stale edit is dropped (the pull below refreshes this device)
+    let dropped = 0;
+    for (const o of await allOps()) {
+      if (o.status !== 'conflict') continue;
+      // later edits of the same record move onto the server version so they are not dropped too
+      const v = Number((o.server_record as { version?: number } | null)?.version);
+      if (Number.isFinite(v)) await rebaseOps(o.entity, o.record_id, o.base_version, v);
+      applyServerRecord(o);
+      await resolveConflict(o.op_id, 'server');
+      dropped++;
+    }
+    if (dropped) await setMeta('versions', versions);
     const left = await allOps();
-    if (!rep.networkError && !left.some((o) => o.status === 'pending')) await pullAll();
+    if (!rep.networkError && (dropped || !left.some((o) => o.status === 'pending'))) await pullAll();
     // ask the server to refresh the Google Sheet after real changes (it coalesces and skips duplicates)
     if (rep.applied.length && Date.now() - lastNudge > 120_000) { lastNudge = Date.now(); fetch('/api/integrations/sheets/nudge', { method: 'POST' }).catch(() => undefined); }
-    set({ error: rep.networkError ? 'Connection problem. Will retry automatically.' : null, lastSyncAt: new Date().toISOString() });
+    set({ error: rep.networkError ? 'Connection problem. Will retry automatically.' : dropped ? `${dropped} change(s) had already been changed by someone else; the server version was kept.` : null, lastSyncAt: new Date().toISOString() });
   } catch (e) {
     set({ error: (e as Error).message });
   } finally {
     set({ syncing: false });
     await refreshCounts();
   }
+}
+
+/** Record new server versions after a direct update that bypassed the outbox, so later edits on this device are not refused as conflicts. */
+export async function noteServerVersions(entity: Entity, rows: { id: string; version: number }[]) {
+  for (const r of rows) {
+    const old = versions[vkey(entity, r.id)]?.version ?? null;
+    // only our own update happened in between; a bigger jump means someone else changed it too, so a later conflict must still show
+    if (old === null || r.version !== old + 1) continue;
+    versions[vkey(entity, r.id)] = { id: r.id, version: r.version };
+    await rebaseOps(entity, r.id, old, r.version);
+  }
+  await setMeta('versions', versions);
 }
 
 /** Use the server's copy for a conflicted record (after the person chose it). */
@@ -321,7 +364,7 @@ async function loadIdentity(): Promise<void> {
   const sb = supabaseBrowser()!;
   const { data: u } = await sb.auth.getUser();
   if (!u.user) return set({ auth: 'signed_out', profile: null, memberships: [] });
-  const { data: profile } = await sb.from('profiles').select('id, email, full_name, global_role, status, email_verified_at, allowed_views, password_set_at').eq('id', u.user.id).single();
+  const { data: profile } = await sb.from('profiles').select('id, email, full_name, username, global_role, status, email_verified_at, allowed_views, password_set_at, is_client').eq('id', u.user.id).single();
   const { data: memberships } = await sb.from('project_memberships').select('project_id, role, can_approve_reports').eq('user_id', u.user.id);
   const active = profile?.status === 'active' && !!profile.email_verified_at;
   await setMeta('identity', { profile, memberships, verified_at: Date.now() });
@@ -338,7 +381,9 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
   const online = typeof navigator === 'undefined' || navigator.onLine;
   set({ online });
   const { data: sess } = await sb.auth.getSession();
-  if (!sess.session) return set({ auth: 'signed_out' });
+  // a passcode just checked offline on this device unlocks the cached identity of that same username
+  const unlocked = !online ? recentOfflineUnlock() : null;
+  if (!sess.session && !unlocked) return set({ auth: 'signed_out' });
   if (online) {
     try {
       await loadIdentity();
@@ -348,7 +393,7 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
   }
   if (!online || status.auth === 'checking') {
     const id = await getMeta<{ profile: Profile; memberships: Membership[]; verified_at: number }>('identity');
-    const fresh = id && Date.now() - id.verified_at < OFFLINE_GRACE_HOURS * 3600 * 1000;
+    const fresh = id && (Date.now() - id.verified_at < OFFLINE_GRACE_HOURS * 3600 * 1000 || (!!unlocked && (id.profile as { username?: string | null }).username === unlocked));
     if (id?.profile && fresh && id.profile.status === 'active') set({ auth: 'offline_grace', profile: id.profile, memberships: id.memberships });
     else set({ auth: 'expired' });
   }
@@ -375,8 +420,11 @@ export async function cloudBoot(applyState: (s: AppState) => void, readState: ()
 
 /** Sign out and remove cached project data from this device (unsent changes are kept unless the person discards them). */
 export async function cloudSignOut(clearCache: () => void) {
+  const who = (status.profile as { username?: string | null } | null)?.username;
   await supabaseBrowser()?.auth.signOut();
   await setMeta('identity', null);
+  if (who) forgetOfflineLogin(who);
+  try { localStorage.removeItem('neas-offline-unlock'); } catch { /* storage blocked */ }
   clearCache();
   set({ auth: 'signed_out', profile: null, memberships: [] });
 }
