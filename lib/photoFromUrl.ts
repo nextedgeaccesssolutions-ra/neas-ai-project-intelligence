@@ -9,6 +9,7 @@ export async function photoFromUrl(url: string): Promise<File> {
   // "Copy image address" on Google Images and similar often gives the picture itself (data:image/...;base64,...).
   // Read that here in the browser: it is already the photo, and it is too big to send to the server.
   const raw = url.trim();
+  if (/^blob:/i.test(raw)) throw new Error('A "blob:" link only works inside the Facebook tab it came from. On Facebook, right-click the photo → Copy image, then click here and press Ctrl+V.');
   if (/^data:/i.test(raw)) {
     const m = /^data:(image\/[\w.+-]+)(;[^,]*)?,/i.exec(raw);
     if (!m) throw new Error('That link is not an image. Copy the image itself, or its https:// address.');
