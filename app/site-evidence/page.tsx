@@ -9,7 +9,7 @@ import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
 import { compressImage, getPhoto, putPhoto } from '@/lib/photos';
-import { isLinkPhoto, photoFromUrl } from '@/lib/photoFromUrl';
+import { isLinkPhoto, onPhotoPaste, photoFromUrl } from '@/lib/photoFromUrl';
 import DataIO from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
@@ -496,8 +496,8 @@ export default function SiteEvidence() {
               <label className="field">Description
                 <input className="input" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="What the photo shows" />
               </label>
-              <label className="field">Or paste a photo link (URL)
-                <input className="input" type="url" inputMode="url" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://… (image, Google Drive or Dropbox link)" />
+              <label className="field">Or paste a photo or link
+                <input className="input" type="url" inputMode="url" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} onPaste={(e) => onPhotoPaste(e, setPhotoUrl)} placeholder="Paste a copied image or a link (https://…)" />
               </label>
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>

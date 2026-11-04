@@ -18,7 +18,7 @@ import { actualPct, todayLocal } from '@/lib/calc';
 import { fmtDate, fmtPct, uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
 import { compressImage, putPhoto } from '@/lib/photos';
-import { isLinkPhoto, photoFromUrl } from '@/lib/photoFromUrl';
+import { isLinkPhoto, onPhotoPaste, photoFromUrl } from '@/lib/photoFromUrl';
 import { locatePhoto, photoRef, gpsSourceOf } from '@/lib/geo';
 import type { Evidence } from '@/lib/types';
 import WalkthroughReport from '@/components/WalkthroughReport';
@@ -235,7 +235,7 @@ export default function FieldReports() {
                       <option>Before</option><option>During</option><option>After</option>
                     </select>
                     <input ref={fileRef} type="file" accept="image/*" multiple className="input" style={{ width: 'auto' }} />
-                    <input className="input" type="url" inputMode="url" style={{ width: 'auto', minWidth: 220 }} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="or paste a photo link (URL)" aria-label="Photo link (URL)" />
+                    <input className="input" type="url" inputMode="url" style={{ width: 'auto', minWidth: 220 }} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} onPaste={(e) => onPhotoPaste(e, setPhotoUrl)} placeholder="or paste a copied image or link" aria-label="Photo link (URL)" />
                     <button className="btn" onClick={attachPhoto} disabled={photoBusy}>{photoBusy ? 'Saving…' : 'Add photo'}</button>
                   </>
                 )}

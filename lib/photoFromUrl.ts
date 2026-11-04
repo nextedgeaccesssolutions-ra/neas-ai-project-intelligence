@@ -30,3 +30,14 @@ export async function photoFromUrl(url: string): Promise<File> {
   fromLink.add(file);
   return file;
 }
+
+/** Paste handler for the photo link box: a copied picture (Messenger, Facebook, any inbox → "Copy image") is put in
+ *  the box as a data: link, which photoFromUrl reads here in the browser. Plain text pastes are left alone. */
+export function onPhotoPaste(e: { clipboardData: DataTransfer; preventDefault(): void }, set: (v: string) => void) {
+  const f = Array.from(e.clipboardData?.files ?? []).find((x) => x.type.startsWith('image/'));
+  if (!f) return;
+  e.preventDefault();
+  const r = new FileReader();
+  r.onload = () => set(String(r.result));
+  r.readAsDataURL(f);
+}
