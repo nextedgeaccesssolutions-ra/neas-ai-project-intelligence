@@ -58,6 +58,7 @@ export const NAV = [
   { href: '/field-reports', label: 'Field reports', icon: 'spark' },
   { href: '/projects', label: 'Project register', icon: 'table' },
   { href: '/site-evidence', label: 'Site evidence', icon: 'camera' },
+  { href: '/reports', label: 'Project reports', icon: 'doc' },
   { href: '/google-sheets', label: 'Google Sheets setup', icon: 'gear' },
 ] as const;
 
@@ -131,7 +132,7 @@ function Workspace({ children, pathname }: { children: ReactNode; pathname: stri
     <div className="shell">
       <aside className={`side${open ? ' open' : ''}`} aria-label="Main navigation">
         <Link href="/" className="brand">
-          <span className="brand-mark">NE</span>
+          <img className="brand-mark brand-logo" src="/neas-logo.png" alt="NEAS — NextEdge Access Solutions" width={44} height={44} />
           <span>
             <div className="brand-name">NEAS INTELLIGENCE</div>
             <div className="brand-sub">PROJECT CONTROL</div>

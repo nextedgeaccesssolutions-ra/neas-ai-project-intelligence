@@ -112,6 +112,7 @@ export default function FieldReports() {
         <div className="form-actions" style={{ marginTop: 0 }}>
           <DataIO doc={() => IO.reportsDoc(state, filter)} capture={() => document.getElementById('reports-card')} importColumns={IO.COLS.reports} importSheet="Field_Reports" onImport={(rows) => asPlan(IO.planReports(state, rows), replaceAll)} label="field reports" />
           <Link className="btn btn-sm" href="/site-evidence">Attach site photos</Link>
+          <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
         </div>
       </div>
       <ProjectBar />

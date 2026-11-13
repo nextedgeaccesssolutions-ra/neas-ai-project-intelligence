@@ -3,7 +3,7 @@
 // without real coordinates, and says plainly that GPS is the phone's position, not the object's.
 import { useEffect, useState } from 'react';
 import type { GpsSource, GpsStatus } from '@/lib/types';
-import { gpsSourceLabel, GPS_TARGET_M } from '@/lib/geo';
+import { accuracyStatus, gpsSourceLabel, GPS_TARGET_M, mapUrl } from '@/lib/geo';
 
 export interface LocationInfo {
   ref?: string;
@@ -52,7 +52,7 @@ export default function LocationViewer({ info, onClose }: { info: LocationInfo; 
     ...(info.site ? [['Site', info.site] as [string, string]] : []),
     ['Work area', [info.workArea, info.location].filter(Boolean).join(' · ') || 'Not provided'],
     ['Latitude, longitude', has ? coords : 'GPS unavailable'],
-    ['Reported accuracy', has ? (info.accuracy != null ? `±${Math.round(info.accuracy)} m` : 'Not reported') : '—'],
+    ['Reported accuracy', has ? `${info.accuracy != null ? `±${Math.round(info.accuracy)} m · ` : ''}${accuracyStatus(info.accuracy, true)}` : '—'],
     ['Location source', has ? gpsSourceLabel(info.source, info.status) : 'GPS unavailable'],
     ['Location time', has ? when(info.gpsAt) : '—'],
     ['Photo captured', when(info.capturedAt)],
@@ -80,7 +80,7 @@ export default function LocationViewer({ info, onClose }: { info: LocationInfo; 
         {has && (
           <div className="form-actions" style={{ marginTop: 8 }}>
             <a className="btn btn-sm" href={`https://www.openstreetmap.org/?mlat=${info.lat}&mlon=${info.lng}#map=19/${info.lat}/${info.lng}`} target="_blank" rel="noreferrer">Open in OpenStreetMap</a>
-            <a className="btn btn-sm" href={`https://www.google.com/maps/search/?api=1&query=${info.lat},${info.lng}`} target="_blank" rel="noreferrer">Open in Google Maps</a>
+            <a className="btn btn-sm" href={mapUrl(info.lat, info.lng) ?? undefined} target="_blank" rel="noreferrer">View location on map</a>
             <button className="btn btn-sm" onClick={copy}>{copied ? 'Copied' : 'Copy coordinates'}</button>
           </div>
         )}

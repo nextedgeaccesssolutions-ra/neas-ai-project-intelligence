@@ -68,7 +68,7 @@ describe('locatePhoto', () => {
   it('never stamps an older photo without GPS with today\'s position', async () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
     const f = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'old.jpg', { type: 'image/jpeg', lastModified: now - 24 * 3600_000 });
-    expect(await locatePhoto(f, { enabled: true, now })).toMatchObject({ status: 'unavailable', fix: null });
+    expect(await locatePhoto(f, { enabled: true, now })).toMatchObject({ status: 'no_photo_gps', fix: null });
   });
   it('respects GPS being turned off', async () => {
     const f = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'x.jpg', { type: 'image/jpeg' });

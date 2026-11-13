@@ -14,7 +14,7 @@ describe('GPS helpers', () => {
   });
   it('labels every status honestly', () => {
     expect(gpsLabel({ gpsStatus: 'captured', gps: { lat: 14.554729, lng: 121.024445, accuracy: 6.4, at: '' } })).toBe('14.554729, 121.024445 ±6 m');
-    expect(gpsLabel({ gpsStatus: 'manual', gps: { lat: 1, lng: 2, accuracy: null, at: '' } })).toContain('manually entered');
+    expect(gpsLabel({ gpsStatus: 'manual', gps: { lat: 1, lng: 2, accuracy: null, at: '' } })).toContain('admin approved');
     expect(gpsLabel({ gpsStatus: 'denied', gps: null })).toContain('permission denied');
     expect(gpsLabel({ gpsStatus: 'unavailable', gps: null })).toBe('GPS unavailable');
   });

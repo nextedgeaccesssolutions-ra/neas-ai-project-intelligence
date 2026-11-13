@@ -10,17 +10,21 @@ import * as IO from '@/lib/moduleIO';
 import { uid } from '@/lib/format';
 import { askConfirm, notify } from '@/components/Dialogs';
 import { CLOUD } from '@/lib/cloud/env';
+import { allOps, onOutboxChange } from '@/lib/offline/outbox';
 import { useCanManage } from '@/components/RoleGate';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 import type { Evidence, EvidenceKind } from '@/lib/types';
 import PhotoThumb, { fetchFromServer } from '@/components/PhotoThumb';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
+import CoverPhotos from '@/components/CoverPhotos';
+import LocationRequests, { REQUEST_LABEL, RequestLocationForm, useLocationRequests } from '@/components/LocationRequests';
+import { COVER_CATEGORIES, type CoverCategory } from '@/lib/types';
 import EvidenceReportPanel from '@/components/EvidenceReportPanel';
-import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack, gpsSourceOf, gpsSourceLabel } from '@/lib/geo';
+import { accuracyWarning, GPS_TARGET_M, gpsLabel, locatePhoto, parseManualCoords, photoRef, startGpsTracking, stopGpsTracking, subscribeGps, type GpsResult, type GpsTrack, gpsSourceOf, gpsSourceLabel, mapUrl } from '@/lib/geo';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const KINDS: EvidenceKind[] = ['Before', 'After', 'During', 'Inspection', 'Safety', 'Defect'];
-const KIND_TONE: Record<EvidenceKind, string> = { Before: '', After: 'pill-ok', During: 'pill-warn', Inspection: '', Safety: 'pill-warn', Defect: 'pill-bad' };
+const KINDS: EvidenceKind[] = ['Before', 'After', 'During', 'Inspection', 'Safety', 'Defect', 'Reference'];
+const KIND_TONE: Record<EvidenceKind, string> = { Before: '', After: 'pill-ok', During: 'pill-warn', Inspection: '', Safety: 'pill-warn', Defect: 'pill-bad', Reference: '' };
 const pairable = (k: EvidenceKind) => k === 'Before' || k === 'After';
 
 function summarizeGps(rs: GpsResult[]): string | null {
@@ -51,6 +55,7 @@ export default function SiteEvidence() {
   const [kind, setKind] = useState<EvidenceKind>('Before');
   const [caption, setCaption] = useState('');
   const [workArea, setWorkArea] = useState('');
+  const [coverCategory, setCoverCategory] = useState<CoverCategory>('main_building');
   const [locationDetail, setLocationDetail] = useState('');
   const [recordGps, setRecordGps] = useState(true);
   const [manualLoc, setManualLoc] = useState(false);
@@ -69,6 +74,15 @@ export default function SiteEvidence() {
   const setLayout = (l: '2x4' | '2x6') => { setLayoutState(l); setPage(0); try { localStorage.setItem('neas-evidence-layout', l); } catch { /* per-device convenience only */ } };
   const [page, setPage] = useState(0);
   const [viewLoc, setViewLoc] = useState<LocationInfo | null>(null);
+  const [requestFor, setRequestFor] = useState<Evidence | null>(null);
+  const locReq = useLocationRequests(CLOUD ? pid : '');
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!CLOUD) return;
+    const load = () => allOps().then((ops) => setPendingIds(new Set(ops.map((o) => o.record_id)))).catch(() => undefined);
+    load();
+    return onOutboxChange(load);
+  }, []);
   const [clientVisible, setClientVisible] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [editKind, setEditKind] = useState<EvidenceKind>('Before');
@@ -152,7 +166,7 @@ export default function SiteEvidence() {
         await putPhoto(id, blob);
         addEvidence({
           id, projectId: pid, activityId, kind, caption: caption.trim() || file.name.replace(/\.[^.]+$/, ''), takenAt, bytes: blob.size,
-          gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
+          gps: gps.fix, gpsStatus: gps.status, gpsSource: gpsSourceOf(gps), coverCategory: kind === 'Reference' ? coverCategory : null, workArea: workArea.trim(), locationDetail: locationDetail.trim(), pairId: null, ref: photoRef(kind, takenAt, id),
         });
         ok++;
       } catch (e) {
@@ -186,7 +200,7 @@ export default function SiteEvidence() {
   const ql = q.trim().toLowerCase();
   const shown = evidence.filter((e) =>
     (!fActivity || e.activityId === fActivity) &&
-    (!fKind || e.kind === fKind) &&
+    (fKind ? e.kind === fKind : e.kind !== 'Reference') &&
     (!fGps || (fGps === 'with' ? e.gpsStatus === 'captured' || e.gpsStatus === 'manual' : fGps === 'without' ? !e.gps : fGps === 'manual' ? e.gpsStatus === 'manual' : !!accuracyWarning(e))) &&
     (!fPair || (fPair === 'paired' ? !!partnerOf(e) : pairable(e.kind) && !partnerOf(e))) &&
     (!ql || `${e.ref ?? ''} ${e.caption} ${e.workArea ?? ''} ${e.locationDetail ?? ''}`.toLowerCase().includes(ql)),
@@ -246,6 +260,7 @@ export default function SiteEvidence() {
         <div className="form-actions" style={{ marginTop: 0 }}>
           <DataIO doc={evidenceDoc} capture={() => document.getElementById('evidence-card')} extraAccept="image/jpeg,image/png,image/webp,image/heic" onExtraFiles={addPhotos} label="photos" />
           <Link className="btn btn-sm" href="/field-reports">Field reports</Link>
+          <Link className="btn btn-sm btn-primary" href="/reports">Preview reports</Link>
         </div>
       </div>
       <ProjectBar />
@@ -255,7 +270,7 @@ export default function SiteEvidence() {
         project={{ code: project.code ?? project.id, name: project.name, client: project.client, site: project.site, referenceNo: project.referenceNo, status: project.status, startDate: project.startDate, endDate: project.endDate }}
         photos={evidence.map((e) => ({
           id: e.id, kind: e.kind, caption: e.caption, takenAt: e.takenAt, ref: e.ref, activity: activities.find((a) => a.id === e.activityId)?.name,
-          workArea: e.workArea, location: e.locationDetail, pairId: e.pairId, gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined,
+          workArea: e.workArea, location: e.locationDetail, pairId: e.pairId, gps: e.gps ? gpsLabel(e) : undefined, gpsSource: e.gps ? gpsSourceLabel(e.gpsSource, e.gpsStatus) : undefined, mapUrl: mapUrl(e.gps?.lat, e.gps?.lng),
         }))}
         load={async (p) => (await getPhoto(p.id).catch(() => undefined)) ?? (CLOUD ? await fetchFromServer(p.id, evidence.find((e) => e.id === p.id)?.storagePath ?? `${pid}/${p.id}.jpg`) : null)}
       />
@@ -280,9 +295,16 @@ export default function SiteEvidence() {
               </label>
               <label className="field">Photo type
                 <select className="input" value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
-                  {KINDS.map((k) => <option key={k}>{k}</option>)}
+                  {KINDS.map((k) => <option key={k} value={k}>{k === 'Reference' ? 'Reference (building / site, for the report cover)' : k}</option>)}
                 </select>
               </label>
+              {kind === 'Reference' && (
+                <label className="field">Cover photo category
+                  <select className="input" value={coverCategory} onChange={(e) => setCoverCategory(e.target.value as CoverCategory)}>
+                    {COVER_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </label>
+              )}
               <label className="field">Work area
                 <input className="input" value={workArea} onChange={(e) => setWorkArea(e.target.value)} maxLength={200} placeholder="e.g. North facade, Turbine 7 blade B" />
               </label>
@@ -309,9 +331,11 @@ export default function SiteEvidence() {
                   {!online && ' · offline (satellite GPS still works)'}
                 </span>
               )}
-              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input type="checkbox" checked={manualLoc} onChange={(e) => setManualLoc(e.target.checked)} /> Enter location manually
-              </label>
+              {!CLOUD && (
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="checkbox" checked={manualLoc} onChange={(e) => setManualLoc(e.target.checked)} /> Enter location manually
+                </label>
+              )}
               {manualLoc && (
                 <>
                   <input className="input" style={{ maxWidth: 150 }} inputMode="decimal" value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Latitude" aria-label="Latitude" />
@@ -319,8 +343,16 @@ export default function SiteEvidence() {
                 </>
               )}
             </div>
+            {recordGps && !manualLoc && (
+              <ul className="note" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                <li>Allow precise location for this app and turn on the phone's location services.</li>
+                <li>Turn on the camera's location tag so photos keep their own GPS.</li>
+                <li>When practical, take photos outdoors with a clear view of the sky, and wait for the fix (target {GPS_TARGET_M} m) before capturing.</li>
+                {CLOUD && <li>No GPS? Save the photo anyway, then use “Request manual location” on it; an admin approves the coordinates.</li>}
+              </ul>
+            )}
             <p className="note">
-              {manualLoc ? 'Manual coordinates are saved and labelled "Manually entered", never as device GPS.'
+              {manualLoc ? 'Device mode: manual coordinates are saved as a manual location, never as device GPS.'
                 : recordGps ? `Location is on automatically and works without internet (satellite GPS). Each photo uses the GPS saved in the photo by the camera when present, otherwise the phone's current position with its reported accuracy (target ${GPS_TARGET_M} m). It is the phone's position, not necessarily the exact surface. Older gallery photos without saved GPS are not stamped with today's location; if no fix is available the photo is still saved as "GPS unavailable". For best accuracy, turn on the phone's precise location and the camera's location tag.`
                 : 'Photos will be saved without a location.'}
             </p>
@@ -332,6 +364,19 @@ export default function SiteEvidence() {
           </>
         )}
       </section>
+
+      {CLOUD && <LocationRequests evidence={evidence} canDecide={reviewer} list={locReq.list} reload={locReq.reload} />}
+
+      {project && (
+        <CoverPhotos
+          project={project}
+          evidence={evidence}
+          canManage={reviewer}
+          updateEvidence={updateEvidence}
+          syncState={(id) => (!CLOUD ? 'Saved on this device' : pendingIds.has(id) ? 'Waiting to sync' : 'Synced')}
+          onAdd={() => { setKind('Reference'); document.getElementById('capture-card')?.scrollIntoView({ behavior: 'smooth' }); }}
+        />
+      )}
 
       <section className="card" id="evidence-card">
         <div className="card-head">
@@ -420,6 +465,8 @@ export default function SiteEvidence() {
                           📍 {gpsLabel(e)}
                           {accuracyWarning(e) && <span className="pill pill-warn">Low accuracy</span>}
                           {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setViewLoc(locationOf(e))}>View location</button>}
+                          {(() => { const r = locReq.list.find((x) => x.attachment_id === e.id && (x.status === 'pending' || x.status === 'clarification')); return r ? <span className="pill pill-warn">{REQUEST_LABEL[r.status]}</span> : null; })()}
+                          {CLOUD && !locReq.list.some((x) => x.attachment_id === e.id && x.status === 'pending') && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => setRequestFor(e)}>Request manual location</button>}
                           {e.gps && <button className="btn btn-sm" style={{ padding: '0 6px' }} onClick={() => navigator.clipboard?.writeText(`${e.gps!.lat}, ${e.gps!.lng}`).then(() => notify('Coordinates copied.'), () => notify(`${e.gps!.lat}, ${e.gps!.lng}`))}>Copy</button>}
                         </span>
                         {pairable(e.kind) && (
@@ -436,6 +483,7 @@ export default function SiteEvidence() {
                           {canPairHere && <button className="btn btn-sm btn-primary" onClick={() => pair(from!, e)}>Pair with selected</button>}
                           {!pairFrom && pairable(e.kind) && canEdit && <button className="btn btn-sm" onClick={() => setPairFrom(e.id)}>{partner ? 'Re-pair' : 'Pair'}</button>}
                           {!pairFrom && partner && canEdit && <button className="btn btn-sm" onClick={() => unpair(e)}>Unpair</button>}
+                          {reviewer && !pairFrom && !e.isCover && <button className="btn btn-sm" onClick={() => { updateEvidence(e.id, { isCover: true, coverOrder: evidence.filter((x) => x.isCover).length + 1 }); notify('Added to the report cover photos.'); }}>Set as cover</button>}
                           {canEdit && !pairFrom && <button className="btn btn-sm" onClick={() => { setEditing(e.id); setEditKind(e.kind); setEditCaption(e.caption); setEditActivity(e.activityId); setEditArea(e.workArea ?? ''); setEditLoc(e.locationDetail ?? ''); }}>Edit</button>}
                           {needsApproval && <span className="note pill pill-warn">Needs admin approval to edit again</span>}
                           {canEdit && !pairFrom && <button className="btn btn-sm btn-danger" onClick={() => askConfirm('Delete this photo? If it has not synced yet, it is lost.', { danger: true }).then((ok) => { if (!ok) return; if (partner) updateEvidence(partner.id, { pairId: null }); deleteEvidence(e.id); })}>Delete</button>}
@@ -460,6 +508,7 @@ export default function SiteEvidence() {
         )}
       </section>
       {viewLoc && <LocationViewer info={viewLoc} onClose={() => setViewLoc(null)} />}
+      {requestFor && <RequestLocationForm pid={pid} photo={requestFor} onCancel={() => setRequestFor(null)} onDone={() => { setRequestFor(null); notify('Sent for approval. The photo keeps its current location until an admin approves.'); void locReq.reload(); }} />}
     </>
   );
 }
