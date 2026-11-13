@@ -23,7 +23,7 @@ interface Project { id: string; code: string; name: string; reference_no: string
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
 interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
-interface SyncOp { op_id: string; user_id: string; entity: string; status: string; result: { error?: string }; received_at: string; project_id: string }
+interface SyncOp { op_id: string; user_id: string; entity: string; status: string; result: { error?: string }; received_at: string; project_id: string; record_id: string; op: string }
 interface IntLog { id: number; at: string; status: string; rows_written: number; error: string | null }
 interface Content { project_id: string; [k: string]: unknown }
 
@@ -74,7 +74,7 @@ export default function AdminPage() {
         sb().from('project_memberships').select('project_id, user_id, role, can_approve_reports'),
         sb().from('client_access_credentials').select('id, project_id, label, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
         sb().from('audit_logs').select('*').order('at', { ascending: false }).limit(300),
-        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id').neq('status', 'applied').order('received_at', { ascending: false }).limit(200),
+        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').neq('status', 'applied').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
         sb().from('integration_sync_log').select('*').order('at', { ascending: false }).limit(50),
         sb().from('approved_client_content').select('*'),
         sb().from('project_invitations').select('*').order('created_at', { ascending: false }).limit(200),
@@ -1049,8 +1049,38 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
   );
 }
 
+const SYNC_TABLES = ['activities', 'project_reports', 'report_attachments', 'boq_lines', 'quotations'];
+
 function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
+  // current server state of each record, so the administrator sees whether anything is actually lost
+  const [gone, setGone] = useState<Map<string, boolean>>(new Map());
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    const byEntity = new Map<string, string[]>();
+    for (const o of d.ops) if (SYNC_TABLES.includes(o.entity)) byEntity.set(o.entity, [...(byEntity.get(o.entity) ?? []), o.record_id]);
+    Promise.all([...byEntity].map(([t, ids]) => sb().from(t).select('id, deleted_at').in('id', ids).then(({ data }) => ({ ids, rows: (data ?? []) as { id: string; deleted_at: string | null }[] }))))
+      .then((res) => {
+        const m = new Map<string, boolean>();
+        for (const { ids, rows } of res) for (const id of ids) { const r = rows.find((x) => x.id === id); m.set(id, !r || !!r.deleted_at); }
+        setGone(m);
+      });
+  }, [d.ops]);
+  const stateOf = (o: SyncOp) => {
+    const g = gone.get(o.record_id);
+    if (g === undefined) return 'Checking…';
+    if (o.op === 'delete') return g ? 'Already deleted on the server: nothing to do' : 'Still on the server: the delete did not happen';
+    return g ? 'Record was deleted on the server' : 'Server version kept; the device still holds the edit';
+  };
+  const resolve = async (o: SyncOp, action: 'dismiss' | 'apply_delete') => {
+    const what = action === 'apply_delete' ? 'Apply this delete on the server now? The record is soft-deleted and can be restored from Data recovery.' : 'Mark this problem as resolved, keeping the server version?';
+    if (!(await askConfirm(what, { danger: action === 'apply_delete' }))) return;
+    setBusy(o.op_id);
+    const { data, error } = await sb().rpc('resolve_sync_operation', { p_op: o.op_id, p_action: action, p_note: '' });
+    setBusy(null);
+    notify(error ? `Not resolved: ${error.message}` : data === 'already_applied' ? 'Resolved: the record was already deleted.' : data === 'applied_by_admin' ? 'Delete applied and recorded in the audit log.' : 'Marked resolved; recorded in the audit log.');
+    await reload();
+  };
   const runSheets = async () => {
     try {
       const r = await api('/api/integrations/sheets', {});
@@ -1066,15 +1096,23 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
         <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span></div>
         {!d.ops.length ? <div className="empty">No sync problems.</div> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>When</th><th>Person</th><th>Project</th><th>Record type</th><th>Status</th><th>Reason</th></tr></thead>
+            <thead><tr><th>When</th><th>Person</th><th>Project</th><th>Record type</th><th>Change</th><th>Status</th><th>Reason</th><th>On the server now</th><th>Resolve</th></tr></thead>
             <tbody>
               {d.ops.map((o) => (
-                <tr key={o.op_id}><td className="note">{when(o.received_at)}</td><td>{names.get(o.user_id)}</td><td>{d.projects.find((p) => p.id === o.project_id)?.code ?? '—'}</td><td>{o.entity}</td><td><Pill s={o.status} /></td><td className="note">{o.result?.error ?? (o.status === 'conflict' ? 'Edited from an older version' : '')}</td></tr>
+                <tr key={o.op_id}>
+                  <td className="note">{when(o.received_at)}</td><td>{names.get(o.user_id)}</td><td>{d.projects.find((p) => p.id === o.project_id)?.code ?? '—'}</td><td>{o.entity}</td><td>{o.op}</td><td><Pill s={o.status} /></td>
+                  <td className="note">{o.result?.error ?? (o.status === 'conflict' ? 'Edited from an older version' : '')}</td>
+                  <td className="note">{stateOf(o)}</td>
+                  <td className="row-actions">
+                    {o.op === 'delete' && gone.get(o.record_id) === false && <button className="btn btn-sm" disabled={busy === o.op_id} onClick={() => resolve(o, 'apply_delete')}>Apply delete</button>}
+                    <button className="btn btn-sm" disabled={busy === o.op_id} onClick={() => resolve(o, 'dismiss')}>{o.op === 'delete' && gone.get(o.record_id) ? 'Clear' : 'Keep server version'}</button>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table></div>
         )}
-        <p className="note">The person who made the change resolves it on their device (Offline queue). Nothing is discarded automatically.</p>
+        <p className="note">Resolving here records your decision in the audit log and removes the item from this list. It does not change the person's device: they can still keep or discard their copy in their Offline queue. Nothing is discarded automatically.</p>
       </section>
       <section className="card">
         <div className="card-head"><h2>Google Sheets integration</h2><button className="btn btn-sm btn-primary" onClick={runSheets}>Update Google Sheet now</button></div>
