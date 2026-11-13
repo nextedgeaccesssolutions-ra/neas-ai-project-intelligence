@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
+import PortfolioSummary from '@/components/PortfolioSummary';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
 import { SCurve } from '@/components/Charts';
 import GanttControls from '@/components/GanttControls';
@@ -43,6 +44,8 @@ export default function Overview() {
           <Link className="btn btn-primary" href="/projects?new=1">+ New project</Link>
         </div>
       </div>
+
+      <PortfolioSummary />
 
       <ProjectBar>
         <label className="field">
