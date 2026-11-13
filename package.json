@@ -15,10 +15,10 @@
     "docx": "^8.5.0",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
-    "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4",
-    "mammoth": "^1.8.0",
-    "next": "14.2.35",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
+    "mammoth": "^1.11.0",
+    "next": "15.5.28",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "server-only": "^0.0.1"
@@ -27,9 +27,9 @@
     "@types/node": "20.14.10",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
-    "esbuild": "^0.23.1",
+    "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.0.0",
     "typescript": "5.5.4",
-    "vitest": "2.0.5"
+    "vitest": "5.0.5"
   }
 }
