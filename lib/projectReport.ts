@@ -30,6 +30,8 @@ export interface ProjectReportInput {
   project: ReportProject & { manager?: string | null };
   generatedAt: Date;
   preparedBy: string;
+  /** cover page edits for this project */
+  coverSettings?: CoverSettings | null;
   /** reporting cut-off (YYYY-MM-DD) */
   asOf: string;
   periodFrom?: string | null;
@@ -50,6 +52,7 @@ export interface ProjectReportInput {
 export interface GanttRow { name: string; m: ScopeMetrics; a: Activity }
 
 export interface ProjectReport {
+  coverPhoto: CoverPhotoLayout;
   title: string;
   reference: string;
   fileName: string;
@@ -105,6 +108,62 @@ export function coverLines(c: CoverItem, n: number, projectName: string, tz = 'A
   };
 }
 
+/** How the cover photo is printed: one photo centred on page 1 (size in % of the page width), or the 9.21 cm tiles. */
+export interface CoverPhotoLayout { single: boolean; sizePct: number; register: boolean }
+export const DEFAULT_COVER_PHOTO: CoverPhotoLayout = { single: true, sizePct: 70, register: false };
+
+/** Per-project cover page edits (report_cover_settings). Keys are the default line labels or "custom:<n>". */
+export interface CoverSettings {
+  values?: Record<string, string>;
+  layout?: { title?: string; rows?: { key: string; label?: string; show?: boolean }[]; extra?: { key: string; label: string }[]; coverPhoto?: CoverPhotoLayout };
+}
+/** Lines the generator fills in itself; they can be hidden or renamed but never given other text. */
+export const LOCKED_COVER_LINES = ['Report reference', 'Generated'];
+/** lines only a Super Admin may give other text (who prepared it, what the report is called) */
+export const ADMIN_COVER_LINES = ['Prepared by', 'Project title'];
+
+/** Accept only the expected shape; anything malformed is ignored rather than breaking the report. */
+export function normaliseCoverSettings(raw: unknown): CoverSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const obj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
+  const values = Object.fromEntries(Object.entries(obj(o.values)).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+  const l = obj(o.layout);
+  const items = (v: unknown) => (Array.isArray(v) ? v.map(obj).filter((r) => typeof r.key === 'string') : []);
+  const rows = items(l.rows).map((r) => ({ key: r.key as string, label: str(r.label), show: r.show === false ? false : undefined }));
+  const extra = items(l.extra).filter((x) => (x.key as string).startsWith('custom:')).map((x) => ({ key: x.key as string, label: str(x.label) ?? 'Line' }));
+  const cp = obj(l.coverPhoto);
+  const coverPhoto: CoverPhotoLayout = {
+    single: typeof cp.single === 'boolean' ? cp.single : DEFAULT_COVER_PHOTO.single,
+    sizePct: typeof cp.sizePct === 'number' && Number.isFinite(cp.sizePct) ? Math.min(100, Math.max(25, Math.round(cp.sizePct))) : DEFAULT_COVER_PHOTO.sizePct,
+    register: typeof cp.register === 'boolean' ? cp.register : DEFAULT_COVER_PHOTO.register,
+  };
+  return { values, layout: { title: str(l.title), rows, extra, coverPhoto } };
+}
+/** lines the PDF places in the heading; they keep their names */
+const FIXED_LABELS = ['Project title', 'Report reference'];
+
+/** Apply cover edits: replace values, rename, hide, reorder and add extra lines. */
+export function applyCoverSettings(fields: [string, string][], s: CoverSettings | null | undefined): [string, string][] {
+  s = normaliseCoverSettings(s);
+  if (!s) return fields;
+  const values = s.values ?? {};
+  const base = new Map(fields);
+  const all: { key: string; value: string }[] = [
+    ...fields.map(([key, value]) => ({ key, value: !LOCKED_COVER_LINES.includes(key) && clean(values[key] ?? '') ? clean(values[key]) : value })),
+    ...(s.layout?.extra ?? []).filter((x) => clean(values[x.key] ?? '')).map((x) => ({ key: x.key, value: clean(values[x.key]) })),
+  ];
+  const rows = s.layout?.rows ?? [];
+  const pos = new Map(rows.map((r, i) => [r.key, i]));
+  const labelOf = (key: string) => FIXED_LABELS.includes(key) ? key : clean(rows.find((r) => r.key === key)?.label ?? '') || (s.layout?.extra ?? []).find((x) => x.key === key)?.label || key;
+  return all
+    .filter((x) => rows.find((r) => r.key === x.key)?.show !== false)
+    .map((x, i) => ({ ...x, o: pos.get(x.key) ?? rows.length + i }))
+    .sort((a, b) => a.o - b.o)
+    .map((x) => [base.has(x.key) || x.key.startsWith('custom:') ? labelOf(x.key) : x.key, x.value] as [string, string]);
+}
+
 export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   const tz = input.timeZone ?? 'Asia/Manila';
   const p = input.project;
@@ -137,7 +196,9 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
   fields.push(['Generated', `${fmtWhen(input.generatedAt.toISOString(), tz)} (${tz})`]);
   fields.push(['Prepared by', clean(input.preparedBy) || 'Not provided']);
 
-  const cover = input.cover.map((c, i) => coverLines(c, i + 1, clean(p.name), tz));
+  const coverFields = applyCoverSettings(fields, input.coverSettings);
+  const coverPhoto = normaliseCoverSettings(input.coverSettings)?.layout?.coverPhoto ?? DEFAULT_COVER_PHOTO;
+  const cover = (coverPhoto.single ? input.cover.slice(0, 1) : input.cover).map((c, i) => coverLines(c, i + 1, clean(p.name), tz));
 
   const inPeriod = (d: string) => d >= from && d <= day;
   const accomplishments: string[] = [];
@@ -185,14 +246,15 @@ export function buildProjectReport(input: ProjectReportInput): ProjectReport {
 
   const approval: [string, string][] = [
     ['Prepared by', clean(input.preparedBy) || 'Not provided'],
-    ['Reviewed by', 'Not recorded'],
-    ['Approval status', 'Not recorded'],
+    // left blank for the client or reviewer to complete (by hand, or online under “Reports for your review”)
+    ['Reviewed by (name / date)', '________________________________'],
+    ['Approval status', '________________________________'],
   ];
 
   return {
-    title: 'Project Report', reference,
+    title: clean(normaliseCoverSettings(input.coverSettings)?.layout?.title ?? '') || 'Project Report', reference,
     fileName: `NEAS_${safeName(p.code)}_${safeName(p.name)}_Project-Report_${dateStamp(input.generatedAt, tz)}`,
-    project: p, audience: input.audience, asOf: day, fields, cover, overall, series, rows,
+    project: { ...p, name: coverFields.find(([k]) => k === 'Project title')?.[1] ?? p.name }, audience: input.audience, asOf: day, fields: coverFields, cover, coverPhoto, overall, series, rows,
     accomplishments, outstanding, delays, observations, limitations, summary, approval, evidence: input.evidence,
   };
 }

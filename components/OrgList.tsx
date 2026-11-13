@@ -1,8 +1,8 @@
 'use client';
 // Select-all, Group, Ungroup, Hide and Unhide for any list or table, built on the saved groups and
 // personal hidden items in lib/viewOrg.ts. Display only: the records themselves never change.
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import OrgToolbar, { GroupHeader } from '@/components/OrgToolbar';
+import { cloneElement, Fragment, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import OrgToolbar, { dragSource, GroupHeader, MoveToMenu, UngroupZone } from '@/components/OrgToolbar';
 import { askConfirm, notify } from '@/components/Dialogs';
 import { itemKey, useCollapsed, useViewOrg, type ItemKind, type ListKey, type ViewGroup } from '@/lib/viewOrg';
 import { canManage, useCloudStatus } from '@/lib/cloud/cloudSync';
@@ -94,12 +94,36 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
     </>
   );
 
+  // drag-and-drop and "Move to": into an existing group of the same project, or back out of any group
+  const moveTo = async (ids: string[], gid: string | null) => {
+    // only items shown here, and only out of groups this person may change
+    const keep = ids.filter((i) => listed.some((t) => id(t) === i)).filter((i) => { const cur = org.groupOf.get(itemKey(kind, i)); return !cur || editable(cur); });
+    if (keep.length < ids.length) notify(`${ids.length - keep.length} ${noun}(s) are in a group you cannot change and were left where they are.`);
+    if (!keep.length) return;
+    if (gid === null) { done(await org.ungroup(kind, keep), 'Moved out of the group.'); return; }
+    const g = org.groups.find((x) => x.id === gid);
+    if (!g || !editable(g) || (g.project_id === null && list !== 'projects')) { notify('You cannot add items to that group.'); return; }
+    const projs = [...new Set(keep.map((i) => project(items.find((t) => id(t) === i)!)))];
+    if (g.project_id && projs.some((p) => p !== g.project_id)) { notify(`Only ${noun}s from the group's own project can go in it.`); return; }
+    done(!!(await org.group(g.project_id, kind, keep, { id: g.id })), `Moved ${keep.length} ${noun}(s) to “${g.name}”.`);
+  };
+  const targets = (t: T) => org.groups.filter((g) => editable(g) && (g.project_id === null ? list === 'projects' : g.project_id === project(t)));
+  /** draggable props for a row or card */
+  const drag = (t: T) => (showHidden ? {} : dragSource(id(t), picked));
+  /** "Move to" menu for a row or card (phones, keyboards) */
+  const moveMenu = (t: T) => { const cur = org.groupOf.get(key(t)); return showHidden ? null : <MoveToMenu groups={targets(t)} current={cur?.id ?? null} currentEditable={!cur || editable(cur)} onMove={(gid) => void moveTo([id(t)], gid)} />; };
+  const ungroupZone = !showHidden && groups.length > 0 ? <UngroupZone label={`Drop here to take ${noun}s out of their group`} onDrop={(ids) => void moveTo(ids, null)} /> : null;
+
   const header = (g: ViewGroup, count: number) => (
     <GroupHeader label={g.name} count={count} open={open.isOpen(g.id)} onToggle={() => open.toggle(g.id)}
+      onDropItems={editable(g) && (g.project_id !== null || list === 'projects') ? (ids) => void moveTo(ids, g.id) : undefined}
       badge={g.scope === 'project' ? 'Shared with project' : 'Only you'}
       onRename={editable(g) ? () => { setRenaming(g); setRenameTo(g.name); } : undefined}
       onRemove={editable(g) ? () => askConfirm(`Remove the group "${g.name}"? Its ${count} ${noun}(s) go back to the main list. Nothing is deleted.`, { danger: false }).then(async (ok) => { if (ok && (await org.remove(g))) notify('Group removed.'); }) : undefined} />
   );
+
+  // rows a caller renders become draggable onto group headers (when the row is a single <tr>)
+  const draggableRow = (t: T, node: ReactNode) => (isValidElement(node) && node.type === 'tr' ? cloneElement(node as ReactElement, drag(t)) : node);
 
   /** Table bodies: one per open group (header row + rows), then the ungrouped rows. */
   const tbodies = (render: (t: T) => ReactNode, colSpan: number, rest: T[] = ungrouped) => (
@@ -107,10 +131,11 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
       {groups.map(({ g, items: rows }) => (
         <tbody key={g.id}>
           <tr className="group-row"><td colSpan={colSpan}>{header(g, rows.length)}</td></tr>
-          {open.isOpen(g.id) && rows.map((t) => <Fragment key={id(t)}>{render(t)}</Fragment>)}
+          {open.isOpen(g.id) && rows.map((t) => <Fragment key={id(t)}>{draggableRow(t, render(t))}</Fragment>)}
         </tbody>
       ))}
-      <tbody>{rest.map((t) => <Fragment key={id(t)}>{render(t)}</Fragment>)}</tbody>
+      {groups.length > 0 && !showHidden && <tbody><tr><td colSpan={colSpan} style={{ padding: 0 }}>{ungroupZone}</td></tr></tbody>}
+      <tbody>{rest.map((t) => <Fragment key={id(t)}>{draggableRow(t, render(t))}</Fragment>)}</tbody>
     </>
   );
 
@@ -119,7 +144,7 @@ export function useOrgList<T>({ list, kind, items, id, project, noun = 'item' }:
     <div key={g.id}>{header(g, rows.length)}{open.isOpen(g.id) && render(rows)}</div>
   ));
 
-  return { listed, ungrouped, groups, picked, checkbox, headerCheckbox, toolbar, tbodies, sections, showHidden };
+  return { listed, ungrouped, groups, picked, checkbox, headerCheckbox, toolbar, tbodies, sections, showHidden, drag, moveMenu, ungroupZone };
 }
 
 function SelectAll({ on, some, onChange, label }: { on: boolean; some: boolean; onChange: () => void; label: string }) {

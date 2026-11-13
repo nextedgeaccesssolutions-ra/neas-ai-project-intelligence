@@ -12,7 +12,7 @@ import { checkEmail, checkName, PROJECT_CODE_RE } from '@/lib/cloud/validate';
 import DataIO from '@/components/DataIO';
 import { askPin, isPinRequired, withPin } from '@/components/PinPrompt';
 import { useOrgList } from '@/components/OrgList';
-import { ALWAYS_VIEWS, VIEWS } from '@/lib/cloud/cloudSync';
+import { ALWAYS_VIEWS, CLIENT_VIEWS, isClientViews, VIEWS } from '@/lib/cloud/cloudSync';
 
 type Tab = 'overview' | 'projects' | 'users' | 'approvals' | 'invitations' | 'client' | 'sync' | 'recovery' | 'audit' | 'security';
 const TABS: [Tab, string][] = [
@@ -20,10 +20,10 @@ const TABS: [Tab, string][] = [
   ['client', 'Client viewer access'], ['sync', 'Synchronization'], ['recovery', 'Data recovery'], ['audit', 'Audit log'], ['security', 'Security settings'],
 ];
 
-interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
-interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string }
+interface Profile { id: string; email: string; full_name: string; job_title: string; global_role: string; status: string; email_verified_at: string | null; approved_at: string | null; approved_by: string | null; password_set_at: string | null; password_reset_requested_at: string | null; sessions_revoked_at: string | null; allowed_views: string[] | null; username?: string | null; pin_locked_at?: string | null; is_client?: boolean; last_login_at: string | null; created_at: string; status_reason: string | null; deleted_at?: string | null }
+interface Project { id: string; code: string; name: string; reference_no: string; client_name: string; site: string; status: string; start_date: string | null; end_date: string | null; contract_value: number | null; client_portal_enabled: boolean; created_at: string; deleted_at?: string | null }
 interface Member { project_id: string; user_id: string; role: string; can_approve_reports: boolean }
-interface Cred { id: string; project_id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
+interface Cred { id: string; project_id: string; label: string; username?: string | null; created_at: string; expires_at: string | null; revoked_at: string | null; last_used_at: string | null; max_uses: number | null; use_count: number }
 interface Audit { id: number; at: string; actor_id: string | null; actor_kind: string; action: string; project_id: string | null; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
 interface SyncOp { op_id: string; user_id: string; entity: string; status: string; result: { error?: string }; received_at: string; project_id: string; record_id: string; op: string }
 interface IntLog { id: number; at: string; status: string; rows_written: number; error: string | null }
@@ -76,9 +76,9 @@ export default function AdminPage() {
         sb().from('profiles').select('*').order('created_at', { ascending: false }),
         sb().from('projects').select('*').order('code'),
         sb().from('project_memberships').select('project_id, user_id, role, can_approve_reports'),
-        sb().from('client_access_credentials').select('id, project_id, label, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
+        sb().from('client_access_credentials').select('id, project_id, label, username, created_at, expires_at, revoked_at, last_used_at, max_uses, use_count').order('created_at', { ascending: false }),
         sb().from('audit_logs').select('*').order('at', { ascending: false }).limit(300),
-        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').neq('status', 'applied').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
+        sb().from('sync_operations').select('op_id, user_id, entity, status, result, received_at, project_id, record_id, op').eq('status', 'rejected').is('resolved_at', null).order('received_at', { ascending: false }).limit(200),
         sb().from('integration_sync_log').select('*').order('at', { ascending: false }).limit(50),
         sb().from('approved_client_content').select('*'),
         sb().from('project_invitations').select('*').order('created_at', { ascending: false }).limit(200),
@@ -258,6 +258,19 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
     setF({ ...empty, code: nextCode([...d.projects, { code } as Project]) });
     await reload();
   };
+  const [codeEdit, setCodeEdit] = useState<{ id: string; value: string } | null>(null);
+  const saveCode = async (p: Project) => {
+    if (!codeEdit) return;
+    const code = codeEdit.value.trim().toUpperCase();
+    if (code === p.code) return setCodeEdit(null);
+    if (!PROJECT_CODE_RE.test(code)) return notify('Project ID: 3–40 capital letters, digits or dashes, e.g. PRJ-2026-003.');
+    if (!(await askConfirm(`Change ${p.code} to ${code}? Team and client links, QR codes and shared bookmarks that use ${p.code} stop working; clients sign in with ${code} from now on.`))) return;
+    const { error } = await withPin(() => sb().from('projects').update({ code }).eq('id', p.id));
+    if (error) return notify(error.message.includes('duplicate') ? `${code} already exists.` : error.message);
+    notify(`Project ID changed to ${code}.`);
+    setCodeEdit(null);
+    await reload();
+  };
   const setStatus = async (p: Project, status: string) => {
     if (!(await askConfirm(`Change ${p.code} to “${status}”? ${status === 'suspended' || status === 'archived' ? 'Members lose access until it is reactivated.' : ''}`, { danger: status !== 'active' }))) return;
     const { error } = await sb().from('projects').update({ status }).eq('id', p.id);
@@ -277,8 +290,24 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
     await reload();
   };
   const copy = (t: string) => navigator.clipboard.writeText(t).then(() => notify('Copied.'), () => notify(t));
+  // deleting hides an archived project everywhere and closes its client portal; its records stay and it can be restored
+  const removeProject = async (p: Project) => {
+    if (!(await askConfirm(`Delete ${p.code}? It disappears from every list and its client portal closes. Its reports, photos and history are kept, and you can restore it from “Show deleted”.`, { danger: true }))) return;
+    const { error } = await withPin(() => sb().from('projects').update({ deleted_at: new Date().toISOString(), client_portal_enabled: false }).eq('id', p.id));
+    if (error) return notify(error.message);
+    notify(`${p.code} deleted.`);
+    await reload();
+  };
+  const restoreProject = async (p: Project) => {
+    const { error } = await withPin(() => sb().from('projects').update({ deleted_at: null }).eq('id', p.id));
+    if (error) return notify(error.message);
+    notify(`${p.code} restored (still archived).`);
+    await reload();
+  };
+  const [showDeleted, setShowDeleted] = useState(false);
+  const deletedCount = d.projects.filter((p) => p.deleted_at).length;
 
-  const rows = d.projects.filter((p) => !q || `${p.code} ${p.name} ${p.client_name} ${p.reference_no}`.toLowerCase().includes(q.toLowerCase()));
+  const rows = d.projects.filter((p) => !!p.deleted_at === showDeleted).filter((p) => !q || `${p.code} ${p.name} ${p.client_name} ${p.reference_no}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       <section className="card">
@@ -298,7 +327,7 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
       </section>
 
       <section className="card">
-        <div className="card-head"><h2>Projects ({rows.length})</h2><input className="input" style={{ maxWidth: 260 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" /></div>
+        <div className="card-head"><h2>{showDeleted ? 'Deleted projects' : 'Projects'} ({rows.length})</h2>{(deletedCount > 0 || showDeleted) && <button className="btn btn-sm" onClick={() => setShowDeleted(!showDeleted)}>{showDeleted ? 'Back to projects' : `Show deleted (${deletedCount})`}</button>}<input className="input" style={{ maxWidth: 260 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" /></div>
         <div className="table-wrap">
           <table className="tbl">
             <thead><tr><th>Project</th><th>Client / ref.</th><th>Dates</th><th>Status</th><th>Team</th><th>Client portal</th><th>Actions</th></tr></thead>
@@ -308,7 +337,20 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                 return (
                   <Fragment key={p.id}>
                     <tr>
-                      <td><b>{p.code}</b><div className="note">{p.name}</div></td>
+                      <td>
+                        {codeEdit?.id === p.id ? (
+                          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                            <input className="input" style={{ maxWidth: 180 }} value={codeEdit.value} autoFocus aria-label="Project ID"
+                              onChange={(e) => setCodeEdit({ id: p.id, value: e.target.value.toUpperCase() })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') void saveCode(p); if (e.key === 'Escape') setCodeEdit(null); }} />
+                            <button className="btn btn-sm btn-primary" onClick={() => saveCode(p)}>Save</button>
+                            <button className="btn btn-sm" onClick={() => setCodeEdit(null)}>Cancel</button>
+                          </span>
+                        ) : (
+                          <><b>{p.code}</b> <button className="btn btn-sm" title="Edit project ID" onClick={() => setCodeEdit({ id: p.id, value: p.code })}>Edit</button></>
+                        )}
+                        <div className="note">{p.name}</div>
+                      </td>
                       <td>{p.client_name || '—'}<div className="note">{p.reference_no}</div></td>
                       <td className="note">{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</td>
                       <td><Pill s={p.status} /></td>
@@ -316,9 +358,11 @@ function Projects({ d, reload }: { d: D; reload: () => Promise<void> }) {
                       <td>{p.client_portal_enabled ? <span className="pill pill-ok">On</span> : <span className="pill">Off</span>}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button className="btn btn-sm" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Close' : 'Manage'}</button>{' '}
+                        {p.deleted_at ? <button className="btn btn-sm" onClick={() => restoreProject(p)}>Restore</button> : <>
                         {p.status !== 'active' && <button className="btn btn-sm" onClick={() => setStatus(p, 'active')}>Activate</button>}{' '}
                         {p.status === 'active' && <button className="btn btn-sm" onClick={() => setStatus(p, 'suspended')}>Suspend</button>}{' '}
                         {p.status !== 'archived' && <button className="btn btn-sm btn-danger" onClick={() => setStatus(p, 'archived')}>Archive</button>}
+                        {p.status === 'archived' && <button className="btn btn-sm btn-danger" onClick={() => removeProject(p)}>Delete</button>}</>}
                       </td>
                     </tr>
                     {open === p.id && (
@@ -445,6 +489,26 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
   };
 
   const [resetCode, setResetCode] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
+  // Role column: Super Admin uses the existing admin rights actions; Client and Staff set the account's modules
+  const changeRole = async (u: Profile, role: string) => {
+    const who = u.full_name || u.email;
+    const text = role === 'super_admin' ? `Give ${who} full Super Admin rights?`
+      : role === 'client' ? `Make ${who} a client account? They will see only reports for their projects.`
+      : `Make ${who} staff? ${u.global_role === 'super_admin' ? 'Super Admin rights are removed.' : 'They can use every module (change this under Module access).'}`;
+    if (!(await askConfirm(text, { danger: role === 'super_admin' || u.global_role === 'super_admin' }))) return;
+    try {
+      if (role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_admin', hours: 24 });
+      else {
+        if (u.global_role === 'super_admin') await api(`/api/admin/users/${u.id}`, { action: 'make_staff', hours: 24 });
+        const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: role === 'client' }));
+        if (error) throw new Error(error.message);
+      }
+      notify('Role changed. Recorded in the audit log.');
+    } catch (e) {
+      notify((e as Error).message);
+    }
+    await reload();
+  };
   const act = async (u: Profile, action: string, confirmText: string, danger = true, reason?: string) => {
     if (!(await askConfirm(confirmText, { danger }))) return;
     try {
@@ -488,10 +552,14 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
     `Delete ${u.full_name || u.email}? They are signed out everywhere, can no longer sign in and lose all project access. Their reports and photos are kept, and the account can be restored later with Activate.`,
     true, 'Deleted by administrator');
 
+  const forget = (u: Profile) => act(u, 'delete_forever',
+    `Delete ${u.full_name || u.email} forever? Their e-mail and username become free, so you can create a new account with the same details. This cannot be undone. Their past reports and photos stay, shown as "${u.full_name || 'Removed user'} (removed)".`,
+    true);
+
   const ql = q.trim().toLowerCase();
   const filtered = d.profiles.filter((u) =>
     (status === 'deleted' ? !!u.deleted_at : !u.deleted_at && (!status || u.status === status)) &&
-    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : membersOf(u.id).some((m) => m.role === role))) &&
+    (!role || (role === 'super_admin' ? u.global_role === 'super_admin' : role === 'client' ? u.global_role !== 'super_admin' && !!u.is_client : membersOf(u.id).some((m) => m.role === role))) &&
     (!project || membersOf(u.id).some((m) => m.project_id === project)) &&
     (!ql || `${u.full_name} ${u.email} ${u.job_title} ${projectsText(u.id)}`.toLowerCase().includes(ql)),
   );
@@ -519,12 +587,17 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
       columns: ['Full name', 'E-mail', 'E-mail verified', 'Account status', 'Approval', 'Global role', 'Projects (role)', 'Last sign-in', 'Created', 'Password', 'Password reset', 'Modules'].map((label) => ({ key: label, label })),
       rows: rows.map((u) => ({
         'Full name': u.full_name, 'E-mail': u.email, 'E-mail verified': u.email_verified_at ? 'Yes' : 'No', 'Account status': u.status, Approval: approvalOf(u),
-        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
+        'Global role': u.global_role === 'super_admin' ? 'Super Admin' : !!u.is_client ? 'Client' : 'Staff', 'Projects (role)': projectsText(u.id), 'Last sign-in': when(u.last_login_at),
         Created: fmtDate(u.created_at.slice(0, 10)), Password: passwordOf(u), 'Password reset': resetOf(u), Modules: u.global_role === 'super_admin' || !u.allowed_views ? 'All' : u.allowed_views.join(', '),
       })),
     }],
   });
 
+  // active client portal logins are listed too, so every person who can sign in appears in one place
+  const portal = (status === 'deleted' || (role && role !== 'client') ? [] : d.creds)
+    .filter((c) => c.username && !c.revoked_at && (!c.expires_at || new Date(c.expires_at) > new Date()))
+    .filter((c) => !project || c.project_id === project)
+    .filter((c) => !ql || `${c.label} ${c.username} ${d.projects.find((p) => p.id === c.project_id)?.code ?? ''}`.toLowerCase().includes(ql));
   return (
     <>
       {resetCode && <CodeReveal code={resetCode.code} expiresAt={resetCode.expiresAt} who={resetCode.who} onClose={() => setResetCode(null)} />}
@@ -547,13 +620,13 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
         <div className="form-grid" style={{ marginBottom: 14 }}>
           <label className="field" style={{ gridColumn: 'span 2' }}>Search<input className="input" placeholder="Name, e-mail, job title or project ID" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search users" /></label>
           <label className="field">Status<select className="input" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="suspended">Suspended</option><option value="rejected">Rejected</option><option value="deleted">Deleted</option></select></label>
-          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
+          <label className="field">Role<select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="client">Client</option><option value="project_manager">Project manager</option><option value="employee">Employee</option></select></label>
           <label className="field">Project<select className="input" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}</select></label>
         </div>
 
         {(status || role || project || ql) && (
           <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="note">{rows.length} of {d.profiles.length} users</span>
+            <span className="note">{rows.length} of {d.profiles.length} users{portal.length ? ` · ${portal.length} client portal login${portal.length === 1 ? '' : 's'}` : ''}</span>
             <button className="btn btn-sm" onClick={() => { setQ(''); setStatus(''); setRole(''); setProject(''); }}>Clear filters</button>
           </div>
         )}
@@ -583,7 +656,11 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                       </div>
                     </td>
                     <td><Pill s={u.deleted_at ? 'deleted' : u.status} />{u.pin_locked_at && <> <span className="pill pill-bad">PIN locked</span></>}{u.status_reason && <div className="note">{u.status_reason}</div>}{u.username && <div className="note">@{u.username}</div>}</td>
-                    <td>{u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : 'Staff'}</td>
+                    <td onClick={(e) => e.stopPropagation()}>{u.id === selfId || u.status !== 'active'
+                      ? (u.global_role === 'super_admin' ? <span style={{ fontWeight: 700, color: 'var(--navy)' }}>Super Admin</span> : !!u.is_client ? <span className="pill">Client</span> : 'Staff')
+                      : <select className="input" style={{ minWidth: 120 }} aria-label="Account role" value={u.global_role === 'super_admin' ? 'super_admin' : !!u.is_client ? 'client' : 'staff'} onChange={(e) => void changeRole(u, e.target.value)}>
+                          <option value="staff">Staff</option><option value="client">Client</option><option value="super_admin">Super Admin</option>
+                        </select>}</td>
                     <td className="note">{projectsText(u.id) || '—'}</td>
                     <td className="note">{u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}</td>
                     <td className="note">{fmtDate(u.created_at.slice(0, 10))}</td>
@@ -591,6 +668,7 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
                         <button className="btn btn-sm" onClick={() => startEdit(u)}>Edit</button>
                         {u.id !== selfId && !u.deleted_at && <button className="btn btn-sm btn-danger" onClick={() => remove(u)}>Delete</button>}
+                        {u.deleted_at && !u.email.startsWith('removed-') && <button className="btn btn-sm btn-danger" onClick={() => forget(u)}>Delete forever</button>}
                         <UserActionMenu u={u} selfId={selfId} onAction={act} onReview={review} />
                       </div>
                     </td>
@@ -620,7 +698,24 @@ function Users({ d, reload, selfId, go }: { d: D; reload: () => Promise<void>; s
                   )}
                 </Fragment>
               ))}
-              {!rows.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+              {!rows.length && !portal.length && <tr><td colSpan={7} className="empty">No users match your filters.</td></tr>}
+              {/* client portal logins (username + passcode, one project): managed under Client viewer access */}
+              {portal.map((c) => (
+                <tr key={`portal-${c.id}`}>
+                  <td>
+                    <div className="user-name-cell">
+                      <UserAvatar name={c.label} role="staff" />
+                      <div className="name-wrap"><b>{c.label}</b><div className="note">Client portal login</div></div>
+                    </div>
+                  </td>
+                  <td><Pill s="active" /><div className="note">@{c.username}</div></td>
+                  <td><span className="pill">Client portal</span></td>
+                  <td className="note">{d.projects.find((p) => p.id === c.project_id)?.code ?? '—'}</td>
+                  <td className="note">{c.last_used_at ? new Date(c.last_used_at).toLocaleDateString() : 'Never'}</td>
+                  <td className="note">{fmtDate(c.created_at.slice(0, 10))}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}><button className="btn btn-sm" onClick={() => go('client')}>Manage</button></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -648,7 +743,10 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
   const [saving, setSaving] = useState(false);
   const save = async (next: string[] | null) => {
     setSaving(true);
-    const { error } = await withPin(() => sb().rpc('admin_set_views', { p_user: u.id, p_views: next }));
+    // a client keeps its client status (view only, shared items) whatever modules it is given
+    const { error } = await withPin(() => u.is_client
+      ? sb().rpc('admin_set_client_views', { p_user: u.id, p_views: next ?? VIEWS.map(([k]) => k) })
+      : sb().rpc('admin_set_views', { p_user: u.id, p_views: next }));
     setSaving(false);
     if (error) return notify(error.message);
     notify(next === null ? 'All modules allowed.' : 'Module access saved. It applies on their next page load.');
@@ -658,12 +756,19 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
   return (
     <div>
       <h3 style={{ margin: '0 0 6px' }}>Modules this person can use</h3>
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        {!!u.is_client
+          ? <><span className="pill">Client account</span><span className="note">Opens the modules ticked below for their projects, with only approved, client-shared reports and photos. Clients cannot edit or submit anything in any module.</span></>
+          : <button className="btn btn-sm" disabled={saving} onClick={async () => { setSaving(true); const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true })); setSaving(false); if (error) return notify(error.message); notify('Client account: all modules, shared items only, no editing.'); await reload(); }}>Make this a client account</button>}
+      </div>
       <p className="note" style={{ marginTop: 0 }}>{all ? 'Currently: all modules.' : `Currently: ${u.allowed_views!.length} of ${VIEWS.length} modules.`} Costing (BOQ, cost settings, quotations), schedule changes, report submission and photo uploads are also blocked in the database when the module is off.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
         {VIEWS.map(([k, label]) => {
-          const always = ALWAYS_VIEWS.includes(k);
+          const client = !!u.is_client;
+          const always = ALWAYS_VIEWS.includes(k) && !client;
+          // a client account can be given more modules; it stays view only with shared items in each of them
           return (
-            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={always ? 'Every user always has this module' : undefined}>
+            <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={client ? 'Clients cannot edit in any module' : always ? 'Every user always has this module' : undefined}>
               <input type="checkbox" checked={always || sel.includes(k)} disabled={always} onChange={(e) => setSel(e.target.checked ? [...sel, k] : sel.filter((x) => x !== k))} />
               {label}{always && <span className="note"> (always on)</span>}
             </label>
@@ -673,6 +778,7 @@ function ViewsEditor({ u, reload }: { u: Profile; reload: () => Promise<void> })
       <div className="form-actions">
         <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save(VIEWS.map(([k]) => k).filter((k) => sel.includes(k)))}>Save module access</button>
         {!all && <button className="btn btn-sm" disabled={saving} onClick={() => save(null)}>Allow all modules</button>}
+        {!!u.is_client && <button className="btn btn-sm" disabled={saving} onClick={() => save([...CLIENT_VIEWS])}>Standard client modules</button>}
       </div>
     </div>
   );
@@ -706,6 +812,20 @@ function UserPanel({ u, d, self, act, review, reload }: {
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
   const log = d.audit.filter((a) => a.target_id === u.id || a.actor_id === u.id).slice(0, 40);
 
+  // Client is an account setting (reports-only modules) on top of an employee membership
+  const changeMemberRole = async (m: Member, role: string) => {
+    const client = !!u.is_client;
+    if (role === 'client' && !client) {
+      if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects, on every project they belong to.`))) return;
+      const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
+      if (error) return notify(error.message);
+    } else if (role !== 'client' && client) {
+      if (!(await askConfirm(`Make ${u.full_name || u.email} staff again? Their account gets every module (narrow it under Module access).`))) return;
+      const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: false }));
+      if (error) return notify(error.message);
+    }
+    await setMember(m.project_id, role === 'client' ? 'employee' : role, role === 'client' ? false : m.can_approve_reports);
+  };
   const setMember = async (projectId: string, role: string, canApprove: boolean) => {
     const { error } = await withPin(() => sb().from('project_memberships').upsert({ project_id: projectId, user_id: u.id, role, can_approve_reports: role === 'project_manager' || canApprove }));
     if (error) return notify(error.message);
@@ -724,7 +844,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
         <UserAvatar name={u.full_name || u.email} role={u.global_role} />
         <div className="user-detail-info">
           <h3>{u.full_name || u.email}</h3>
-          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : 'Staff'} · <Pill s={u.status} /></div>
+          <div className="note">{u.email} · {u.email_verified_at ? 'Verified' : 'Unverified'} · {u.global_role === 'super_admin' ? 'Super Admin' : !!u.is_client ? 'Client' : 'Staff'} · <Pill s={u.status} /></div>
         </div>
       </div>
 
@@ -761,7 +881,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
 
       <div className="user-section">
         <h4>Module access</h4>
-        <ViewsEditor u={u} reload={reload} />
+        <ViewsEditor key={(u.allowed_views ?? ['*']).join(',')} u={u} reload={reload} />
       </div>
 
       <div className="user-section">
@@ -775,7 +895,7 @@ function UserPanel({ u, d, self, act, review, reload }: {
               return (
                 <tr key={m.project_id}>
                   <td><b>{p?.code}</b> <span className="note">{p?.name}</span></td>
-                  <td><select className="input" value={m.role} onChange={(e) => setMember(m.project_id, e.target.value, m.can_approve_reports)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option></select></td>
+                  <td><select className="input" value={m.role === 'employee' && !!u.is_client && u.global_role !== 'super_admin' ? 'client' : m.role} onChange={(e) => void changeMemberRole(m, e.target.value)} aria-label="Project role"><option value="employee">{roleLabel('employee')}</option><option value="project_manager">{roleLabel('project_manager')}</option>{u.global_role !== 'super_admin' && <option value="client">Client</option>}</select></td>
                   <td><input type="checkbox" checked={m.can_approve_reports} disabled={m.role === 'project_manager'} onChange={(e) => setMember(m.project_id, m.role, e.target.checked)} aria-label="Can approve reports" /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => remove(m.project_id)}>Remove</button></td>
                 </tr>
@@ -787,8 +907,16 @@ function UserPanel({ u, d, self, act, review, reload }: {
         {u.status === 'active' && free.length > 0 && (
           <div className="form-actions">
             <select className="input" style={{ maxWidth: 240 }} value={addProject} onChange={(e) => setAddProject(e.target.value)} aria-label="Project to add"><option value="">Add to project…</option>{free.map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select>
-            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option></select>
-            <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => { await setMember(addProject, addRole, false); setAddProject(''); }}>Give access</button>
+            <select className="input" style={{ maxWidth: 180 }} value={addRole} onChange={(e) => setAddRole(e.target.value)} aria-label="Role for new project"><option value="employee">Employee</option><option value="project_manager">Project manager</option>{u.global_role !== 'super_admin' && <option value="client">Client</option>}</select>
+            <button className="btn btn-sm btn-primary" disabled={!addProject} onClick={async () => {
+              // a client is a project member whose account sees only the client report views
+              if (addRole === 'client' && !!!u.is_client) {
+                if (!(await askConfirm(`Make ${u.full_name || u.email} a client account? They will see only reports for their projects; every other module is hidden.`))) return;
+                const { error } = await withPin(() => sb().rpc('admin_set_client', { p_user: u.id, p_client: true }));
+                if (error) return notify(error.message);
+              }
+              await setMember(addProject, addRole === 'client' ? 'employee' : addRole, false); setAddProject('');
+            }}>Give access</button>
           </div>
         )}
       </div>
@@ -857,32 +985,63 @@ function Approvals({ d, reload }: { d: D; reload: () => Promise<void> }) {
 }
 
 function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
-  const [f, setF] = useState({ fullName: '', email: '', projectId: '', role: 'employee' });
+  const [f, setF] = useState({ fullName: '', email: '', projectId: '', role: 'employee', pin: '', username: '' });
+  const fClient = f.role === 'client';
   const send = async () => {
     const n = checkName(f.fullName);
     if (!n.ok) return notify(n.error);
     const e = checkEmail(f.email);
     if (!e.ok) return notify(e.error);
+    if (fClient && !f.projectId) return notify('Choose the project this client may see.');
+    if ((fClient || f.pin) && !/^\d{6}$/.test(f.pin)) return notify('The passcode is 6 digits. Type one or press Generate.');
+    // with a passcode (always for clients) the login is made now and the details are e-mailed by you; without one, a single-use link is sent
+    if (f.pin) {
+      const username = f.username.trim().toLowerCase() || e.email.split('@')[0].toLowerCase().replace(/[^a-z0-9.-]+/g, '.').replace(/^[^a-z0-9]+/, '').slice(0, 32).padEnd(3, '0');
+      try {
+        await api('/api/admin/users/create', { fullName: n.name, username, email: fClient ? undefined : e.email, projectId: f.projectId || undefined, role: f.role, pin: f.pin });
+        setMadeLogin({ who: n.name, username, pin: f.pin, client: fClient, email: e.email });
+        notify('Login ready. The username and passcode are shown at the top of this page.');
+        setF({ fullName: '', email: '', projectId: f.projectId, role: f.role, pin: '', username: '' });
+        await reload();
+      } catch (x) {
+        notify((x as Error).message);
+      }
+      return;
+    }
     try {
       const r = await api('/api/admin/invitations', { ...f, fullName: n.name, email: e.email, projectId: f.projectId || undefined });
       notify(r.message ?? 'Invitation sent.');
-      setF({ fullName: '', email: '', projectId: f.projectId, role: f.role });
+      setF({ fullName: '', email: '', projectId: f.projectId, role: f.role, pin: '', username: '' });
       await reload();
     } catch (x) {
       notify((x as Error).message);
     }
   };
-  const [g, setG] = useState({ fullName: '', email: '', projectId: '', role: 'employee', hours: 72 });
+  const [g, setG] = useState({ fullName: '', username: '', email: '', projectId: '', role: 'employee', hours: 72, pin: '' });
   const [issued, setIssued] = useState<{ code: string; expiresAt: string; who: string } | null>(null);
+  const [madeLogin, setMadeLogin] = useState<{ who: string; username: string; pin: string; client: boolean; email?: string } | null>(null);
+  const isClient = g.role === 'client';
+  const newPin = () => {
+    // 6 random digits, never all the same or a simple run
+    for (;;) {
+      const p = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+      if (new Set(p).size > 1 && !'0123456789'.includes(p) && !'9876543210'.includes(p)) return p;
+    }
+  };
+  const generatePin = () => { const p = newPin(); setG((x) => ({ ...x, pin: p })); };
   const addWithCode = async () => {
     const n = checkName(g.fullName);
     if (!n.ok) return notify(n.error);
-    const e = checkEmail(g.email);
+    if (!g.username.trim()) return notify('Enter a username: it is their sign-in name.');
+    const e = g.email.trim() ? checkEmail(g.email) : { ok: true as const, email: '' };
     if (!e.ok) return notify(e.error);
+    if (isClient && !g.projectId) return notify('Choose the project this client may see.');
+    if ((isClient || g.pin) && !/^\d{6}$/.test(g.pin)) return notify('The passcode is 6 digits. Type one or press Generate.');
     try {
-      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: e.email, projectId: g.projectId || undefined })) as unknown as { code: string; expiresAt: string };
-      setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
-      setG({ ...g, fullName: '', email: '' });
+      const r = (await api('/api/admin/users/create', { ...g, fullName: n.name, email: isClient ? undefined : e.email || undefined, projectId: g.projectId || undefined, pin: g.pin || undefined })) as unknown as { code?: string; expiresAt?: string };
+      if (r.code && r.expiresAt) setIssued({ code: r.code, expiresAt: r.expiresAt, who: n.name });
+      else setMadeLogin({ who: n.name, username: g.username.trim().toLowerCase(), pin: g.pin, client: isClient });
+      setG((x) => ({ ...x, fullName: '', username: '', email: '', pin: '' }));
       await reload();
     } catch (x) {
       notify((x as Error).message);
@@ -896,26 +1055,48 @@ function Invitations({ d, reload }: { d: D; reload: () => Promise<void> }) {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>Add a person with a one-time code</h2><span className="note">No e-mail needed: you hand them the code</span></div>
+        <div className="card-head"><h2>Add a person or client</h2><span className="note">Sign-in is username + 6-digit passcode. No e-mail needed.</span></div>
         {issued && <CodeReveal code={issued.code} expiresAt={issued.expiresAt} who={issued.who} onClose={() => setIssued(null)} />}
+        {madeLogin && (
+          <div className="banner" role="status" style={{ display: 'grid', gap: 6 }}>
+            <div><b>{madeLogin.client ? 'Client login' : 'Account'} ready for {madeLogin.who}.</b> Username <code>{madeLogin.username}</code>, passcode <code style={{ letterSpacing: '.1em' }}>{madeLogin.pin}</code>{' '}
+              <button className="btn btn-sm" onClick={() => setMadeLogin(null)}>Done</button></div>
+            {madeLogin.email && <div><a className="btn btn-sm" href={`mailto:${madeLogin.email}?subject=${encodeURIComponent('Your NEAS sign-in')}&body=${encodeURIComponent(`Hello ${madeLogin.who},\n\nSign in at ${window.location.origin}/login\nUsername: ${madeLogin.username}\nPasscode: ${madeLogin.pin}\n`)}`}>E-mail these details to {madeLogin.email}</a></div>}
+            <div className="note">Shown only now (stored as a hash). Hand it over directly. They sign in on the normal sign-in page{madeLogin.client ? ' and see only what you approved for clients on that project' : ''}. After their first online sign-in on a device, that device also works offline.</div>
+          </div>
+        )}
         <div className="form-grid">
-          <label className="field">Full name<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
-          <label className="field">E-mail (their sign-in name)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>
-          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
-          <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option></select></label>
-          <label className="field">Code valid for<select className="input" value={g.hours} onChange={(e) => setG({ ...g, hours: Number(e.target.value) })}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>
+          <label className="field">Full name{isClient ? ' / company contact' : ''}<input className="input" value={g.fullName} onChange={(e) => setG({ ...g, fullName: e.target.value })} /></label>
+          <label className="field">Username<input className="input" autoCapitalize="none" spellCheck={false} placeholder="e.g. jancho.client" value={g.username} onChange={(e) => setG({ ...g, username: e.target.value })} /></label>
+          {!isClient && <label className="field">E-mail (optional)<input className="input" type="email" value={g.email} onChange={(e) => setG({ ...g, email: e.target.value })} /></label>}
+          <label className="field">Project<select className="input" value={g.projectId} onChange={(e) => setG({ ...g, projectId: e.target.value })}><option value="">{isClient ? 'Choose a project' : 'No project yet'}</option>{d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Role<select className="input" value={g.role} onChange={(e) => setG({ ...g, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
+          <label className="field">Passcode (6 digits){isClient ? '' : ' — or leave empty for a one-time code'}
+            <span style={{ display: 'flex', gap: 8 }}>
+              <input className="input" inputMode="numeric" maxLength={6} value={g.pin} onChange={(e) => setG({ ...g, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} style={{ letterSpacing: '0.3em' }} />
+              <button type="button" className="btn" onClick={generatePin}>Generate</button>
+            </span>
+          </label>
+          {!isClient && !g.pin && <label className="field">Code valid for<select className="input" value={g.hours} onChange={(e) => setG({ ...g, hours: Number(e.target.value) })}>{LIFETIMES.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>}
         </div>
-        <div className="form-actions"><button className="btn btn-primary" onClick={addWithCode}>Create account and code</button></div>
+        <div className="form-actions"><button className="btn btn-primary" onClick={addWithCode}>{isClient ? 'Create client login' : g.pin ? 'Create account' : 'Create account and code'}</button></div>
       </section>
       <section className="card">
         <div className="card-head"><h2>Invite a person by e-mail</h2><span className="note">Pre-approved: they set their own password from a single-use link</span></div>
         <div className="form-grid">
           <label className="field">Full name<input className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></label>
           <label className="field">E-mail<input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-          <label className="field">Project<select className="input" value={f.projectId} onChange={(e) => setF({ ...f, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
-          <label className="field">Role<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option></select></label>
+          <label className="field">Project<select className="input" value={f.projectId} onChange={(e) => setF({ ...f, projectId: e.target.value })}><option value="">No project yet</option>{d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+          <label className="field">Role<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="employee">Employee / Technician / Inspector</option><option value="project_manager">Project Manager</option><option value="client">Client</option></select></label>
+          <label className="field">Passcode (6 digits){fClient ? '' : ' — or leave empty for a one-time code'}
+            <span style={{ display: 'flex', gap: 8 }}>
+              <input className="input" inputMode="numeric" maxLength={6} value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} style={{ letterSpacing: '0.3em' }} />
+              <button type="button" className="btn" onClick={() => { const p = newPin(); setF((x) => ({ ...x, pin: p })); }}>Generate</button>
+            </span>
+          </label>
+          {f.pin && <label className="field">Username<input className="input" autoCapitalize="none" spellCheck={false} placeholder={f.email.split('@')[0] || 'e.g. jancho.client'} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></label>}
         </div>
-        <div className="form-actions"><button className="btn btn-primary" onClick={send}>Send invitation</button></div>
+        <div className="form-actions"><button className="btn btn-primary" onClick={send}>{f.pin ? (fClient ? 'Create client login' : 'Create account') : 'Send invitation'}</button></div>
       </section>
       <section className="card">
         <div className="card-head"><h2>Invitations</h2></div>
@@ -967,11 +1148,22 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   const create = async (rotate: boolean) => {
     if (!p) return;
-    if (rotate && !(await askConfirm('Rotate the passcode? All current client passcodes and sessions for this project stop working.'))) return;
+    if (rotate && !(await askConfirm('Rotate the project passcode? All shared project passcodes and their sessions stop working. Client username logins keep working.'))) return;
     const expires = days ? new Date(Date.now() + Number(days) * 864e5).toISOString() : null;
     const { data, error } = await withPin(() => sb().rpc('admin_create_client_passcode', { p_project: p.id, p_label: label, p_expires_at: expires, p_revoke_existing: rotate, p_one_time: oneTime }));
     if (error) return notify(error.message);
     setShown(String(data));
+    await reload();
+  };
+  // a client username login: set a new 6-digit passcode (also restores a revoked login)
+  const [resetShown, setResetShown] = useState<{ username: string; pin: string } | null>(null);
+  const resetLogin = async (c: Cred) => {
+    if (!(await askConfirm(`Give @${c.username} a new 6-digit passcode${c.revoked_at ? ' and restore the login' : ''}? The old passcode stops working.`, { danger: false }))) return;
+    let pin = '';
+    while (!pin || new Set(pin).size === 1 || '0123456789'.includes(pin) || '9876543210'.includes(pin)) pin = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+    const { error } = await withPin(() => sb().rpc('admin_reset_client_login', { p_credential: c.id, p_passcode: pin }));
+    if (error) return notify(error.message);
+    setResetShown({ username: c.username!, pin });
     await reload();
   };
   const revoke = async (c: Cred) => {
@@ -1017,16 +1209,26 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
           <p className="note" style={{ marginTop: 0 }}>With a one-time passcode the client signs in once; the portal then stays open on that device for the session length below and keeps an offline copy.</p>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={() => create(false)}>Generate passcode</button>
-            <button className="btn" onClick={() => create(true)}>Rotate (revoke all and issue new)</button>
+            <button className="btn" onClick={() => create(true)}>Rotate project passcode (revoke old ones, issue new)</button>
           </div>
+          {resetShown && (
+            <div className="banner" role="status" style={{ marginTop: 10 }}>
+              <b>New passcode for @{resetShown.username}: </b><code style={{ fontSize: 18, letterSpacing: '.15em' }}>{resetShown.pin}</code>{' '}
+              <button className="btn btn-sm" onClick={() => setResetShown(null)}>Done</button>
+              <div className="note">Shown only now. The client signs in on the normal sign-in page with the username and this passcode.</div>
+            </div>
+          )}
           <table className="tbl" style={{ marginTop: 12 }}>
             <thead><tr><th>Label</th><th>Type</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th /></tr></thead>
             <tbody>
               {creds.map((c) => {
                 const st = c.revoked_at ? 'revoked' : c.expires_at && c.expires_at < new Date().toISOString() ? 'expired' : c.max_uses && c.use_count >= c.max_uses ? 'used' : 'active';
                 return (
-                  <tr key={c.id}><td>{c.label}</td><td className="note">{c.max_uses === 1 ? 'One-time' : 'Reusable'}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
-                    <td>{st === 'active' && <button className="btn btn-sm btn-danger" onClick={() => revoke(c)}>Revoke</button>}</td></tr>
+                  <tr key={c.id}><td>{c.label}</td><td className="note">{c.username ? <>Client login <b>@{c.username}</b></> : c.max_uses === 1 ? 'One-time passcode' : 'Reusable passcode'}</td><td className="note">{when(c.created_at)}</td><td className="note">{when(c.expires_at)}</td><td className="note">{when(c.last_used_at)}</td><td><Pill s={st} /></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {c.username && <button className="btn btn-sm" onClick={() => resetLogin(c)}>{st === 'revoked' ? 'Restore with new passcode' : 'New passcode'}</button>}{' '}
+                      {st === 'active' && <button className="btn btn-sm btn-danger" onClick={() => revoke(c)}>Revoke</button>}
+                    </td></tr>
                 );
               })}
               {!creds.length && <tr><td colSpan={7} className="note">No passcodes yet.</td></tr>}
@@ -1067,6 +1269,31 @@ function ClientAccess({ d, reload }: { d: D; reload: () => Promise<void> }) {
 
 const SYNC_TABLES = ['activities', 'project_reports', 'report_attachments', 'boq_lines', 'quotations'];
 
+// Automatic report backup: the Google Apps Script refreshes the reporting sheet from the app every 30 minutes and
+// saves it to the Drive folder as Excel and PDF (integrations/apps-script-cloud.gs, backupReports).
+const BACKUP_FOLDER = 'https://drive.google.com/drive/folders/1RRDCkWAz2sbDyVybzS0zq6dThWDxDqXW';
+function BackupCard() {
+  const [busy, setBusy] = useState(false);
+  const now = async () => {
+    setBusy(true);
+    try {
+      const r = (await api('/api/integrations/sheets', {})) as unknown as { message?: string };
+      notify(`${r.message ?? 'Google Sheet updated.'} The next 30-minute backup saves it to Drive as Excel and PDF.`);
+    } catch (e) { notify((e as Error).message); }
+    setBusy(false);
+  };
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Report backups</h2><span className="note">Every 30 minutes · Excel and PDF · kept 14 days</span></div>
+      <p className="note" style={{ marginTop: 0 }}>All projects, activities, field reports, review status, photos list and team are copied to the NEAS Google Sheet and saved to the backup folder in Google Drive as an Excel workbook and a PDF, every 30 minutes.</p>
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        <a className="btn btn-sm" href={BACKUP_FOLDER} target="_blank" rel="noreferrer">Open backup folder</a>
+        <button className="btn btn-sm" disabled={busy} onClick={() => void now()}>{busy ? 'Updating…' : 'Update the sheet now'}</button>
+      </div>
+    </section>
+  );
+}
+
 function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   const names = new Map(d.profiles.map((p) => [p.id, p.full_name || p.email]));
   // current server state of each record, so the administrator sees whether anything is actually lost
@@ -1097,6 +1324,16 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
     notify(error ? `Not resolved: ${error.message}` : data === 'already_applied' ? 'Resolved: the record was already deleted.' : data === 'applied_by_admin' ? 'Delete applied and recorded in the audit log.' : 'Marked resolved; recorded in the audit log.');
     await reload();
   };
+  // clear every listed problem at once, keeping the server versions (deletes are not applied)
+  const resolveAll = async () => {
+    if (!(await askConfirm(`Mark all ${d.ops.length} sync problem(s) as resolved, keeping the server versions? Nothing on the server changes; each is recorded in the audit log.`, { danger: false }))) return;
+    setBusy('all');
+    let ok = 0, failed = 0;
+    for (const o of d.ops) { const { error } = await sb().rpc('resolve_sync_operation', { p_op: o.op_id, p_action: 'dismiss', p_note: 'bulk' }); if (error) failed++; else ok++; }
+    setBusy(null);
+    notify(`Resolved ${ok} problem(s).${failed ? ` ${failed} could not be resolved.` : ''}`);
+    await reload();
+  };
   const runSheets = async () => {
     try {
       const r = await api('/api/integrations/sheets', {});
@@ -1108,8 +1345,9 @@ function SyncMonitor({ d, reload }: { d: D; reload: () => Promise<void> }) {
   };
   return (
     <>
+      <BackupCard />
       <section className="card">
-        <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span></div>
+        <div className="card-head"><h2>Offline sync problems</h2><span className="note">Conflicts and refused changes from field devices</span>{d.ops.length > 0 && <button className="btn btn-sm" disabled={!!busy} onClick={() => void resolveAll()}>{busy === 'all' ? 'Resolving…' : `Resolve all (${d.ops.length}) — keep server versions`}</button>}</div>
         {!d.ops.length ? <div className="empty">No sync problems.</div> : (
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>When</th><th>Person</th><th>Project</th><th>Record type</th><th>Change</th><th>Status</th><th>Reason</th><th>On the server now</th><th>Resolve</th></tr></thead>
@@ -1260,7 +1498,7 @@ function Recovery({ d }: { d: D }) {
           <label className="field">Project
             <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
               <option value="">All projects</option>
-              {d.projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+              {d.projects.filter((p) => !p.deleted_at).map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
             </select>
           </label>
         </div>

@@ -2,6 +2,7 @@
 // Same title page, photo grid and summary in every format; NEAS navy and gold.
 import { COMPANY, photoCaption, type Report, type ReportPhoto } from './evidenceReport';
 import { saveFile } from './fileio';
+import { docxCompanyFooter, drawCompanyFooter } from './companyFooter';
 
 export type ReportFormat = 'pdf' | 'pptx' | 'docx';
 export const MAP_LINK_TEXT = 'VIEW PHOTO LOCATION ON MAP';
@@ -116,6 +117,7 @@ async function toPdf(r: Report, images: Map<string, ReportImage | null>): Promis
     pdf.setTextColor(...rgb(MUTED)); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8);
     pdf.text(`${r.title} · ${r.reference}`, M, H - 20);
     pdf.text(`Page ${n}`, W - M, H - 20, { align: 'right' });
+    drawCompanyFooter(pdf, H - 30);
   };
   let page = 1;
 
@@ -331,7 +333,7 @@ async function toDocx(r: Report, images: Map<string, ReportImage | null>): Promi
     shading: { type: ShadingType.CLEAR, color: 'auto', fill: NAVY },
     children: [new TextRun({ text: ` ${COMPANY.toUpperCase()} `, bold: true, color: GOLD_SOFT, size: 18 }), new TextRun({ text: `  ${r.title} · ${r.project.code}`, color: 'FFFFFF', size: 16 })],
   })] });
-  const footer = new Footer({ children: [new Paragraph({ children: [new TextRun({ text: `${r.title} · ${r.reference}`, color: MUTED, size: 14 })] })] });
+  const footer = docxCompanyFooter(d, `${r.title} · ${r.reference}`);
 
   const title: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [
     new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: r.title.toUpperCase(), bold: true, color: GOLD, size: 22 })] }),

@@ -7,6 +7,7 @@ import type { ClientFile, ClientView } from '@/lib/cloud/clientView';
 import { fmtDate, fmtPct } from '@/lib/format';
 import EvidenceReportPanel from '@/components/EvidenceReportPanel';
 import ProjectReportPanel from '@/components/ProjectReportPanel';
+import { useRef } from 'react';
 import { coverPhotos } from '@/lib/coverPhotos';
 import { COMPANY } from '@/lib/evidenceReport';
 import LocationViewer, { type LocationInfo } from '@/components/LocationViewer';
@@ -14,10 +15,11 @@ import { gpsSourceLabel, mapUrl } from '@/lib/geo';
 import type { GpsSource, GpsStatus } from '@/lib/types';
 
 export default function ClientProjectView({ view, cachedAt, footer }: { view: ClientView; cachedAt?: string | null; footer?: ReactNode }) {
+  const fresh = useRef<{ at: number; p: Promise<unknown> } | null>(null);
   return (
     <>
       {cachedAt && <div className="banner">Offline copy saved {new Date(cachedAt).toLocaleString()}. It may be out of date. Reconnect to see the latest approved information.</div>}
-      <section className="card">
+      <section className="card" id="client-overview">
         <div className="eyebrow">{view.project.code}</div>
         <h1 style={{ margin: '4px 0' }}>{view.project.name}</h1>
         <div className="client-meta">
@@ -61,18 +63,18 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
       )}
 
       {view.reports && (
-        <section className="card">
-          <div className="card-head"><h2>Progress reports</h2></div>
-          {!view.reports.length ? <div className="empty">No approved reports yet.</div> : (
+        <section className="card" id="client-field-reports">
+          <div className="card-head"><h2>Field reports</h2><span className="note">Approved reports shared with you</span></div>
+          {!view.reports.length ? <div className="empty">No field reports have been shared yet.</div> : (
             <ReportGroups reports={view.reports} />
           )}
         </section>
       )}
 
       {view.files && (
-        <section className="card">
-          <div className="card-head"><h2>Photos and documents</h2></div>
-          {!view.files.length ? <div className="empty">Nothing approved for viewing yet.</div> : (
+        <section className="card" id="client-site-evidence">
+          <div className="card-head"><h2>Site evidence</h2><span className="note">Photos and documents shared with you</span></div>
+          {!view.files.length ? <div className="empty">No photos or documents have been shared yet.</div> : (
             <ClientGallery files={view.files} project={view.project} />
           )}
         </section>
@@ -98,9 +100,16 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
       <ProjectReportPanel
         note="Contains only information NEAS has approved for you."
         load={async (id) => {
-          const url = view.files?.find((f) => f.id === id)?.url;
-          const r = url ? await fetch(url) : null;
-          return r?.ok ? r.blob() : null;
+          const get = async (u?: string | null) => { const r = u ? await fetch(u).catch(() => null) : null; return r?.ok ? r.blob() : null; };
+          const first = await get(view.files?.find((f) => f.id === id)?.url);
+          if (first) return first;
+          // photo links expire after an hour: fetch fresh ones once and try again
+          if (!fresh.current || Date.now() - fresh.current.at > 50 * 60_000) {
+            fresh.current = { at: Date.now(), p: fetch(`/api/client/snapshot?code=${encodeURIComponent(view.project.code)}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null) };
+          }
+          const v = await fresh.current.p as { files?: { id: string; url: string | null }[] } | null;
+          if (!v) fresh.current = null; // try again for the next photo
+          return get(v?.files?.find((f) => f.id === id)?.url);
         }}
         input={(asOf) => {
           const files = (view.files ?? []).filter((f) => f.mime.startsWith('image/') && f.url);
@@ -125,6 +134,12 @@ export default function ClientProjectView({ view, cachedAt, footer }: { view: Cl
         }}
       />
       {footer}
+      {/* phones: jump between the parts of the page the project shares */}
+      <nav className="bottom-bar" aria-label="Quick navigation">
+        <a href="#client-overview"><span aria-hidden="true">▦</span><span>Board</span></a>
+        {view.reports && <a href="#client-field-reports"><span aria-hidden="true">✎</span><span>Field</span></a>}
+        {view.files && <a href="#client-site-evidence"><span aria-hidden="true">◉</span><span>Photos</span></a>}
+      </nav>
     </>
   );
 }

@@ -4,6 +4,7 @@ import type { ClientView } from '@/lib/cloud/clientView';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
 import ClientProjectView from '@/components/ClientProjectView';
 import AuthCard from '@/components/AuthCard';
+import ClientReportReviews from '@/components/ClientReportReviews';
 
 const cacheKey = (code: string) => `neas-client-cache:${code}`;
 
@@ -66,7 +67,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
 
   const logout = async () => {
     await fetch('/api/client/logout', { method: 'POST' }).catch(() => undefined);
-    try { localStorage.removeItem(cacheKey(code)); } catch { /* ignore */ }
+    try { localStorage.removeItem(cacheKey(code)); localStorage.removeItem('neas-offline-logins'); } catch { /* ignore */ }
     setView(null);
     setNeedLogin(true);
   };
@@ -78,6 +79,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
         {error && <p className="bad" role="alert">{error}</p>}
         <button className="btn btn-primary" disabled={busy || passcode.replace(/[^A-Za-z0-9]/g, '').length < 8}>{busy ? 'Checking…' : 'View project'}</button>
       </form>
+      <p className="note" style={{ margin: 0 }}>Have a username and a 6-digit passcode instead? <a className="linklike" href="/login">Sign in here</a>.</p>
     </AuthCard>
   );
 
@@ -94,6 +96,7 @@ export default function ClientPortal({ params }: { params: { code: string } }) {
       <main className="client-main">
         {!needLogin && !view && <div className="card note">{error ?? 'Loading…'}</div>}
 
+        {view && !cachedAt && <ClientReportReviews code={code} />}
         {view && (
           <ClientProjectView
             view={view}

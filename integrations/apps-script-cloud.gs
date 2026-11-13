@@ -90,3 +90,51 @@ function doPost(e) {
     lock.releaseLock();
   }
 }
+
+/**
+ * Automatic report backup every 30 minutes: refresh the sheet from the live app, then save it to Google Drive
+ * as an Excel workbook and a PDF, with the date and time in the file names.
+ *
+ * Setup (once)
+ * 1. Script properties: NEAS_APP_URL = https://neas-platform-preview.vercel.app and
+ *    NEAS_CRON_SECRET = the same value as the server's CRON_SECRET.
+ * 2. Run installBackupTrigger once from the editor and allow the Drive and external-request permissions.
+ * Backups older than KEEP_DAYS are moved to the Drive trash (still recoverable there for 30 days).
+ */
+const BACKUP_FOLDER_ID = '1RRDCkWAz2sbDyVybzS0zq6dThWDxDqXW';
+const KEEP_DAYS = 14;
+
+function installBackupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'backupReports') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('backupReports').timeBased().everyMinutes(30).create();
+  backupReports();
+}
+
+function backupReports() {
+  var props = PropertiesService.getScriptProperties();
+  var app = props.getProperty('NEAS_APP_URL');
+  var key = props.getProperty('NEAS_CRON_SECRET');
+  var note = 'sheet not refreshed';
+  if (app && key) {
+    // asks the app to push its latest data into this sheet (through doPost above)
+    var res = UrlFetchApp.fetch(app.replace(/\/$/, '') + '/api/integrations/sheets', { headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true });
+    note = res.getResponseCode() === 200 ? 'sheet refreshed' : 'refresh failed (' + res.getResponseCode() + '), saved the last copy';
+  }
+  SpreadsheetApp.flush();
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Manila', 'yyyy-MM-dd HHmm');
+  var folder = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+  var token = ScriptApp.getOAuthToken();
+  var base = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/export?';
+  var get = function (q) { return UrlFetchApp.fetch(base + q, { headers: { Authorization: 'Bearer ' + token } }).getBlob(); };
+  folder.createFile(get('format=xlsx').setName('NEAS reports backup ' + stamp + '.xlsx'));
+  folder.createFile(get('format=pdf&size=A4&portrait=false&fitw=true&gridlines=false&sheetnames=true&printtitle=true').setName('NEAS reports backup ' + stamp + '.pdf'));
+  var cutoff = Date.now() - KEEP_DAYS * 24 * 3600 * 1000;
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    if (/^NEAS reports backup /.test(f.getName()) && f.getDateCreated().getTime() < cutoff) f.setTrashed(true);
+  }
+  console.log('NEAS backup ' + stamp + ': ' + note);
+}

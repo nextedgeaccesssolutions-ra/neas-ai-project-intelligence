@@ -233,6 +233,13 @@ export async function resolveConflict(opId: string, choice: 'mine' | 'server'): 
 }
 
 /** Retry a rejected or waiting op now (e.g. after an administrator restored access). */
+/** A record changed on the server outside the outbox (e.g. a direct "show to client" update): queued edits based on the old version move to the new one. */
+export async function rebaseOps(entity: Entity, recordId: string, from: number | null, to: number): Promise<void> {
+  for (const o of await allOps()) {
+    if (o.entity === entity && o.record_id === recordId && (o.status === 'pending' || o.status === 'syncing') && (o.base_version === from || o.base_version === null)) await putOp({ ...o, base_version: to });
+  }
+}
+
 export async function retryOp(opId: string): Promise<void> {
   const op = (await allOps()).find((o) => o.op_id === opId);
   if (!op) return;
