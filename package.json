@@ -10,7 +10,7 @@
     "test:db": "bash scripts/db-test.sh"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.1",
+    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "docx": "^8.5.0",
     "exceljs": "^4.4.0",
