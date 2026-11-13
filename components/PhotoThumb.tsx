@@ -5,7 +5,7 @@ import { CLOUD, FILES_BUCKET } from '@/lib/cloud/env';
 import { supabaseBrowser } from '@/lib/cloud/browser';
 
 /** Fetches a synced photo from private storage (short-lived signed URL) and keeps a copy on this device. */
-async function fetchFromServer(id: string, storagePath: string): Promise<Blob | null> {
+export async function fetchFromServer(id: string, storagePath: string): Promise<Blob | null> {
   const sb = supabaseBrowser();
   if (!sb) return null;
   const { data, error } = await sb.storage.from(FILES_BUCKET).createSignedUrl(storagePath, 300);

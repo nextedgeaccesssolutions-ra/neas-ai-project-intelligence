@@ -1,4 +1,6 @@
-export type ProjectStatus = 'draft' | 'active' | 'on-hold' | 'completed';
+import type { WorkCalendar } from './schedule';
+
+export type ProjectStatus ='draft' | 'active' | 'on-hold' | 'completed';
 
 export interface Project {
   id: string;
@@ -9,6 +11,10 @@ export interface Project {
   site: string;
   status: ProjectStatus;
   contractValue: number | null; // PHP
+  /** client's reference / PO number, planned start and completion (cloud mode) */
+  referenceNo?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   createdAt: string;
 }
 
@@ -19,6 +25,53 @@ export interface Activity {
   start: string; // YYYY-MM-DD
   end: string; // YYYY-MM-DD, inclusive
   weight: number; // % of project
+  /** original approved dates; only a Super Admin can change them (rebaseline) */
+  baselineStart?: string | null;
+  baselineEnd?: string | null;
+  actualStart?: string | null;
+  /** set only when the scope is confirmed complete */
+  actualFinish?: string | null;
+  /** latest approved estimate of working days still needed */
+  remainingDays?: number | null;
+  /** approved scope quantity for measurable work (e.g. 1000 m²) */
+  quantityTotal?: number | null;
+  quantityUnit?: string;
+  delayReason?: string;
+  /** number of evidence photos this scope must have (optional) */
+  requiredPhotos?: number | null;
+}
+
+export type StopReason = 'weather' | 'wind' | 'client_instruction' | 'site_access' | 'safety' | 'equipment' | 'manpower' | 'material' | 'other';
+export const STOP_REASONS: { value: StopReason; label: string }[] = [
+  { value: 'weather', label: 'Rain or adverse weather' },
+  { value: 'wind', label: 'High winds / unsafe conditions' },
+  { value: 'client_instruction', label: 'Client instruction' },
+  { value: 'site_access', label: 'Site access restriction' },
+  { value: 'safety', label: 'Safety concern / permit suspended' },
+  { value: 'equipment', label: 'Equipment breakdown' },
+  { value: 'manpower', label: 'Manpower shortage' },
+  { value: 'material', label: 'Material delay' },
+  { value: 'other', label: 'Other (explain)' },
+];
+
+/** A STOP WORK event and, once confirmed, its RESTART. Never deleted or rewritten. */
+export type GpsSource = 'exif' | 'device' | 'manual';
+
+export interface ActivityStop {
+  id: string;
+  projectId: string;
+  activityId: string;
+  /** ISO timestamp */
+  stoppedAt: string;
+  reason: StopReason;
+  remarks: string;
+  supervisor: string;
+  affectsSchedule: boolean;
+  restartedAt: string | null;
+  restartSupervisor: string;
+  restartRemarks: string;
+  safetyCleared: boolean;
+  remainingDays: number | null;
 }
 
 export interface FieldReport {
@@ -27,6 +80,8 @@ export interface FieldReport {
   activityId: string;
   date: string; // YYYY-MM-DD
   actualPct: number; // cumulative % complete of the activity
+  /** verified cumulative quantity in the activity's unit (measurable scopes) */
+  completedQty?: number | null;
   notes: string;
   createdAt: string;
   /** cloud mode: review state */
@@ -103,6 +158,8 @@ export interface Evidence {
   editCount?: number;
   gps?: GpsFix | null;
   gpsStatus?: GpsStatus;
+  /** where the coordinates came from: the camera's own EXIF GPS, the device position at capture, or typed in */
+  gpsSource?: GpsSource | null;
   /** structural location, separate from GPS: facade, tower, turbine component… */
   workArea?: string;
   /** building / floor / elevation / grid */
@@ -124,6 +181,10 @@ export interface AppState {
   costSettings: Record<string, CostSettings>;
   quotations: Record<string, Quotation>;
   evidence: Evidence[];
+  /** per-project working calendars; a project without one uses DEFAULT_CALENDAR */
+  calendars?: Record<string, WorkCalendar>;
+  /** work stoppages and restarts */
+  stops?: ActivityStop[];
   savedAt: string | null;
 }
 

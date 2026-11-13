@@ -104,7 +104,7 @@ export default function ProjectRegister() {
                 {rows.map((p) => {
                   const acts = state.activities.filter((a) => a.projectId === p.id);
                   const reps = state.reports.filter((r) => r.projectId === p.id);
-                  const prog = projectProgress(acts, reps, today);
+                  const prog = projectProgress(acts, reps, today, (id) => state.calendars?.[id]);
                   const boq = boqTotals(state.boq.filter((b) => b.projectId === p.id), costSettingsFor(p.id));
                   const active = p.id === state.activeProjectId;
                   return (

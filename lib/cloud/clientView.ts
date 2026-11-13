@@ -11,7 +11,19 @@ export interface SnapshotInput {
   activities?: { id: string; name: string; start_date: string; end_date: string; weight: number; is_milestone: boolean }[];
   progress?: { activity_id: string; report_date: string; actual_pct: number }[];
   reports?: { report_date: string; report_type: string; activity: string | null; actual_pct: number | null; notes: string }[];
-  files?: { id: string; kind: string; caption: string; storage_path: string; mime_type: string; created_at: string }[];
+  files?: {
+    id: string; kind: string; caption: string; storage_path: string; mime_type: string; created_at: string;
+    captured_at?: string | null; photo_ref?: string | null; work_area?: string | null; pair_id?: string | null; activity?: string | null;
+    /** present only when the project lets clients see photo locations */
+    gps_lat?: number | string | null; gps_lng?: number | string | null; gps_accuracy_m?: number | string | null; gps_captured_at?: string | null;
+    gps_status?: string | null; gps_source?: string | null; location_detail?: string | null;
+  }[];
+}
+
+export interface ClientFile {
+  id: string; kind: string; caption: string; mime: string; url: string | null; createdAt: string;
+  capturedAt: string | null; ref: string; workArea: string; location: string; activity: string; pairId: string | null;
+  gps: { lat: number; lng: number; accuracy: number | null; at: string | null; status: string; source: string | null } | null;
 }
 
 export interface ClientView {
@@ -26,7 +38,7 @@ export interface ClientView {
   gantt?: { id: string; name: string; start: string; end: string; weight: number; actual: number }[];
   scurve?: ProgressPoint[];
   reports?: SnapshotInput['reports'];
-  files?: { id: string; kind: string; caption: string; mime: string; url: string | null; createdAt: string }[];
+  files?: ClientFile[];
 }
 
 export function buildClientView(s: SnapshotInput, asOf: string, signed: Record<string, string> = {}): ClientView {
@@ -46,7 +58,16 @@ export function buildClientView(s: SnapshotInput, asOf: string, signed: Record<s
   if (v.show_scurve) view.scurve = sCurve(acts, reps);
   if (v.show_reports) view.reports = s.reports ?? [];
   if (v.show_photos || v.show_documents)
-    view.files = (s.files ?? []).map((f) => ({ id: f.id, kind: f.kind, caption: f.caption, mime: f.mime_type, url: signed[f.storage_path] ?? null, createdAt: f.created_at }));
+    view.files = (s.files ?? []).map((f) => {
+      const lat = f.gps_lat == null ? null : Number(f.gps_lat), lng = f.gps_lng == null ? null : Number(f.gps_lng);
+      return {
+        id: f.id, kind: f.kind, caption: f.caption, mime: f.mime_type, url: signed[f.storage_path] ?? null, createdAt: f.created_at,
+        capturedAt: f.captured_at ?? null, ref: f.photo_ref ?? '', workArea: f.work_area ?? '', location: f.location_detail ?? '', activity: f.activity ?? '', pairId: f.pair_id ?? null,
+        gps: lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
+          ? { lat, lng, accuracy: f.gps_accuracy_m == null ? null : Number(f.gps_accuracy_m), at: f.gps_captured_at ?? null, status: f.gps_status ?? 'captured', source: f.gps_source ?? null }
+          : null,
+      };
+    });
   return view;
 }
 

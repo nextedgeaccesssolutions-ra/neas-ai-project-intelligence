@@ -1,5 +1,6 @@
 // Deterministic project-control calculations. No AI, no rounding until display.
 import type { Activity, BoqLine, CostSettings, FieldReport } from './types';
+import { actualPhysicalPct, calendarOf, plannedPctWorking, weightedProgress, type WorkCalendar } from './schedule';
 
 const DAY = 86_400_000;
 
@@ -17,16 +18,14 @@ export function todayLocal(now = new Date()): string {
 export const durationDays = (a: Pick<Activity, 'start' | 'end'>): number => Math.max(1, daysBetween(a.start, a.end) + 1);
 
 /**
- * Planned % complete of one activity at the END of `day`.
- * Work is spread evenly over the activity's calendar days, start and end inclusive.
+ * Planned % complete of one activity at the END of `day`, spread evenly over the project's
+ * working days (default calendar: every day works, so this equals the calendar-day rule).
  */
-export function plannedPct(a: Pick<Activity, 'start' | 'end'>, day: string): number {
-  const dur = durationDays(a);
-  const elapsed = Math.min(Math.max(daysBetween(a.start, day) + 1, 0), dur);
-  return (elapsed / dur) * 100;
+export function plannedPct(a: Pick<Activity, 'start' | 'end'>, day: string, cal?: WorkCalendar | null): number {
+  return plannedPctWorking(a, day, calendarOf(cal));
 }
 
-/** Latest field report for an activity on or before `day` (latest date, then latest saved). */
+/** Latest field report for an activity on or before `day`, whatever its review state. */
 export function latestReport(activityId: string, reports: FieldReport[], day = '9999-12-31'): FieldReport | null {
   let best: FieldReport | null = null;
   for (const r of reports) {
@@ -36,10 +35,12 @@ export function latestReport(activityId: string, reports: FieldReport[], day = '
   return best;
 }
 
-/** Latest reported cumulative % for an activity on or before `day` (0 if none). */
-export function actualPct(activityId: string, reports: FieldReport[], day: string): number {
-  const best = latestReport(activityId, reports, day);
-  return best ? clampPct(best.actualPct) : 0;
+/**
+ * Actual % for an activity on or before `day` (0 if none). With the activity given, measurable
+ * scopes use verified quantity ÷ approved quantity.
+ */
+export function actualPct(activityId: string, reports: FieldReport[], day: string, act?: Pick<Activity, 'id' | 'quantityTotal'>): number {
+  return actualPhysicalPct(act ?? { id: activityId }, reports, day);
 }
 
 export const clampPct = (x: number) => Math.min(100, Math.max(0, Number.isFinite(x) ? x : 0));
@@ -54,17 +55,16 @@ export interface ProgressPoint {
   actual: number;
 }
 
-/** Weighted project progress on `day`. Weights are normalised by their total. */
-export function projectProgress(acts: Activity[], reports: FieldReport[], day: string): ProgressPoint {
-  const w = totalWeight(acts);
-  if (!acts.length || w <= 0) return { day, planned: 0, actual: 0 };
-  let p = 0;
-  let a = 0;
-  for (const act of acts) {
-    p += act.weight * plannedPct(act, day);
-    a += act.weight * actualPct(act.id, reports, day);
-  }
-  return { day, planned: p / w, actual: a / w };
+export type CalendarFor = (projectId: string) => WorkCalendar | null | undefined;
+
+/** Weighted project progress on `day`: Σ(weight × %) ÷ Σ(weight), planned and actual alike. */
+export function projectProgress(acts: Activity[], reports: FieldReport[], day: string, calFor?: CalendarFor): ProgressPoint {
+  const r = weightedProgress(acts.map((act) => ({
+    weight: Number(act.weight) || 0,
+    planned: plannedPct(act, day, calFor?.(act.projectId)),
+    actual: actualPct(act.id, reports, day, act),
+  })));
+  return { day, ...r };
 }
 
 export function projectSpan(acts: Activity[]): { start: string; end: string } | null {
@@ -79,11 +79,11 @@ export function projectSpan(acts: Activity[]): { start: string; end: string } | 
 }
 
 /** Daily S-curve from the day before the first start to the last finish. */
-export function sCurve(acts: Activity[], reports: FieldReport[]): ProgressPoint[] {
+export function sCurve(acts: Activity[], reports: FieldReport[], calFor?: CalendarFor): ProgressPoint[] {
   const span = projectSpan(acts);
   if (!span) return [];
   const out: ProgressPoint[] = [];
-  for (let d = addDays(span.start, -1); d <= span.end; d = addDays(d, 1)) out.push(projectProgress(acts, reports, d));
+  for (let d = addDays(span.start, -1); d <= span.end; d = addDays(d, 1)) out.push(projectProgress(acts, reports, d, calFor));
   return out;
 }
 
