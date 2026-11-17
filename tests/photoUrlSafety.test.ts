@@ -3,11 +3,14 @@ import { directImageUrl, isPrivateIp } from '../lib/photoUrlSafety';
 
 describe('photo links fetched by the server', () => {
   it('refuses private, local and cloud-metadata addresses', () => {
-    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.5', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1'])
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.5', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', '::ffff:a9fe:a9fe'])
       expect(isPrivateIp(ip)).toBe(true);
   });
+  it('rejects malformed or non-IP addresses rather than treating them as public', () => {
+    for (const ip of ['', 'localhost', '999.1.1.1', '::ffff:zzzz:0001']) expect(isPrivateIp(ip)).toBe(true);
+  });
   it('allows public addresses', () => {
-    for (const ip of ['8.8.8.8', '142.250.72.14', '2606:4700::1111']) expect(isPrivateIp(ip)).toBe(false);
+    for (const ip of ['8.8.8.8', '142.250.72.14', '2606:4700::1111', '::ffff:0808:0808']) expect(isPrivateIp(ip)).toBe(false);
   });
   it('turns share links into file links', () => {
     expect(directImageUrl(new URL('https://drive.google.com/file/d/AbC123/view?usp=sharing')).toString()).toBe('https://drive.google.com/uc?export=download&id=AbC123');
