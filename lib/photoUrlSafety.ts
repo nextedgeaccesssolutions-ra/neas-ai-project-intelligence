@@ -42,7 +42,7 @@ export const isPrivateIp = (ip: string) => {
 
 // Google Drive and Dropbox share links point at a viewer page; ask for the file itself
 export const directImageUrl = (u: URL) => {
-  const drive = u.hostname === 'drive.google.com' && (u.pathname.match(/\\/file\\/d\\/([^/]+)/)?.[1] ?? u.searchParams.get('id'));
+  const drive = u.hostname === 'drive.google.com' && (u.pathname.match(/\/file\/d\/([^/]+)/)?.[1] ?? u.searchParams.get('id'));
   if (drive) return new URL(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(drive)}`);
   if (u.hostname.endsWith('dropbox.com')) { u.searchParams.set('dl', '1'); return u; }
   return u;
