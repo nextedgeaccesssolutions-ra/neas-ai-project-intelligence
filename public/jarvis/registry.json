@@ -1,0 +1,499 @@
+{
+  "schemaVersion": "1.0.0",
+  "product": "NEAS JARVIS",
+  "registryStatus": "blueprint",
+  "note": "Registry definitions only. A skill is not executable until its implementation, provider configuration, permissions, tests and approval gates are complete.",
+  "agents": [
+    {
+      "id": "orchestrator",
+      "name": "JARVIS Orchestrator",
+      "status": "planned",
+      "purpose": "Routes requests, plans work and coordinates specialist agents.",
+      "skills": [
+        "agents.route",
+        "agents.plan",
+        "agents.delegate",
+        "agents.review",
+        "skills.discover",
+        "skills.audit"
+      ]
+    },
+    {
+      "id": "strategy",
+      "name": "Strategist",
+      "status": "planned",
+      "purpose": "Business strategy, executive planning and decision support.",
+      "skills": [
+        "strategy.plan",
+        "market.research",
+        "business.kpi_dashboard"
+      ]
+    },
+    {
+      "id": "research",
+      "name": "Researcher",
+      "status": "planned",
+      "purpose": "Web research, source verification and market intelligence.",
+      "skills": [
+        "research.web",
+        "research.verify_sources",
+        "knowledge.search"
+      ]
+    },
+    {
+      "id": "finance",
+      "name": "Finance",
+      "status": "planned",
+      "purpose": "Project costing, budgets, cash flow and commercial analysis.",
+      "skills": [
+        "finance.budget",
+        "finance.cashflow",
+        "estimating.cost_build_up",
+        "estimating.bonds_insurance"
+      ]
+    },
+    {
+      "id": "sales",
+      "name": "Sales",
+      "status": "planned",
+      "purpose": "Lead management, client proposals and follow-up.",
+      "skills": [
+        "crm.lead_capture",
+        "crm.lead_score",
+        "crm.followup_plan",
+        "sales.proposal_builder"
+      ]
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing",
+      "status": "planned",
+      "purpose": "SEO, campaigns, social content and brand growth.",
+      "skills": [
+        "marketing.seo_audit",
+        "marketing.content_calendar",
+        "marketing.copywriter",
+        "marketing.social_repurpose"
+      ]
+    },
+    {
+      "id": "operations",
+      "name": "Operations",
+      "status": "planned",
+      "purpose": "Manpower, procurement, logistics and field delivery.",
+      "skills": [
+        "project.resource_plan",
+        "field.daily_report",
+        "field.timesheet",
+        "admin.procurement_request"
+      ]
+    },
+    {
+      "id": "engineering",
+      "name": "Engineering & HSE",
+      "status": "planned",
+      "purpose": "Technical workpacks, rope access planning and safety decision support.",
+      "skills": [
+        "ropeaccess.method_statement",
+        "ropeaccess.risk_assessment",
+        "ropeaccess.rescue_plan",
+        "hse.audit_checklist"
+      ]
+    },
+    {
+      "id": "documents",
+      "name": "Document & Knowledge",
+      "status": "planned",
+      "purpose": "Company knowledge retrieval and document production.",
+      "skills": [
+        "knowledge.ingest",
+        "knowledge.extract",
+        "knowledge.summarize",
+        "documents.draft",
+        "documents.review"
+      ]
+    },
+    {
+      "id": "creative",
+      "name": "Design & Communications",
+      "status": "planned",
+      "purpose": "Visual concepts, presentations and communications.",
+      "skills": [
+        "design.brief",
+        "documents.export",
+        "marketing.copywriter"
+      ]
+    },
+    {
+      "id": "project-controls",
+      "name": "Project Controls",
+      "status": "planned",
+      "purpose": "Schedules, progress, Gantt and S-curve reporting.",
+      "skills": [
+        "project.status",
+        "project.gantt",
+        "project.s_curve",
+        "project.risk_register"
+      ]
+    },
+    {
+      "id": "renewables",
+      "name": "Renewables Specialist",
+      "status": "planned",
+      "purpose": "Wind, blade, met mast and renewable project workpacks.",
+      "skills": [
+        "wind.blade_inspection",
+        "wind.blade_repair_scope",
+        "metmast.installation_plan",
+        "metmast.maintenance_plan"
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "id": "agents.route",
+      "name": "Route request",
+      "agent": "orchestrator",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Select the appropriate specialist agent from the request and permitted context."
+    },
+    {
+      "id": "agents.plan",
+      "name": "Plan work",
+      "agent": "orchestrator",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "none",
+      "description": "Break a request into steps, dependencies and acceptance criteria."
+    },
+    {
+      "id": "agents.delegate",
+      "name": "Delegate task",
+      "agent": "orchestrator",
+      "status": "planned",
+      "mode": "action",
+      "approval": "required",
+      "description": "Assign bounded subtasks to specialist agents."
+    },
+    {
+      "id": "agents.review",
+      "name": "Review agent output",
+      "agent": "orchestrator",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Check outputs for completeness, consistency and source support."
+    },
+    {
+      "id": "knowledge.search",
+      "name": "Search NEAS knowledge",
+      "agent": "research",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Retrieve approved company documents and knowledge records."
+    },
+    {
+      "id": "research.web",
+      "name": "Web research",
+      "agent": "research",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Research current external information and retain source links."
+    },
+    {
+      "id": "research.verify_sources",
+      "name": "Verify sources",
+      "agent": "research",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Cross-check claims against reliable sources and publication dates."
+    },
+    {
+      "id": "finance.budget",
+      "name": "Build budget",
+      "agent": "finance",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Prepare project or operating budgets from supplied assumptions."
+    },
+    {
+      "id": "finance.cashflow",
+      "name": "Cash-flow forecast",
+      "agent": "finance",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Model billing, payments, expenses and cash requirements."
+    },
+    {
+      "id": "estimating.cost_build_up",
+      "name": "Project cost build-up",
+      "agent": "finance",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Calculate labor, materials, equipment, logistics and commercial allowances."
+    },
+    {
+      "id": "estimating.bonds_insurance",
+      "name": "Bonds and insurance estimate",
+      "agent": "finance",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Model premiums using user-provided rates and contract values."
+    },
+    {
+      "id": "crm.lead_capture",
+      "name": "Capture sales lead",
+      "agent": "sales",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "none",
+      "description": "Structure prospect information and inquiry details."
+    },
+    {
+      "id": "crm.lead_score",
+      "name": "Score sales lead",
+      "agent": "sales",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "none",
+      "description": "Score leads using transparent, configurable criteria."
+    },
+    {
+      "id": "crm.followup_plan",
+      "name": "Plan client follow-up",
+      "agent": "sales",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Prepare follow-up actions and suggested messages."
+    },
+    {
+      "id": "sales.proposal_builder",
+      "name": "Build proposal",
+      "agent": "sales",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Draft a client proposal from approved scope and pricing."
+    },
+    {
+      "id": "marketing.seo_audit",
+      "name": "SEO audit",
+      "agent": "marketing",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Review metadata, headings, internal links and content opportunities."
+    },
+    {
+      "id": "marketing.content_calendar",
+      "name": "Content calendar",
+      "agent": "marketing",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Create a channel-specific publishing calendar."
+    },
+    {
+      "id": "marketing.copywriter",
+      "name": "Marketing copywriter",
+      "agent": "marketing",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Draft SEO pages, ads, captions and email campaigns."
+    },
+    {
+      "id": "project.status",
+      "name": "Project status summary",
+      "agent": "project-controls",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Summarize project progress, schedule, blockers and risks."
+    },
+    {
+      "id": "project.gantt",
+      "name": "Generate Gantt schedule",
+      "agent": "project-controls",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Prepare activity schedules and dependencies."
+    },
+    {
+      "id": "project.s_curve",
+      "name": "Calculate S-curve",
+      "agent": "project-controls",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Calculate planned versus actual progress from validated inputs."
+    },
+    {
+      "id": "field.daily_report",
+      "name": "Daily field report",
+      "agent": "operations",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Prepare daily progress, manpower, equipment and issue reports."
+    },
+    {
+      "id": "ropeaccess.method_statement",
+      "name": "Rope access method statement",
+      "agent": "engineering",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Draft a task-specific methodology for competent-person review."
+    },
+    {
+      "id": "ropeaccess.risk_assessment",
+      "name": "Rope access risk assessment",
+      "agent": "engineering",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Structure hazards, risk ratings and control measures for review."
+    },
+    {
+      "id": "ropeaccess.rescue_plan",
+      "name": "Rope access rescue plan",
+      "agent": "engineering",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Draft rescue scenarios, roles and equipment requirements for review."
+    },
+    {
+      "id": "hse.audit_checklist",
+      "name": "HSE audit checklist",
+      "agent": "engineering",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Prepare site audit and inspection checklists."
+    },
+    {
+      "id": "knowledge.ingest",
+      "name": "Ingest approved documents",
+      "agent": "documents",
+      "status": "planned",
+      "mode": "action",
+      "approval": "required",
+      "description": "Index approved documents with source and version metadata."
+    },
+    {
+      "id": "knowledge.extract",
+      "name": "Extract document data",
+      "agent": "documents",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Extract tables, clauses, quantities and metadata from supplied documents."
+    },
+    {
+      "id": "knowledge.summarize",
+      "name": "Summarize with citations",
+      "agent": "documents",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "none",
+      "description": "Summarize retrieved source material and cite its origin."
+    },
+    {
+      "id": "documents.draft",
+      "name": "Draft business document",
+      "agent": "documents",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Draft reports, letters, proposals and method statements."
+    },
+    {
+      "id": "documents.review",
+      "name": "Review document",
+      "agent": "documents",
+      "status": "planned",
+      "mode": "read",
+      "approval": "none",
+      "description": "Check document completeness and internal consistency."
+    },
+    {
+      "id": "wind.blade_inspection",
+      "name": "Wind blade inspection support",
+      "agent": "renewables",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Structure observations and defect logs from submitted inspection evidence."
+    },
+    {
+      "id": "wind.blade_repair_scope",
+      "name": "Wind blade repair scope",
+      "agent": "renewables",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Draft a repair scope from approved inspection findings."
+    },
+    {
+      "id": "metmast.installation_plan",
+      "name": "Met mast installation plan",
+      "agent": "renewables",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "competent_person",
+      "description": "Prepare civil, erection and commissioning work planning."
+    },
+    {
+      "id": "metmast.maintenance_plan",
+      "name": "Met mast maintenance plan",
+      "agent": "renewables",
+      "status": "planned",
+      "mode": "draft",
+      "approval": "human_review",
+      "description": "Schedule inspection and preventive maintenance activities."
+    }
+  ],
+  "governance": {
+    "defaultSkillStatus": "planned",
+    "secretHandling": "Provider keys must remain server-side; never place secrets in browser assets.",
+    "approvalRequiredFor": [
+      "external_messages",
+      "financial_commitments",
+      "record_mutations",
+      "scheduled_automation",
+      "production_deployment"
+    ],
+    "competentPersonReviewFor": [
+      "rope_access",
+      "rescue",
+      "engineering",
+      "HSE",
+      "inspection_decisions"
+    ],
+    "audit": [
+      "request_id",
+      "user_id",
+      "agent_id",
+      "skill_id",
+      "input_summary",
+      "permission_decision",
+      "approval_id",
+      "result_status",
+      "timestamp"
+    ],
+    "privacy": "Request explicit consent before microphone capture or retention of voice transcripts. Apply role and project access controls to retrieved records."
+  }
+}
