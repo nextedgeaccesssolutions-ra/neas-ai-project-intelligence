@@ -18,11 +18,11 @@ export const POST = handle(async (req, { params }) => {
   if (error) throw new HttpError(400, error.message);
   // silent: the administrator will hand over a one-time code instead of an e-mailed link
   if (body.action === 'approve' && !body.silent) {
-    const { data: p } = await sb.from('profiles').select('email').eq('id', params.id).single();
+    const { data: p } = await sb.from('profiles').select('email').eq('id', id).single();
     if (p?.email) {
       const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
       await anon.auth.resetPasswordForEmail(p.email, { redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password` });
-      await supabaseService().from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', params.id);
+      await supabaseService().from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', id);
     }
   }
   return Response.json({ ok: true });
