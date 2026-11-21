@@ -29,7 +29,7 @@ export class HttpError extends Error {
 }
 
 /** Supabase client acting as the signed-in user (RLS applies). */
-export function supabaseAsUser(): SupabaseClient {
+export async function supabaseAsUser(): Promise<SupabaseClient> {
   const store = await cookies();
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     db: { schema: DB_SCHEMA },
@@ -54,7 +54,7 @@ export function supabaseService(): SupabaseClient {
 
 /** The signed-in, active user, or a 401/403. Authorization itself is enforced again by RLS. */
 export async function requireUser() {
-  const sb = supabaseAsUser();
+  const sb = await supabaseAsUser();
   const { data, error } = await sb.auth.getUser();
   if (error || !data.user) throw new HttpError(401, 'Sign in required');
   const { data: active } = await sb.rpc('is_active_user');
