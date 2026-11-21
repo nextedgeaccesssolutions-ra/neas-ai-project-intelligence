@@ -30,7 +30,7 @@ export class HttpError extends Error {
 
 /** Supabase client acting as the signed-in user (RLS applies). */
 export function supabaseAsUser(): SupabaseClient {
-  const store = cookies();
+  const store = await cookies();
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     db: { schema: DB_SCHEMA },
     cookies: {
