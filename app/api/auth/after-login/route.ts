@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 // Records the sign-in time and an audit entry. Called by the app right after a successful login.
 export const POST = handle(async (req) => {
   assertSameOrigin(req);
-  const sb = supabaseAsUser();
+  const sb = await supabaseAsUser();
   const { data } = await sb.auth.getUser();
   if (!data.user) throw new HttpError(401, 'Sign in required');
   const svc = supabaseService();
