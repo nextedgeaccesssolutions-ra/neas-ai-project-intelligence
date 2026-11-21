@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: neas-project-intelligence-ci-${{ github.ref }}
@@ -21,13 +21,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - name: Install dependencies
+      - name: Regenerate lockfile from declared dependencies
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Install locked dependencies
         run: npm ci
       - name: Unit tests
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Commit regenerated lockfile on the isolated repair branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/codex/repo-health-2026-11-21'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: align npm lockfile with Node type dependency"
+            git push
+          fi
