@@ -29,13 +29,13 @@ export class HttpError extends Error {
 }
 
 /** Supabase client acting as the signed-in user (RLS applies). */
-export function supabaseAsUser(): SupabaseClient {
-  const store = cookies();
+export async function supabaseAsUser(): Promise<SupabaseClient> {
+  const store = await cookies();
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     db: { schema: DB_SCHEMA },
     cookies: {
       getAll: () => store.getAll(),
-      setAll: (list) => {
+      setAll: (list: Array<{ name: string; value: string; options?: any }>) => {
         try {
           list.forEach(({ name, value, options }) => store.set(name, value, options));
         } catch {
@@ -54,7 +54,7 @@ export function supabaseService(): SupabaseClient {
 
 /** The signed-in, active user, or a 401/403. Authorization itself is enforced again by RLS. */
 export async function requireUser() {
-  const sb = supabaseAsUser();
+  const sb = await supabaseAsUser();
   const { data, error } = await sb.auth.getUser();
   if (error || !data.user) throw new HttpError(401, 'Sign in required');
   const { data: active } = await sb.rpc('is_active_user');
@@ -82,8 +82,10 @@ export function appUrl(req: Request): string {
 }
 
 /** Uniform JSON responses; internal error details are never sent to the browser. */
-export function handle(fn: (req: Request, ctx: { params: Record<string, string> }) => Promise<Response>) {
-  return async (req: Request, ctx: { params: Record<string, string> }) => {
+type RouteContext = { params: Promise<object> };
+
+export function handle(fn: (req: Request, ctx: RouteContext) => Promise<Response>) {
+  return async (req: Request, ctx: RouteContext) => {
     try {
       return await fn(req, ctx);
     } catch (e) {
