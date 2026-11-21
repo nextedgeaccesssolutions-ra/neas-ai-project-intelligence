@@ -27,7 +27,9 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install locked dependencies
-        run: npm ci
+        # Current lockfile resolves optional peer dependencies inconsistently with Vite 8.
+        # Keep CI unblocked while the @types/node lockfile upgrade is prepared.
+        run: npm ci --legacy-peer-deps
       - name: Unit tests
         run: npm test
       - name: TypeScript validation
