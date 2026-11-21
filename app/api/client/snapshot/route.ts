@@ -8,13 +8,14 @@ export const dynamic = 'force-dynamic';
 
 export const GET = handle(async (req) => {
   const code = normaliseProjectCode(new URL(req.url).searchParams.get('code') ?? '');
-  const raw = cookies().get('neas_client')?.value ?? '';
+  const cookieStore = await cookies();
+  const raw = cookieStore.get('neas_client')?.value ?? '';
   const [cookieCode, token] = raw.split('.');
   if (!token || cookieCode !== code) throw new HttpError(401, 'Enter the passcode to view this project.');
   const svc = supabaseService();
   const { data, error } = await svc.rpc('client_snapshot', { p_token: token });
   if (error || !data) {
-    cookies().delete('neas_client');
+    cookieStore.delete('neas_client');
     throw new HttpError(401, 'Your viewing session has ended. Enter the passcode again.');
   }
   const snap = data as SnapshotInput;
