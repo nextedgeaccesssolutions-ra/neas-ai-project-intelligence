@@ -35,7 +35,7 @@ export async function supabaseAsUser(): Promise<SupabaseClient> {
     db: { schema: DB_SCHEMA },
     cookies: {
       getAll: () => store.getAll(),
-      setAll: (list) => {
+      setAll: (list: { name: string; value: string; options?: Parameters<typeof store.set>[2] }[]) => {
         try {
           list.forEach(({ name, value, options }) => store.set(name, value, options));
         } catch {
