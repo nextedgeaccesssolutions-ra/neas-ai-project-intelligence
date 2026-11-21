@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: "22.12.0"
       - name: Install locked dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm ci
       - name: Run unit tests
         run: npm test
       - name: Build Next.js application
