@@ -25,7 +25,8 @@ export const POST = handle(async (req) => {
     const throttled = row?.error?.startsWith('Too many');
     throw new HttpError(throttled ? 429 : 401, row?.error ?? 'Invalid project code or passcode');
   }
-  cookies().set(CLIENT_COOKIE, `${code}.${row.session_token}`, {
+  const cookieStore = await cookies();
+  cookieStore.set(CLIENT_COOKIE, `${code}.${row.session_token}`, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
