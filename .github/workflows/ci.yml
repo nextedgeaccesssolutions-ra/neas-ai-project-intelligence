@@ -1,4 +1,5 @@
 name: NEAS Project Intelligence CI
+# Keep the isolated repair branch under continuous verification.
 
 on:
   push:
