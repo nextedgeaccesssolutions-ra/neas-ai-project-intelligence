@@ -26,8 +26,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install locked dependencies
-        run: npm ci
+      - name: Install locked dependencies (optional peer compatibility)
+        # docx 8 and Vitest 5 declare overlapping optional Node type peer ranges.
+        # Keep exact lockfile versions while allowing npm to resolve those optional peers.
+        run: npm ci --legacy-peer-deps
       - name: Unit tests
         run: npm test
       - name: TypeScript validation
