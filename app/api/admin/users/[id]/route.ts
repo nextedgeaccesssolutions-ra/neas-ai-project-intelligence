@@ -8,8 +8,9 @@ export const dynamic = 'force-dynamic';
 type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code';
 
 export const POST = handle(async (req, { params }) => {
+  const { id } = await params as { id: string };
   assertSameOrigin(req);
-  if (!UUID_RE.test(params.id)) throw new HttpError(400, 'Invalid user id');
+  if (!UUID_RE.test(id)) throw new HttpError(400, 'Invalid user id');
   const { sb, user } = await requireSuperAdmin();
   const body = await readJson<{ action: Action; reason?: string; hours?: number }>(req, 4096);
   const svc = supabaseService();
@@ -17,7 +18,7 @@ export const POST = handle(async (req, { params }) => {
 
   switch (body.action) {
     case 'suspend': {
-      const { error } = await sb.rpc('admin_set_user_status', { p_user: params.id, p_status: 'suspended', p_reason: reason });
+      const { error } = await sb.rpc('admin_set_user_status', { p_user: id, p_status: 'suspended', p_reason: reason });
       if (error) throw new HttpError(400, error.message);
       // RLS already denies data access; the ban also stops new sign-ins and token refresh.
       await svc.auth.admin.updateUserById(params.id, { ban_duration: '876000h' });
