@@ -1,0 +1,1024 @@
+diff --git a/.github/workflows/jekyll-docker.yml b/.github/workflows/ci.yml
+similarity index 55%
+rename from .github/workflows/jekyll-docker.yml
+rename to .github/workflows/ci.yml
+index d2aab7b..3e73c89 100644
+--- a/.github/workflows/jekyll-docker.yml
++++ b/.github/workflows/ci.yml
+@@ -2,33 +2,40 @@ name: NEAS Project Intelligence CI
+ 
+ on:
+   push:
+-    branches: ["main"]
++    branches:
++      - main
+   pull_request:
+-    branches: ["main"]
++    branches:
++      - main
+   workflow_dispatch:
+ 
+ permissions:
+   contents: read
+ 
+ concurrency:
+-  group: neas-project-ci-${{ github.workflow }}-${{ github.ref }}
++  group: neas-project-intelligence-ci-${{ github.workflow }}-${{ github.ref }}
+   cancel-in-progress: true
+ 
+ jobs:
+   verify:
+-    name: Unit tests and production build
++    name: Verify (Node.js 22)
+     runs-on: ubuntu-latest
+-    timeout-minutes: 25
++    timeout-minutes: 20
+     steps:
+-      - name: Checkout
++      - name: Check out source
+         uses: actions/checkout@v4
+-      - name: Set up Node.js
++
++      - name: Set up Node.js 22
+         uses: actions/setup-node@v4
+         with:
+-          node-version: "22.12.0"
++          node-version: 22
++          cache: npm
++
+       - name: Install locked dependencies
+         run: npm ci
++
+       - name: Run unit tests
+         run: npm test
+-      - name: Build Next.js application
++
++      - name: Build production application
+         run: npm run build
+diff --git a/app/api/admin/registrations/[id]/route.ts b/app/api/admin/registrations/[id]/route.ts
+index a0188e9..f98871a 100644
+--- a/app/api/admin/registrations/[id]/route.ts
++++ b/app/api/admin/registrations/[id]/route.ts
+@@ -8,20 +8,21 @@ export const dynamic = 'force-dynamic';
+ // Approve or reject a pending registration. On approval the user receives a single-use,
+ // time-limited link to set their own password (the administrator never sees or sets it).
+ export const POST = handle(async (req, { params }) => {
++  const { id } = await params as { id: string };
+   assertSameOrigin(req);
+-  if (!UUID_RE.test(params.id)) throw new HttpError(400, 'Invalid user id');
++  if (!UUID_RE.test(id)) throw new HttpError(400, 'Invalid user id');
+   const { sb } = await requireSuperAdmin();
+   const body = await readJson<{ action: 'approve' | 'reject'; reason?: string; silent?: boolean }>(req, 4096);
+   if (body.action !== 'approve' && body.action !== 'reject') throw new HttpError(400, 'Unknown action');
+-  const { error } = await sb.rpc('admin_review_registration', { p_user: params.id, p_approve: body.action === 'approve', p_reason: body.reason?.slice(0, 500) ?? null });
++  const { error } = await sb.rpc('admin_review_registration', { p_user: id, p_approve: body.action === 'approve', p_reason: body.reason?.slice(0, 500) ?? null });
+   if (error) throw new HttpError(400, error.message);
+   // silent: the administrator will hand over a one-time code instead of an e-mailed link
+   if (body.action === 'approve' && !body.silent) {
+-    const { data: p } = await sb.from('profiles').select('email').eq('id', params.id).single();
++    const { data: p } = await sb.from('profiles').select('email').eq('id', id).single();
+     if (p?.email) {
+       const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+       await anon.auth.resetPasswordForEmail(p.email, { redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password` });
+-      await supabaseService().from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', params.id);
++      await supabaseService().from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', id);
+     }
+   }
+   return Response.json({ ok: true });
+diff --git a/app/api/admin/users/[id]/route.ts b/app/api/admin/users/[id]/route.ts
+index e42a633..686846e 100644
+--- a/app/api/admin/users/[id]/route.ts
++++ b/app/api/admin/users/[id]/route.ts
+@@ -8,8 +8,9 @@ export const dynamic = 'force-dynamic';
+ type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code';
+ 
+ export const POST = handle(async (req, { params }) => {
++  const { id } = await params as { id: string };
+   assertSameOrigin(req);
+-  if (!UUID_RE.test(params.id)) throw new HttpError(400, 'Invalid user id');
++  if (!UUID_RE.test(id)) throw new HttpError(400, 'Invalid user id');
+   const { sb, user } = await requireSuperAdmin();
+   const body = await readJson<{ action: Action; reason?: string; hours?: number }>(req, 4096);
+   const svc = supabaseService();
+@@ -17,45 +18,73 @@ export const POST = handle(async (req, { params }) => {
+ 
+   switch (body.action) {
+     case 'suspend': {
+-      const { error } = await sb.rpc('admin_set_user_status', { p_user: params.id, p_status: 'suspended', p_reason: reason });
++      const { error } = await sb.rpc('admin_set_user_status', { p_user: id, p_status: 'suspended', p_reason: reason });
+       if (error) throw new HttpError(400, error.message);
+-      // RLS already denies data access; the ban also stops new sign-ins and token refresh.
+-      await svc.auth.admin.updateUserById(params.id, { ban_duration: '876000h' });
++      // RLS and active-user checks deny application access; the Auth ban also blocks new sign-ins
++      // and token refresh. Surface a partial failure instead of claiming the ban succeeded.
++      const { error: banError } = await svc.auth.admin.updateUserById(id, { ban_duration: '876000h' });
++      if (banError) {
++        console.error('[admin:suspend] Auth ban failed after database suspension:', banError.message);
++        throw new HttpError(502, 'The account is suspended in NEAS data access, but the sign-in ban did not complete. Contact the system administrator.');
++      }
+       break;
+     }
+     case 'reactivate': {
+-      const { error } = await sb.rpc('admin_set_user_status', { p_user: params.id, p_status: 'active', p_reason: reason });
++      const { error } = await sb.rpc('admin_set_user_status', { p_user: id, p_status: 'active', p_reason: reason });
+       if (error) throw new HttpError(400, error.message);
+-      await svc.auth.admin.updateUserById(params.id, { ban_duration: 'none' });
++      const { error: unbanError } = await svc.auth.admin.updateUserById(id, { ban_duration: 'none' });
++      if (unbanError) {
++        console.error('[admin:reactivate] Auth unban failed after database reactivation:', unbanError.message);
++        throw new HttpError(502, 'The account status was reactivated, but sign-in remains blocked. Contact the system administrator.');
++      }
+       break;
+     }
+     case 'reset_password': {
+-      const { data: p } = await sb.from('profiles').select('email').eq('id', params.id).single();
+-      if (!p?.email) throw new HttpError(404, 'User not found');
+-      const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+-      const { error } = await anon.auth.resetPasswordForEmail(p.email, { redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password` });
+-      if (error) throw new HttpError(429, 'Could not send the reset e-mail right now. Try again shortly.');
+-      await svc.from('profiles').update({ password_reset_requested_at: new Date().toISOString() }).eq('id', params.id);
+-      await svc.from('audit_logs').insert({ actor_id: user.id, action: 'account:password_reset_sent', target_type: 'profiles', target_id: params.id });
++      const { data: p, error: profileError } = await sb.from('profiles').select('email').eq('id', id).single();
++      if (profileError || !p?.email) throw new HttpError(404, 'User not found');
++      const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
++      const { error } = await anon.auth.resetPasswordForEmail(p.email, {
++        redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password`,
++      });
++      if (error) {
++        const rateLimited = error.status === 429 || /rate|limit|security purposes|after \d+ seconds/i.test(error.message);
++        throw new HttpError(rateLimited ? 429 : 502, rateLimited
++          ? 'The password reset e-mail limit has been reached. Wait before requesting another link.'
++          : 'The password reset e-mail could not be sent. Verify the Supabase Auth e-mail configuration and try again.');
++      }
++      const { error: updateError } = await svc.from('profiles')
++        .update({ password_reset_requested_at: new Date().toISOString() }).eq('id', id);
++      if (updateError) {
++        console.error('[admin:password-reset] request sent but profile timestamp failed:', updateError.message);
++      }
++      const { error: auditError } = await svc.from('audit_logs').insert({
++        actor_id: user.id,
++        action: 'account:password_reset_sent',
++        target_type: 'profiles',
++        target_id: id,
++      });
++      if (auditError) console.error('[admin:password-reset] audit log write failed:', auditError.message);
+       break;
+     }
+     case 'issue_code': {
+-      // one-time activation code, shown once to the admin; only its hash is stored
+       const hours = Math.min(720, Math.max(1, Math.round(Number(body.hours) || 72)));
+-      const { data, error } = await sb.rpc('admin_issue_setup_code', { p_user: params.id, p_hours: hours });
++      const { data, error } = await sb.rpc('admin_issue_setup_code', { p_user: id, p_hours: hours });
+       if (error) throw new HttpError(400, error.message);
+-      const row = (Array.isArray(data) ? data[0] : data) as { code: string; expires_at: string };
++      const row = (Array.isArray(data) ? data[0] : data) as { code?: string; expires_at?: string } | null;
++      if (!row?.code || !row.expires_at) throw new HttpError(500, 'The activation code could not be issued. Try again or contact the system administrator.');
+       return Response.json({ ok: true, code: row.code, expiresAt: row.expires_at });
+     }
+     case 'revoke_sessions': {
+-      // Deletes refresh sessions and makes already-issued access tokens useless at the database.
+-      const { error } = await sb.rpc('admin_revoke_sessions', { p_user: params.id, p_reason: reason });
++      const { error } = await sb.rpc('admin_revoke_sessions', { p_user: id, p_reason: reason });
+       if (error) throw new HttpError(400, error.message);
+       break;
+     }
+     case 'make_admin':
+     case 'make_staff': {
+-      const { error } = await sb.rpc('admin_set_global_role', { p_user: params.id, p_role: body.action === 'make_admin' ? 'super_admin' : 'staff' });
++      const { error } = await sb.rpc('admin_set_global_role', {
++        p_user: id,
++        p_role: body.action === 'make_admin' ? 'super_admin' : 'staff',
++      });
+       if (error) throw new HttpError(400, error.message);
+       break;
+     }
+diff --git a/app/api/admin/users/create/route.ts b/app/api/admin/users/create/route.ts
+index 346fd2c..0a0d935 100644
+--- a/app/api/admin/users/create/route.ts
++++ b/app/api/admin/users/create/route.ts
+@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
+ // given access to one project, and a one-time activation code is returned for the admin to hand over.
+ export const POST = handle(async (req) => {
+   assertSameOrigin(req);
+-  const { sb } = await requireSuperAdmin();
++  const { sb, user } = await requireSuperAdmin();
+   const body = await readJson<{ fullName?: string; email?: string; projectId?: string; role?: string; hours?: number }>(req, 4096);
+   const n = checkName(body.fullName ?? '');
+   if (!n.ok) throw new HttpError(400, n.error);
+@@ -18,19 +18,70 @@ export const POST = handle(async (req) => {
+   const hours = Math.min(720, Math.max(1, Math.round(Number(body.hours) || 72)));
+ 
+   const svc = supabaseService();
+-  const { data: created, error } = await svc.auth.admin.createUser({ email: e.email, email_confirm: true, user_metadata: { full_name: n.name } });
+-  if (error || !created.user) throw new HttpError(409, 'Could not create the account. If this e-mail already has an account, issue a code from the User directory instead.');
++  const { data: created, error } = await svc.auth.admin.createUser({
++    email: e.email,
++    email_confirm: true,
++    user_metadata: { full_name: n.name },
++  });
++  if (error || !created.user) {
++    throw new HttpError(409, 'Could not create the account. If this e-mail already has an account, issue a code from the User directory instead.');
++  }
++
+   const id = created.user.id;
++  // Account provisioning spans Auth and several database operations. If any later step fails,
++  // remove the newly-created Auth identity so a half-provisioned account cannot be left behind.
++  try {
++    const { error: apErr } = await sb.rpc('admin_review_registration', {
++      p_user: id,
++      p_approve: true,
++      p_reason: null,
++    });
++    if (apErr && !/No pending registration/.test(apErr.message)) {
++      throw new HttpError(400, apErr.message);
++    }
++
++    if (body.projectId) {
++      const { error: membershipError } = await sb.from('project_memberships').upsert({
++        project_id: body.projectId,
++        user_id: id,
++        role,
++        can_approve_reports: role === 'project_manager',
++      });
++      if (membershipError) throw new HttpError(400, membershipError.message);
++    }
++
++    const { data: codeRows, error: codeError } = await sb.rpc('admin_issue_setup_code', {
++      p_user: id,
++      p_hours: hours,
++    });
++    if (codeError) throw new HttpError(400, codeError.message);
++
++    const row = (Array.isArray(codeRows) ? codeRows[0] : codeRows) as
++      | { code?: string; expires_at?: string }
++      | null;
++    if (!row?.code || !row.expires_at) {
++      throw new HttpError(500, 'The account was created but its activation code could not be issued.');
++    }
++
++    const { error: auditError } = await svc.from('audit_logs').insert({
++      actor_id: user.id,
++      action: 'account:admin_created',
++      target_type: 'profiles',
++      target_id: id,
++      details: { role, project_assigned: !!body.projectId },
++    });
++    if (auditError) {
++      // Do not discard a valid activation code because audit logging is temporarily unavailable.
++      console.error('[admin:create-user] audit log write failed:', auditError.message);
++    }
+ 
+-  // approval and code go through the admin's own session, so the database checks Super Admin rights and audits them
+-  const { error: apErr } = await sb.rpc('admin_review_registration', { p_user: id, p_approve: true, p_reason: null });
+-  if (apErr && !/No pending registration/.test(apErr.message)) throw new HttpError(400, apErr.message);
+-  if (body.projectId) {
+-    const { error: mErr } = await sb.from('project_memberships').upsert({ project_id: body.projectId, user_id: id, role, can_approve_reports: role === 'project_manager' });
+-    if (mErr) throw new HttpError(400, mErr.message);
++    return Response.json({ ok: true, userId: id, code: row.code, expiresAt: row.expires_at });
++  } catch (error) {
++    const { error: cleanupError } = await svc.auth.admin.deleteUser(id);
++    if (cleanupError) {
++      console.error('[admin:create-user] failed to roll back partially provisioned Auth user:', cleanupError.message);
++      throw new HttpError(500, 'Account setup did not complete and automatic cleanup failed. Contact the system administrator before retrying.');
++    }
++    throw error;
+   }
+-  const { data: codeRows, error: cErr } = await sb.rpc('admin_issue_setup_code', { p_user: id, p_hours: hours });
+-  if (cErr) throw new HttpError(400, cErr.message);
+-  const row = (Array.isArray(codeRows) ? codeRows[0] : codeRows) as { code: string; expires_at: string };
+-  return Response.json({ ok: true, userId: id, code: row.code, expiresAt: row.expires_at });
+ });
+diff --git a/docs/NEAS_AUTONOMOUS_RELEASE_POLICY.md b/docs/NEAS_AUTONOMOUS_RELEASE_POLICY.md
+new file mode 100644
+index 0000000..a134dbf
+--- /dev/null
++++ b/docs/NEAS_AUTONOMOUS_RELEASE_POLICY.md
+@@ -0,0 +1,49 @@
++# NEAS Shared Autonomous Repair and Release Policy
++
++Scope: NEAS APEX, NEAS corporate website / AI Workforce, and NEAS AI Project Intelligence.
++
++This is a repository policy specification. It becomes operational only when the required workflows, repository rules, Vercel settings, and successful test evidence are verified.
++
++## Release lifecycle
++
++1. Detect an issue through CI, scheduled health checks, deployment health, or an authorized work order.
++2. Reproduce and classify the issue. Do not guess at root cause.
++3. Create an isolated repair branch from the current default branch.
++4. Make the smallest reversible change; add a regression test.
++5. Run repository-native install, lint, typecheck, unit/integration tests, dependency/security audit, and production build where supported.
++6. Open or update a pull request with exact evidence and risk classification.
++7. Build and smoke-test a Vercel Preview deployment.
++8. Merge only when GitHub's configured required checks, reviews, branch rules, and merge queue/policy all pass. Never bypass a rule.
++9. Deploy production only through the configured protected production branch/release path.
++10. Run production smoke tests and monitor health. Roll back to the last known-good deployment on a confirmed regression, using the normal authorized rollback path.
++11. Record trigger, diagnosis, diff, test results, preview/deployment IDs, merge/deploy SHAs, rollback outcome, and cost.
++
++## Automation permissions
++
++- Automatically allowed when separately configured: read-only monitoring, diagnostics, issue creation, isolated repair branches, low-risk code fixes, tests, commits to repair branches, PR creation, preview deployments, and bounded retries.
++- Conditional: auto-merge and production deployment only after the repository's normal required checks/reviews/rules are satisfied and Vercel production branch/domain mapping is verified.
++- Never bypass: branch protection, required checks, security scans, review requirements, deployment protection, or authentication.
++- Never autonomously alter secrets, OAuth grants, identity/role permissions, production database data, billing limits, DNS, destructive schema migrations, customer communications, financial commitments, or HSE/engineering approvals.
++- Gmail and social-platform credentials, mailbox scopes, outbound sending and publishing permissions are governed separately from software deployment.
++
++## Failure handling
++
++- Maximum two automatic retries for transient CI/infrastructure failures; no retry loop for deterministic test/security failures.
++- Stop and open an issue when a repair is ambiguous, security-sensitive, destructive, changes auth/permissions, lacks a regression test, or fails twice.
++- Never auto-merge a stale, conflicting, non-mergeable, draft, or failing PR.
++- Never report a workflow as enabled until its schedule/trigger is installed and at least one successful run is observed.
++- Never report a production release as complete until the production deployment and post-deploy health checks are verified.
++
++## Required repository configuration audit
++
++Verify and record:
++- Default branch and branch protection/rulesets.
++- Required status checks and review requirements.
++- Whether auto-merge is enabled at repository level.
++- GitHub Actions permissions, workflow triggers, concurrency, secrets exposure and fork-PR safety.
++- Vercel project ID, linked Git repository, production branch, domains, deployment protection, environment scopes and rollback target.
++- Build/test/security checks and post-deploy smoke tests.
++
++## Completion states
++
++Use distinct states: NOT_STARTED, CONFIGURED, ENABLED, TESTED, VERIFIED, BLOCKED. A plan or document is not proof of an active automation.
+diff --git a/lib/cloud/server.ts b/lib/cloud/server.ts
+index 76ba41b..ea80bae 100644
+--- a/lib/cloud/server.ts
++++ b/lib/cloud/server.ts
+@@ -82,8 +82,10 @@ export function appUrl(req: Request): string {
+ }
+ 
+ /** Uniform JSON responses; internal error details are never sent to the browser. */
+-export function handle(fn: (req: Request, ctx: { params: any }) => Promise<Response>) {
+-  return async (req: Request, ctx: { params: any }) => {
++type RouteContext = { params: Promise<object> };
++
++export function handle(fn: (req: Request, ctx: RouteContext) => Promise<Response>) {
++  return async (req: Request, ctx: RouteContext) => {
+     try {
+       return await fn(req, ctx);
+     } catch (e) {
+diff --git a/package-lock.json b/package-lock.json
+index b057ed0..5706f7e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -22,12 +22,13 @@
+         "server-only": "^0.0.1"
+       },
+       "devDependencies": {
+-        "@types/node": "20.19.43",
++        "@types/node": "^22.20.5",
+         "@types/react": "18.3.3",
+         "@types/react-dom": "18.3.0",
+         "esbuild": "^0.28.2",
+         "fake-indexeddb": "^6.0.0",
+         "typescript": "5.5.4",
++        "vite": "^8.3.8",
+         "vitest": "5.1.0"
+       }
+     },
+@@ -47,7 +48,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "@emnapi/wasi-threads": "2.2.0",
+         "tslib": "^2.4.0"
+@@ -70,7 +70,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "tslib": "^2.4.0"
+       }
+@@ -670,9 +669,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -689,9 +685,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -708,9 +701,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -727,9 +717,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -746,9 +733,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -765,9 +749,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -784,9 +765,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -803,9 +781,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "LGPL-3.0-or-later",
+       "optional": true,
+       "os": [
+@@ -822,9 +797,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -847,9 +819,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -872,9 +841,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -897,9 +863,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -922,9 +885,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -947,9 +907,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -972,9 +929,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -997,9 +951,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "Apache-2.0",
+       "optional": true,
+       "os": [
+@@ -1142,7 +1093,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "@tybys/wasm-util": "^0.10.3"
+       },
+@@ -1203,9 +1153,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1222,9 +1169,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1241,9 +1185,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1260,9 +1201,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1310,7 +1248,6 @@
+       "integrity": "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "funding": {
+         "url": "https://github.com/sponsors/oxc-project"
+       }
+@@ -1328,7 +1265,6 @@
+       "os": [
+         "android"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1346,7 +1282,6 @@
+       "os": [
+         "android"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1364,7 +1299,6 @@
+       "os": [
+         "darwin"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1382,7 +1316,6 @@
+       "os": [
+         "darwin"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1400,7 +1333,6 @@
+       "os": [
+         "freebsd"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1418,7 +1350,6 @@
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1431,15 +1362,11 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1452,15 +1379,11 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1473,15 +1396,11 @@
+         "ppc64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1494,15 +1413,11 @@
+         "s390x"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1515,15 +1430,11 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1536,15 +1447,11 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1562,7 +1469,6 @@
+       "os": [
+         "openharmony"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1577,7 +1483,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "@emnapi/core": "2.0.0-beta.2",
+         "@emnapi/runtime": "2.0.0-beta.2",
+@@ -1594,7 +1499,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "tslib": "^2.4.0"
+       }
+@@ -1612,7 +1516,6 @@
+       "os": [
+         "win32"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1630,7 +1533,6 @@
+       "os": [
+         "win32"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^20.19.0 || >=22.12.0"
+       }
+@@ -1640,8 +1542,7 @@
+       "resolved": "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.1.1.tgz",
+       "integrity": "sha512-glFIJDvLNDtJhT9qrMFWLPbvS+skxgt4L0K8Ei2YtnhPysAJnsI7nyxSJxKj4ADeKX0OLjC4ntRkwpLOoS3rwA==",
+       "dev": true,
+-      "license": "MIT",
+-      "peer": true
++      "license": "MIT"
+     },
+     "node_modules/@supabase/auth-js": {
+       "version": "2.119.0",
+@@ -1764,7 +1665,6 @@
+       "dev": true,
+       "license": "MIT",
+       "optional": true,
+-      "peer": true,
+       "dependencies": {
+         "tslib": "^2.4.0"
+       }
+@@ -1801,9 +1701,10 @@
+       "license": "MIT"
+     },
+     "node_modules/@types/node": {
+-      "version": "20.19.43",
+-      "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.43.tgz",
+-      "integrity": "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==",
++      "version": "22.20.5",
++      "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.5.tgz",
++      "integrity": "sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==",
++      "dev": true,
+       "license": "MIT",
+       "dependencies": {
+         "undici-types": "~6.21.0"
+@@ -2561,6 +2462,15 @@
+         "node": ">=10"
+       }
+     },
++    "node_modules/docx/node_modules/@types/node": {
++      "version": "20.19.43",
++      "resolved": "https://registry.npmjs.org/@types/node/-/node-20.19.43.tgz",
++      "integrity": "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==",
++      "license": "MIT",
++      "dependencies": {
++        "undici-types": "~6.21.0"
++      }
++    },
+     "node_modules/docx/node_modules/nanoid": {
+       "version": "5.1.16",
+       "resolved": "https://registry.npmjs.org/nanoid/-/nanoid-5.1.16.tgz",
+@@ -2996,7 +2906,6 @@
+       "os": [
+         "darwin"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
+       }
+@@ -3753,7 +3662,6 @@
+       "integrity": "sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==",
+       "dev": true,
+       "license": "MPL-2.0",
+-      "peer": true,
+       "dependencies": {
+         "detect-libc": "^2.0.3"
+       },
+@@ -3791,7 +3699,6 @@
+       "os": [
+         "android"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3813,7 +3720,6 @@
+       "os": [
+         "darwin"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3835,7 +3741,6 @@
+       "os": [
+         "darwin"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3857,7 +3762,6 @@
+       "os": [
+         "freebsd"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3879,7 +3783,6 @@
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3896,15 +3799,11 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3921,15 +3820,11 @@
+         "arm64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3946,15 +3841,11 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -3971,15 +3862,11 @@
+         "x64"
+       ],
+       "dev": true,
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+         "linux"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -4001,7 +3888,6 @@
+       "os": [
+         "win32"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -4023,7 +3909,6 @@
+       "os": [
+         "win32"
+       ],
+-      "peer": true,
+       "engines": {
+         "node": ">= 12.0.0"
+       },
+@@ -4626,7 +4511,6 @@
+       "integrity": "sha512-QIiV1J9d0pzN4jeeTH4sjPy0AZ6cAy2cG0ExeoE1+U8Rvj+hR3gYkokx0YbeUNGlZqiQJJ2utcETe0oKXwzsuA==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "@oxc-project/types": "=0.156.0",
+         "@rolldown/pluginutils": "^1.0.0"
+@@ -5391,7 +5275,6 @@
+       "integrity": "sha512-LzOn3h9rG/0vhLdXrV4yJ4QFA9eEoqCl+Yx+kGJd7aB9w6nfNgVHKSYwLPZUHrz4ZGa+t+kXjV9itvcHDLQouA==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "lightningcss": "^1.33.0",
+         "picomatch": "^4.0.7",
+@@ -5484,7 +5367,6 @@
+         }
+       ],
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "nanoid": "^3.3.20",
+         "picocolors": "^1.1.1",
+diff --git a/package.json b/package.json
+index 2db219f..426cba5 100644
+--- a/package.json
++++ b/package.json
+@@ -24,12 +24,13 @@
+     "server-only": "^0.0.1"
+   },
+   "devDependencies": {
+-    "@types/node": "20.19.43",
++    "@types/node": "^22.20.5",
+     "@types/react": "18.3.3",
+     "@types/react-dom": "18.3.0",
+     "esbuild": "^0.28.2",
+     "fake-indexeddb": "^6.0.0",
+     "typescript": "5.5.4",
++    "vite": "^8.3.8",
+     "vitest": "5.1.0"
+   }
+ }
