@@ -37,13 +37,17 @@ export const POST = handle(async (req) => {
     if (error) throw new HttpError(503, 'Sign-in is unavailable right now. Try again shortly.');
     const row = (Array.isArray(data) ? data[0] : data) as { ok: boolean; error: string | null; session_token: string | null; project_code: string | null; expires_at: string | null } | undefined;
     ok = !!(row?.ok && row.session_token && row.project_code);
-    if (ok) cookies().set('neas_client', `${row!.project_code}.${row!.session_token}`, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/',
-      expires: row!.expires_at ? new Date(row!.expires_at) : undefined,
-    });
+    if (ok) {
+      const cookieStore = await cookies();
+      cookieStore.set('neas_client', `${row!.project_code}.${row!.session_token}`, {
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/',
+        expires: row!.expires_at ? new Date(row!.expires_at) : undefined,
+      });
+    }
     if (ok) redirect = `/client/${encodeURIComponent(row!.project_code!)}`;
   } else if (g.email && g.user_id) {
-    const { error } = await supabaseAsUser().auth.signInWithPassword({ email: g.email, password: pinPassword(g.user_id, pin) });
+    const authClient = await supabaseAsUser();
+    const { error } = await authClient.auth.signInWithPassword({ email: g.email, password: pinPassword(g.user_id, pin) });
     ok = !error;
   }
   const { data: outcome } = await svc.rpc('pin_login_finish', { p_username: username, p_ip_hash: ip, p_ok: ok });
