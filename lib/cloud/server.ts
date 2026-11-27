@@ -82,8 +82,10 @@ export function appUrl(req: Request): string {
 }
 
 /** Uniform JSON responses; internal error details are never sent to the browser. */
-export function handle(fn: (req: Request, ctx: { params: any }) => Promise<Response>) {
-  return async (req: Request, ctx: { params: any }) => {
+type RouteContext = { params: Promise<object> };
+
+export function handle(fn: (req: Request, ctx: RouteContext) => Promise<Response>) {
+  return async (req: Request, ctx: RouteContext) => {
     try {
       return await fn(req, ctx);
     } catch (e) {
