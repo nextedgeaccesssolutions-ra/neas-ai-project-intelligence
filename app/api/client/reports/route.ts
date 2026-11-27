@@ -11,15 +11,16 @@ export interface ClientReport {
   review: { name: string; decision: string; comment: string; at: string } | null;
 }
 
-function session(code: string) {
-  const [cookieCode, token] = (cookies().get('neas_client')?.value ?? '').split('.');
+async function session(code: string): Promise<string> {
+  const cookieStore = await cookies();
+  const [cookieCode, token] = (cookieStore.get('neas_client')?.value ?? '').split('.');
   if (!token || cookieCode !== normaliseProjectCode(code)) throw new HttpError(401, 'Your viewing session has ended. Sign in again.');
   return token;
 }
 
 // Reports sent to this client for review, each with a short-lived link to the exact file.
 export const GET = handle(async (req) => {
-  const token = session(new URL(req.url).searchParams.get('code') ?? '');
+  const token = await session(new URL(req.url).searchParams.get('code') ?? '');
   const svc = supabaseService();
   const { data, error } = await svc.rpc('client_reports', { p_token: token });
   if (error) throw new HttpError(401, 'Your viewing session has ended. Sign in again.');
@@ -32,7 +33,7 @@ export const GET = handle(async (req) => {
 export const POST = handle(async (req) => {
   assertSameOrigin(req);
   const b = await readJson<{ code?: string; exportId?: string; decision?: string; name?: string; comment?: string; sha256?: string }>(req, 8192);
-  const token = session(b.code ?? '');
+  const token = await session(b.code ?? '');
   if (!UUID_RE.test(b.exportId ?? '')) throw new HttpError(400, 'Invalid report');
   const { data, error } = await supabaseService().rpc('client_review_report', {
     p_token: token, p_export: b.exportId, p_decision: b.decision ?? '', p_name: (b.name ?? '').slice(0, 120), p_comment: (b.comment ?? '').slice(0, 2000), p_sha256: b.sha256 ?? '',
