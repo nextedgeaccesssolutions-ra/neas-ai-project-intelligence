@@ -47,7 +47,7 @@ export const POST = handle(async (req, { params }) => {
         redirectTo: `${appUrl(req)}/auth/callback?next=/auth/setup-password`,
       });
       if (error) {
-        const rateLimited = error.status === 429 || /rate|limit|security purposes|after \\d+ seconds/i.test(error.message);
+        const rateLimited = error.status === 429 || /rate|limit|security purposes|after \d+ seconds/i.test(error.message);
         throw new HttpError(rateLimited ? 429 : 502, rateLimited
           ? 'The password reset e-mail limit has been reached. Wait before requesting another link.'
           : 'The password reset e-mail could not be sent. Verify the Supabase Auth e-mail configuration and try again.');
