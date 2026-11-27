@@ -1,48 +1,41 @@
 name: NEAS Project Intelligence CI
-# Keep the isolated repair branch under continuous verification.
 
 on:
   push:
     branches:
-      - codex/repo-health-2026-11-21
+      - main
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: neas-project-intelligence-ci-${{ github.ref }}
+  group: neas-project-intelligence-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    name: Verify (Node.js 22)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          persist-credentials: true
-      - uses: actions/setup-node@v4
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Regenerate lockfile from declared dependencies
-        run: npm install --package-lock-only --ignore-scripts
-      - name: Commit regenerated lockfile to the isolated repair branch
-        if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/repo-health-2026-11-21'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: sync npm lockfile for Node type dependency"
-            git push origin HEAD:codex/repo-health-2026-11-21
-          fi
+          cache: npm
+
       - name: Install locked dependencies
         run: npm ci
-      - name: Unit tests
+
+      - name: Run unit tests
         run: npm test
-      - name: Production build
+
+      - name: Build production application
         run: npm run build
