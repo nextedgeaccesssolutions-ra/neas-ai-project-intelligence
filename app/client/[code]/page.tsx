@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import type { ClientView } from '@/lib/cloud/clientView';
 import { normaliseProjectCode } from '@/lib/cloud/validate';
 import ClientProjectView from '@/components/ClientProjectView';
@@ -9,8 +9,9 @@ import ClientReportReviews from '@/components/ClientReportReviews';
 const cacheKey = (code: string) => `neas-client-cache:${code}`;
 
 // Client viewer portal: passcode only, read-only, approved content only.
-export default function ClientPortal({ params }: { params: { code: string } }) {
-  const code = normaliseProjectCode(decodeURIComponent(params.code));
+export default function ClientPortal({ params }: { params: Promise<{ code: string }> }) {
+  const { code: rawCode } = use(params);
+  const code = normaliseProjectCode(decodeURIComponent(rawCode));
   const [view, setView] = useState<ClientView | null>(null);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
