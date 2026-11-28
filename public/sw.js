@@ -1,5 +1,6 @@
 // Minimal offline shell: network-first for pages, cache-first for static assets.
-const CACHE = 'neas-pc-v2';
+// v3: drops any error responses cached by v2 (a 404 during a deploy switch could stick)
+const CACHE = 'neas-pc-v3';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon.svg'])).then(() => self.skipWaiting()));
@@ -24,8 +25,11 @@ self.addEventListener('fetch', (e) => {
         (hit) =>
           hit ||
           fetch(req).then((res) => {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
+            // only keep real files: a 404 or 5xx (e.g. during a deploy) must not be served forever
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, copy));
+            }
             return res;
           }),
       ),
@@ -35,8 +39,10 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
         return res;
       })
       .catch(() => caches.match(req).then((hit) => hit || caches.match('/'))),

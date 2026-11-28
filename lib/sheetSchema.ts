@@ -3,7 +3,9 @@ import type { Activity, AppState, BoqCategory, BoqLine, CostSettings, Evidence, 
 import { BOQ_CATEGORIES, DEFAULT_COST_SETTINGS } from './types';
 import { durationDays, latestReport, lineAmount, plannedPct, todayLocal } from './calc';
 
-export const SHEET_ID = '19e14iR4X8ZLDARO2auYe0Cm4jPoZGUlGvC9O2f9EIAQ';
+// Device-mode builds only (artifact/demo): the spreadsheet the browser itself syncs with.
+// Cloud builds leave it empty; the server mirrors to the sheet and hands its link to Super Admins.
+export const SHEET_ID = process.env.NEXT_PUBLIC_DEVICE_SHEET_ID ?? '';
 export const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
 
 export type Cell = string | number | boolean;
@@ -136,19 +138,49 @@ export function rowsToGrid(tab: TabName, rows: Row[]): Cell[][] {
 }
 
 /** Map a header cell (key or label, any case) to a column key. */
+/** Header text compared loosely: no BOM or invisible characters, case, punctuation, units in brackets or spacing. */
+export const normHeader = (v: unknown) => s(v).replace(/[\uFEFF\u200B-\u200D\u00A0]/g, ' ').toLowerCase()
+  .replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9#%]+/g, ' ').trim();
+
+/** Other names people commonly give the same column (only for columns that exist in the table being imported). */
+const ALIASES: Record<string, string[]> = {
+  description: ['item description', 'work description', 'description of work', 'description of works', 'scope of work', 'scope of works', 'scope', 'particulars', 'details', 'product description', 'work item', 'item of work', 'items of work', 'line description'],
+  item: ['item no', 'item number', 'item #', 'no', 'no.', '#', 'ref', 'ref no', 'line no', 'item code', 'code'],
+  unit: ['uom', 'unit of measure', 'unit of measurement', 'units'],
+  qty: ['quantity', 'qty', 'quantities', 'no of units'],
+  unit_cost_php: ['unit cost', 'unit price', 'unit rate', 'rate', 'price', 'cost per unit', 'unit cost php'],
+  amount_php: ['amount', 'total', 'total amount', 'total cost', 'line total'],
+  category: ['type', 'cost type', 'cost category', 'group'],
+  notes: ['remarks', 'note', 'comments', 'comment'],
+};
+
 export function matchColumn(cols: Column[], header: unknown): string | null {
-  const h = s(header).trim().toLowerCase();
+  const h = normHeader(header);
   if (!h) return null;
-  const hit = cols.find((c) => c.key.toLowerCase() === h || c.label.toLowerCase() === h || c.label.toLowerCase().replace(/\s*\(.*\)$/, '') === h);
+  const hit = cols.find((c) => normHeader(c.key.replace(/_/g, ' ')) === h || normHeader(c.label) === h)
+    ?? cols.find((c) => (ALIASES[c.key] ?? []).some((a) => normHeader(a) === h));
   return hit ? hit.key : null;
 }
 
-/** 2D grid (first row headers) → rows keyed by column key; unknown columns dropped. */
+/** The header row: the first of the top rows that names the most known columns (a title row above it is skipped). */
+export function headerRowIndex(cols: Column[], grid: unknown[][]): number {
+  const hitsOf = (row: unknown[]) => new Set(row.map((h) => matchColumn(cols, h)).filter(Boolean)).size;
+  const top = grid.slice(0, 15).map(hitsOf);
+  const max = Math.max(0, ...top);
+  // the first row stays the header unless a lower row is clearly better (a title above the real headers)
+  if (top[0] >= 1 && top[0] >= max - 1) return 0;
+  return Math.max(0, top.indexOf(max));
+}
+
+/** 2D grid → rows keyed by column key; the header row is found automatically, unknown columns dropped. */
 export function gridToRows(cols: Column[], grid: unknown[][]): Row[] {
   if (!grid.length) return [];
-  const keys = grid[0].map((h) => matchColumn(cols, h));
+  const at = headerRowIndex(cols, grid);
+  const seen = new Set<string>();
+  // the first column with a given meaning wins; a second "Description" column is ignored rather than overwriting it
+  const keys = grid[at].map((h) => { const k = matchColumn(cols, h); if (!k || seen.has(k)) return null; seen.add(k); return k; });
   return grid
-    .slice(1)
+    .slice(at + 1)
     .filter((line) => line.some((v) => s(v).trim() !== ''))
     .map((line) => {
       const r: Row = {};
@@ -256,10 +288,16 @@ export function rowsToState(tabs: Partial<Record<TabName, Row[]>>, base: AppStat
   }
   const evidence = (tabs.Site_Evidence ?? [])
     .filter((r) => s(r.evidence_id))
-    .map((r) => ({ id: s(r.evidence_id), projectId: s(r.project_id).toUpperCase(), activityId: s(r.activity_id), kind: (['Before', 'During', 'After'].includes(s(r.kind)) ? s(r.kind) : 'During') as Evidence['kind'], caption: s(r.caption), takenAt: s(r.taken_at), bytes: Number(r.bytes) || 0 }));
+    .map((r) => ({ id: s(r.evidence_id), projectId: s(r.project_id).toUpperCase(), activityId: s(r.activity_id), kind: (['Before', 'During', 'After', 'Inspection', 'Safety', 'Defect'].includes(s(r.kind)) ? s(r.kind) : 'During') as Evidence['kind'], caption: s(r.caption), takenAt: s(r.taken_at), bytes: Number(r.bytes) || 0 }));
   return {
     ...base,
     activeProjectId: projects.some((p) => p.id === base.activeProjectId) ? base.activeProjectId : firstPid,
     projects, activities, reports, boq, costSettings, quotations, evidence,
   };
+}
+
+const OWN_LINK = /^=HYPERLINK\("https:\/\/www\.google\.com\/maps\?q=-?\d{1,2}\.\d{6},-?\d{1,3}\.\d{6}","VIEW LOCATION ON MAP"\)$/;
+/** Text that starts like a formula is stored with a leading apostrophe (shown as plain text). */
+export function safeCell(c: Cell): Cell {
+  return typeof c === 'string' && /^[=+\-@]/.test(c) && !OWN_LINK.test(c) ? `'${c}` : c;
 }

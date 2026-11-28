@@ -5,9 +5,12 @@ import DataIO, { asPlan } from '@/components/DataIO';
 import * as IO from '@/lib/moduleIO';
 import { useCanManage } from '@/components/RoleGate';
 import ProjectBar, { Loading, NoProject } from '@/components/ProjectBar';
+import { useOrgList } from '@/components/OrgList';
 import { useProjectData, useStore } from '@/lib/store';
 import { useQueryParam } from '@/lib/useQuery';
-import { durationDays, latestReport, plannedPct, todayLocal, totalWeight } from '@/lib/calc';
+import { latestReport, plannedPct, todayLocal, totalWeight } from '@/lib/calc';
+import { calendarOf, scopeMetrics } from '@/lib/schedule';
+import CalendarEditor from '@/components/CalendarEditor';
 import { fmtDate, fmtPct, fmtPP, uid } from '@/lib/format';
 import { askConfirm } from '@/components/Dialogs';
 import type { Activity, FieldReport } from '@/lib/types';
@@ -21,9 +24,25 @@ type Draft = {
   actual: string; // latest actual progress (%)
   actualDate: string; // date the progress applies to
   note: string;
+  actualStart: string;
+  actualFinish: string;
+  remaining: string;
+  qtyTotal: string;
+  qtyUnit: string;
+  delayReason: string;
+  requiredPhotos: string;
+  newStart: string;
+  newFinish: string;
 };
 
-const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '' });
+// common units for approved quantities; any other unit can still be typed
+const QTY_UNITS: [string, string][] = [
+  ['m²', 'square metres'], ['m', 'metres'], ['lm', 'linear metres'], ['m³', 'cubic metres'], ['ft²', 'square feet'], ['ft', 'feet'],
+  ['pcs', 'pieces'], ['nos', 'numbers'], ['units', 'units'], ['sets', 'sets'], ['lot', 'lot'], ['panels', 'panels'], ['windows', 'windows'],
+  ['drops', 'rope access drops'], ['floors', 'floors'], ['kg', 'kilograms'], ['t', 'tonnes'], ['L', 'litres'], ['days', 'man-days'], ['hrs', 'hours'], ['%', 'percent'],
+];
+
+const blank = (): Draft => ({ id: null, name: '', start: todayLocal(), end: todayLocal(), weight: '', actual: '0', actualDate: todayLocal(), note: '', actualStart: '', actualFinish: '', remaining: '', qtyTotal: '', qtyUnit: '', delayReason: '', requiredPhotos: '', newStart: '', newFinish: '' });
 
 const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
   const last = latestReport(a.id, reports);
@@ -36,14 +55,23 @@ const fromActivity = (a: Activity, reports: FieldReport[]): Draft => {
     actual: String(last?.actualPct ?? 0),
     actualDate: todayLocal(),
     note: '',
+    actualStart: a.actualStart ?? '',
+    actualFinish: a.actualFinish ?? '',
+    remaining: a.remainingDays == null ? '' : String(a.remainingDays),
+    qtyTotal: a.quantityTotal == null ? '' : String(a.quantityTotal),
+    qtyUnit: a.quantityUnit ?? '',
+    delayReason: a.delayReason ?? '',
+    requiredPhotos: a.requiredPhotos == null ? '' : String(a.requiredPhotos),
+    newStart: a.rescheduleStart ?? '', newFinish: a.rescheduleEnd ?? '',
   };
 };
+const optNum = (v: string) => (v.trim() === '' ? null : Number(v));
 
 const tone = (v: number) => (v >= 0 ? 'ok' : v > -10 ? 'warn' : 'bad');
 
 export default function ProjectManagement() {
-  const { ready, project, upsertActivity, deleteActivity, addReport, state, replaceAll } = useStore();
-  const { pid, activities, reports } = useProjectData();
+  const { ready, project, upsertActivity, deleteActivity, addReport, state, replaceAll, calendarFor } = useStore();
+  const { pid, activities, reports, stops } = useProjectData();
   const editParam = useQueryParam('edit');
   const canEdit = useCanManage();
   const [draft, setDraft] = useState<Draft>(blank);
@@ -56,6 +84,8 @@ export default function ProjectManagement() {
     if (a) setDraft(fromActivity(a, reports));
   }, [editParam, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const o = useOrgList({ list: 'activities', kind: 'activity', items: activities, id: (a) => a.id, project: (a) => a.projectId, noun: 'activity' });
+
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
 
@@ -66,7 +96,8 @@ export default function ProjectManagement() {
   const lastPct = last?.actualPct ?? 0;
   const actualNum = Number(draft.actual);
   const progressChanged = draft.actual.trim() !== '' && Number.isFinite(actualNum) && Math.abs(actualNum - lastPct) > 1e-9;
-  const plannedAtDate = draft.start && draft.end && draft.end >= draft.start ? plannedPct({ start: draft.start, end: draft.end }, draft.actualDate || todayLocal()) : 0;
+  const cal = calendarFor(pid);
+  const plannedAtDate = draft.start && draft.end && draft.end >= draft.start ? plannedPct({ start: draft.start, end: draft.end }, draft.actualDate || todayLocal(), cal) : 0;
 
   const startEdit = (a: Activity) => {
     setDraft(fromActivity(a, reports));
@@ -83,13 +114,34 @@ export default function ProjectManagement() {
     if (!Number.isFinite(w) || w <= 0 || w > 100) return setError('Weight must be more than 0 and at most 100.');
     if (draft.actual.trim() === '' || !Number.isFinite(actualNum) || actualNum < 0 || actualNum > 100)
       return setError('Latest actual progress must be a number from 0 to 100.');
+    const remaining = optNum(draft.remaining), qtyTotal = optNum(draft.qtyTotal);
+    if (remaining != null && (!Number.isFinite(remaining) || remaining < 0)) return setError('Remaining working days must be 0 or more.');
+    if (qtyTotal != null && (!Number.isFinite(qtyTotal) || qtyTotal <= 0)) return setError('Approved quantity must be more than 0.');
+    const reqPhotos = optNum(draft.requiredPhotos);
+    if (reqPhotos != null && (!Number.isInteger(reqPhotos) || reqPhotos < 0 || reqPhotos > 500)) return setError('Required photos must be a whole number from 0 to 500.');
+    if (draft.actualFinish && !draft.actualStart) return setError('Enter the actual start before the actual finish.');
+    if (draft.actualStart && draft.actualFinish && draft.actualFinish < draft.actualStart) return setError('Actual finish cannot be before the actual start.');
+    if (!!draft.newStart !== !!draft.newFinish) return setError('Enter both New start and New finish, or clear both.');
+    if (draft.newStart && draft.newFinish < draft.newStart) return setError('New finish cannot be before New start.');
+    if (draft.newStart && draft.newStart < draft.start) return setError('New start cannot be before the planned start. Move the New start later, or press “Clear reschedule”.');
+    if (draft.newStart && (draft.newStart !== (editing?.rescheduleStart ?? '') || draft.newFinish !== (editing?.rescheduleEnd ?? '')) && !draft.delayReason.trim())
+      return setError('Give a reason for the reschedule (e.g. weather, access, client instruction).');
+    if (editing && (draft.start !== editing.start || draft.end !== editing.end) && !draft.delayReason.trim())
+      return setError('Give a reason for changing the planned dates (e.g. weather, access, client instruction).');
     if (progressChanged && !draft.actualDate) return setError('Choose the date this progress applies to.');
     if (progressChanged && actualNum < lastPct) {
       const ok = await askConfirm(`Actual progress goes down from ${fmtPct(lastPct)} to ${fmtPct(actualNum)}. Record it anyway?`, { danger: false });
       if (!ok) return;
     }
 
-    const a: Activity = { id: draft.id ?? uid('act'), projectId: pid, name: draft.name.trim(), start: draft.start, end: draft.end, weight: w };
+    const a: Activity = {
+      ...editing, id: draft.id ?? uid('act'), projectId: pid, name: draft.name.trim(), start: draft.start, end: draft.end, weight: w,
+      // the original baseline is kept; a new activity takes its first planned dates as baseline
+      baselineStart: editing ? editing.baselineStart ?? editing.start : draft.start, baselineEnd: editing ? editing.baselineEnd ?? editing.end : draft.end,
+      actualStart: draft.actualStart || null, actualFinish: draft.actualFinish || null, remainingDays: remaining,
+      quantityTotal: qtyTotal, quantityUnit: draft.qtyUnit.trim(), delayReason: draft.delayReason.trim(), requiredPhotos: reqPhotos || null,
+      rescheduleStart: draft.newStart || null, rescheduleEnd: draft.newFinish || null,
+    };
     upsertActivity(a);
     // Progress is stored as a field report, the single source for actual % everywhere
     // (Overview KPIs, S-curve, Gantt, Field reports, Project register).
@@ -163,6 +215,55 @@ export default function ProjectManagement() {
             <input id="act-weight" className="input" type="number" min="0" max="100" step="0.1" value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: e.target.value })} />
           </label>
         </div>
+
+        <fieldset className="progress-box">
+          <legend>Schedule</legend>
+          <div className="form-grid">
+            <label className="field">
+              Actual start
+              <input id="act-actual-start" className="input" type="date" max={today} value={draft.actualStart} onChange={(e) => setDraft({ ...draft, actualStart: e.target.value })} />
+            </label>
+            <label className="field">
+              Actual finish
+              <input id="act-actual-finish" className="input" type="date" max={today} value={draft.actualFinish} onChange={(e) => setDraft({ ...draft, actualFinish: e.target.value })} />
+            </label>
+            <label className="field">
+              Remaining working days
+              <input id="act-remaining" className="input" type="number" min="0" step="0.5" value={draft.remaining} onChange={(e) => setDraft({ ...draft, remaining: e.target.value })} placeholder="estimate" />
+            </label>
+            <label className="field">
+              Approved quantity
+              <div className="pct-row">
+                <input id="act-qty" className="input" type="number" min="0" step="any" value={draft.qtyTotal} onChange={(e) => setDraft({ ...draft, qtyTotal: e.target.value })} placeholder="optional" />
+                <input id="act-qty-unit" className="input" style={{ maxWidth: 110 }} list="qty-units" value={draft.qtyUnit} onChange={(e) => setDraft({ ...draft, qtyUnit: e.target.value })} placeholder="m²" aria-label="Quantity unit" />
+                <datalist id="qty-units">{QTY_UNITS.map((u) => <option key={u[0]} value={u[0]}>{u[1]}</option>)}</datalist>
+              </div>
+            </label>
+            <label className="field">
+              Required evidence photos
+              <input id="act-req-photos" className="input" type="number" min="0" max="500" step="1" value={draft.requiredPhotos} onChange={(e) => setDraft({ ...draft, requiredPhotos: e.target.value })} placeholder="optional" />
+            </label>
+            <label className="field" style={{ gridColumn: 'span 2' }}>
+              Delay / change reason
+              <input id="act-delay" className="input" value={draft.delayReason} onChange={(e) => setDraft({ ...draft, delayReason: e.target.value })} placeholder="required when planned dates change" />
+            </label>
+            <label className="field">
+              New start (reschedule)
+              <input id="act-new-start" className="input" type="date" min={draft.start} value={draft.newStart} onChange={(e) => setDraft({ ...draft, newStart: e.target.value })} />
+            </label>
+            <label className="field">
+              New finish (reschedule)
+              <input id="act-new-finish" className="input" type="date" min={draft.newStart || draft.start} value={draft.newFinish} onChange={(e) => setDraft({ ...draft, newFinish: e.target.value })} />
+            </label>
+          </div>
+          {editing?.baselineStart && (
+            <p className="note" style={{ margin: '8px 0 0' }}>
+              Original baseline: {fmtDate(editing.baselineStart)} – {fmtDate(editing.baselineEnd ?? editing.end)} (only a Super Admin can rebaseline). New start / New finish add a second Gantt bar for the remaining work; the plan above stays the baseline for planned progress.
+              {(draft.newStart || draft.newFinish) && <> <button type="button" className="linklike" onClick={() => setDraft({ ...draft, newStart: '', newFinish: '' })}>Clear reschedule</button></>}
+              {draft.qtyTotal && ' Actual % comes from verified quantity ÷ approved quantity.'}
+            </p>
+          )}
+        </fieldset>
 
         <fieldset className="progress-box">
           <legend>Actual progress</legend>
@@ -241,46 +342,61 @@ export default function ProjectManagement() {
         </div>
       </section>}
 
+      <CalendarEditor projectId={pid} canEdit={canEdit} />
+
       <section className="card" id="activities-card">
         <div className="card-head">
           <h2>Activities ({activities.length})</h2>
-          <span className="note">Planned and variance as of today, {fmtDate(today)}</span>
+          <span className="note">As of today, {fmtDate(today)}; durations in working days</span>
         </div>
-        {activities.length === 0 ? (
-          <div className="empty">No activities yet. Add one above.</div>
+        {activities.length > 0 && o.toolbar}
+        {o.listed.length === 0 ? (
+          <div className="empty">{o.showHidden ? 'You have not hidden any activities.' : 'No activities yet. Add one above.'}</div>
         ) : (
           <div className="table-wrap">
             <table className="tbl">
               <thead>
                 <tr>
+                  <th className="pick-col">{o.headerCheckbox}</th>
                   <th>Activity</th>
-                  <th>Start</th>
-                  <th>Finish</th>
-                  <th className="num">Days</th>
+                  <th>Baseline</th>
+                  <th>Current plan</th>
+                  <th>Actual</th>
+                  <th className="num" title="Baseline / current working days">Duration</th>
+                  <th className="num">Actual days</th>
+                  <th className="num">Remaining</th>
                   <th className="num">Weight</th>
                   <th className="num">Planned</th>
-                  <th className="num">Latest actual</th>
-                  <th>Progress</th>
-                  <th>Last report</th>
+                  <th className="num">Actual %</th>
+                  <th className="num" title="Actual − planned, percentage points">Variance</th>
+                  <th className="num" title="Actual working days ÷ current duration">Time used</th>
+                  <th>Forecast finish</th>
+                  <th>Status</th>
+                  <th>Delay reason</th>
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {activities.map((a) => {
-                  const lr = latestReport(a.id, reports);
-                  const act = lr?.actualPct ?? 0;
-                  const plan = plannedPct(a, today);
+              {o.tbodies((a) => {
+                  const m = scopeMetrics(a, reports, today, calendarOf(cal), stops);
+                  const range = (x?: string | null, y?: string | null) => (x ? `${fmtDate(x)} – ${y ? fmtDate(y) : '…'}` : '—');
                   return (
-                    <tr key={a.id} style={draft.id === a.id ? { background: '#fff8ea' } : undefined}>
-                      <td>{a.name}</td>
-                      <td>{fmtDate(a.start)}</td>
-                      <td>{fmtDate(a.end)}</td>
-                      <td className="num">{durationDays(a)}</td>
+                    <tr style={draft.id === a.id ? { background: '#fff8ea' } : undefined} title={m.flags.join('\n') || undefined}>
+                      <td className="pick-col">{o.checkbox(a)}</td>
+                      <td>{a.name}{a.quantityTotal ? <div className="note">{a.quantityTotal} {a.quantityUnit}</div> : null}</td>
+                      <td className="note">{range(a.baselineStart, a.baselineEnd)}</td>
+                      <td>{range(a.start, a.end)}</td>
+                      <td>{range(a.actualStart, a.actualFinish)}</td>
+                      <td className="num">{m.baselineDuration ?? '—'} / {m.currentDuration}</td>
+                      <td className="num">{m.actualDays ?? '—'}</td>
+                      <td className="num">{m.remainingDays ?? '—'}</td>
                       <td className="num">{a.weight}%</td>
-                      <td className="num">{fmtPct(plan)}</td>
-                      <td className={`num ${tone(act - plan)}`}>{fmtPct(act)}</td>
-                      <td><div className="bar" title={`${fmtPct(act)} complete`}><span style={{ width: `${act}%` }} /></div></td>
-                      <td className="note">{lr ? fmtDate(lr.date) : 'None'}</td>
+                      <td className="num">{fmtPct(m.plannedPct)}</td>
+                      <td className={`num ${tone(m.variancePts)}`}>{fmtPct(m.actualPct)}</td>
+                      <td className={`num ${tone(m.variancePts)}`}>{fmtPP(m.variancePts)}</td>
+                      <td className={`num ${m.timeConsumptionPct != null && m.timeConsumptionPct > 100 ? 'bad' : ''}`}>{m.timeConsumptionPct == null ? 'N/A' : fmtPct(m.timeConsumptionPct)}</td>
+                      <td className={m.slipDays > 0 ? 'bad' : undefined}>{fmtDate(m.forecastFinish)}{m.slipDays > 0 ? ` (+${m.slipDays}d)` : ''}</td>
+                      <td><span className={`pill ${m.status === 'Complete' ? 'pill-ok' : m.status === 'Delayed' || m.status === 'Stopped' ? 'pill-warn' : ''}`}>{m.status}</span>{m.flags.length ? <span title={m.flags.join('\n')}> ⚠</span> : null}</td>
+                      <td className="note">{a.delayReason || '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         {canEdit && <><button className="btn btn-sm" onClick={() => startEdit(a)}>Edit</button>{' '}</>}
                         <Link className="btn btn-sm" href={`/field-reports?activity=${a.id}`}>Report</Link>{' '}
@@ -288,8 +404,7 @@ export default function ProjectManagement() {
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
+                }, 17)}
             </table>
           </div>
         )}

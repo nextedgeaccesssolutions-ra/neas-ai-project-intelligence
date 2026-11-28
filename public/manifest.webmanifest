@@ -1,9 +1,20 @@
 {
-  "name": "NEAS Intelligence · Project Control",
-  "short_name": "NEAS PC",
+  "id": "/",
+  "name": "NEAS Field Access · Project Control",
+  "short_name": "NEAS",
+  "description": "Field reports, before-and-after site photos, inspections and project progress for NextEdge Access Solutions teams and clients. Works offline.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#071D29",
   "theme_color": "#071D29",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
 }

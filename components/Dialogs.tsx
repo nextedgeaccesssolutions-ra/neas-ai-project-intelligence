@@ -2,6 +2,7 @@
 // In-page confirmation dialog and toast. Replaces window.confirm/alert, which some
 // embedded viewers (and many kiosk/field browsers) block.
 import { useEffect, useRef, useState } from 'react';
+import { PinPromptHost } from '@/components/PinPrompt';
 
 type Ask = { message: string; danger: boolean; resolve: (ok: boolean) => void };
 let pushAsk: ((a: Ask) => void) | null = null;
@@ -45,7 +46,7 @@ export default function DialogHost() {
   const [ask, setAsk] = useState<Ask | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const okRef = useRef<HTMLButtonElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     pushAsk = (a) => setAsk(a);
@@ -88,6 +89,7 @@ export default function DialogHost() {
           </div>
         </div>
       )}
+      <PinPromptHost />
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
   );

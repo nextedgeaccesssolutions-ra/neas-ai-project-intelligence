@@ -1,4 +1,5 @@
 'use client';
+import { useOrgList } from '@/components/OrgList';
 import Link from 'next/link';
 import { Fragment, useState } from 'react';
 import DataIO, { asPlan } from '@/components/DataIO';
@@ -39,6 +40,8 @@ function Estimating() {
   const t = useBoqTotals();
   const [draft, setDraft] = useState<Draft>(blank());
   const [error, setError] = useState<string | null>(null);
+
+  const o = useOrgList({ list: 'boq', kind: 'boq_line', items: boq, id: (l) => l.id, project: (l) => l.projectId, noun: 'BOQ line' });
 
   if (!ready) return <Loading />;
   if (!project) return <NoProject />;
@@ -119,13 +122,14 @@ function Estimating() {
 
       <section className="card" id="boq-card">
         <div className="card-head"><h2>Bill of quantities ({boq.length} lines)</h2><span className="note">Direct cost, before markups</span></div>
-        {boq.length === 0 ? <div className="empty">No BOQ lines yet. Enter your own quantities and rates above.</div> : (
+        {boq.length > 0 && o.toolbar}
+        {o.listed.length === 0 ? <div className="empty">{o.showHidden ? 'You have not hidden any BOQ lines.' : 'No BOQ lines yet. Enter your own quantities and rates above.'}</div> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Item</th><th>Description</th><th>Category</th><th>Unit</th><th className="num">Qty</th><th className="num">Unit cost</th><th className="num">Amount</th>{!locked && <th />}</tr></thead>
-              <tbody>
-                {boq.map((l) => (
-                  <tr key={l.id}>
+              <thead><tr><th className="pick-col">{o.headerCheckbox}</th><th>Item</th><th>Description</th><th>Category</th><th>Unit</th><th className="num">Qty</th><th className="num">Unit cost</th><th className="num">Amount</th>{!locked && <th />}</tr></thead>
+              {o.tbodies((l) => (
+                  <tr>
+                    <td className="pick-col">{o.checkbox(l)}</td>
                     <td>{l.item}</td><td>{l.description}</td><td>{l.category}</td><td>{l.unit}</td>
                     <td className="num">{fmtNum(l.qty)}</td><td className="num">{fmtPHP(l.unitCost)}</td><td className="num">{fmtPHP(lineAmount(l))}</td>
                     {!locked && (
@@ -135,9 +139,8 @@ function Estimating() {
                       </td>
                     )}
                   </tr>
-                ))}
-              </tbody>
-              <tfoot><tr><td colSpan={6}>Total direct cost</td><td className="num">{fmtPHP(t.direct)}</td>{!locked && <td />}</tr></tfoot>
+                ), locked ? 8 : 9)}
+              <tfoot><tr><td colSpan={7}>Total direct cost (all lines, including hidden)</td><td className="num">{fmtPHP(t.direct)}</td>{!locked && <td />}</tr></tfoot>
             </table>
           </div>
         )}

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac, createHash } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { DB_SCHEMA, SUPABASE_ANON_KEY, SUPABASE_URL } from './env';
 
@@ -35,7 +35,7 @@ export async function supabaseAsUser(): Promise<SupabaseClient> {
     db: { schema: DB_SCHEMA },
     cookies: {
       getAll: () => store.getAll(),
-      setAll: (list: Array<{ name: string; value: string; options?: any }>) => {
+      setAll: (list: { name: string; value: string; options: CookieOptions }[]) => {
         try {
           list.forEach(({ name, value, options }) => store.set(name, value, options));
         } catch {
@@ -82,7 +82,7 @@ export function appUrl(req: Request): string {
 }
 
 /** Uniform JSON responses; internal error details are never sent to the browser. */
-type RouteContext = { params: Promise<object> };
+type RouteContext = { params: Promise<unknown> };
 
 export function handle(fn: (req: Request, ctx: RouteContext) => Promise<Response>) {
   return async (req: Request, ctx: RouteContext) => {

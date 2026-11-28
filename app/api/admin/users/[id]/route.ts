@@ -5,16 +5,21 @@ import { UUID_RE } from '@/lib/cloud/validate';
 
 export const dynamic = 'force-dynamic';
 
-type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code';
+type Action = 'suspend' | 'reactivate' | 'reset_password' | 'make_admin' | 'make_staff' | 'revoke_sessions' | 'issue_code' | 'update_profile' | 'delete' | 'set_username' | 'unlock_pin' | 'delete_forever';
 
 export const POST = handle(async (req, { params }) => {
   const { id } = await params as { id: string };
   assertSameOrigin(req);
   if (!UUID_RE.test(id)) throw new HttpError(400, 'Invalid user id');
   const { sb, user } = await requireSuperAdmin();
-  const body = await readJson<{ action: Action; reason?: string; hours?: number }>(req, 4096);
+  const body = await readJson<{ action: Action; reason?: string; hours?: number; fullName?: string; jobTitle?: string; username?: string }>(req, 4096);
   const svc = supabaseService();
   const reason = body.reason?.slice(0, 500) ?? null;
+  // account-takeover-sensitive actions the database triggers do not see need the PIN re-check too
+  if (body.action === 'issue_code' || body.action === 'revoke_sessions' || body.action === 'reset_password') {
+    const { error: pinErr } = await sb.rpc('require_reauth');
+    if (pinErr) throw new HttpError(403, pinErr.message);
+  }
 
   switch (body.action) {
     case 'suspend': {
@@ -79,12 +84,42 @@ export const POST = handle(async (req, { params }) => {
       if (error) throw new HttpError(400, error.message);
       break;
     }
+    case 'update_profile': {
+      const { error } = await sb.rpc('admin_update_profile', { p_user: id, p_full_name: body.fullName ?? '', p_job_title: body.jobTitle ?? '' });
+      if (error) throw new HttpError(400, error.message);
+      break;
+    }
+    case 'delete': {
+      // Reversible: the profile stays so reports keep their author; the database revokes access and sessions.
+      const { error } = await sb.rpc('admin_delete_user', { p_user: id, p_reason: reason });
+      if (error) throw new HttpError(400, error.message);
+      await svc.auth.admin.updateUserById(id, { ban_duration: '876000h' });
+      break;
+    }
+    case 'delete_forever': {
+      // frees the e-mail and username of a deleted account; the renamed record keeps reports and history attributed
+      const { data, error } = await sb.rpc('admin_release_deleted_user', { p_user: id });
+      if (error) throw new HttpError(400, error.message);
+      const { error: aErr } = await svc.auth.admin.updateUserById(id, { email: String(data), email_confirm: true, ban_duration: '876000h' });
+      if (aErr) throw new HttpError(500, `The account was released in the app, but the sign-in e-mail could not be freed: ${aErr.message}`);
+      break;
+    }
     case 'make_admin':
     case 'make_staff': {
       const { error } = await sb.rpc('admin_set_global_role', {
         p_user: id,
         p_role: body.action === 'make_admin' ? 'super_admin' : 'staff',
       });
+      if (error) throw new HttpError(400, error.message);
+      break;
+    }
+    case 'set_username': {
+      const { error } = await sb.rpc('admin_set_username', { p_user: id, p_username: String(body.username ?? '') });
+      if (error) throw new HttpError(error.code === '23505' ? 409 : 400, error.message);
+      break;
+    }
+    case 'unlock_pin': {
+      const { error } = await sb.rpc('admin_unlock_pin', { p_user: id });
       if (error) throw new HttpError(400, error.message);
       break;
     }

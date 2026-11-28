@@ -41,6 +41,18 @@ export function checkPassword(pw: string): string[] {
   return problems;
 }
 
+/** Usernames: 3–32 lowercase letters, digits, dots or dashes, starting with a letter or digit. */
+export const USERNAME_RE = /^[a-z0-9][a-z0-9.-]{2,31}$/;
+export const normaliseUsername = (u: string) => (u ?? '').trim().toLowerCase();
+export const checkUsername = (u: string) => USERNAME_RE.test(normaliseUsername(u));
+
+/** A PIN is exactly 6 digits; all-same digits and simple runs are refused. */
+export function checkPin(pin: string): string | null {
+  if (!/^\d{6}$/.test(pin ?? '')) return 'Your PIN must be exactly 6 digits.';
+  if (new Set(pin).size === 1 || '0123456789'.includes(pin) || '9876543210'.includes(pin)) return 'Choose a PIN that is not all the same digit or a simple run like 123456.';
+  return null;
+}
+
 export const PROJECT_CODE_RE = /^[A-Z0-9][A-Z0-9-]{2,39}$/;
 export function normaliseProjectCode(c: string): string {
   return (c ?? '').trim().toUpperCase();

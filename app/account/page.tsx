@@ -1,14 +1,15 @@
 'use client';
 import Link from 'next/link';
 import AuthCard from '@/components/AuthCard';
-import { cloudSignOut, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { isClientAccount, useCloudStatus } from '@/lib/cloud/cloudSync';
+import { signOutChecked } from '@/components/Shell';
 import { useStore } from '@/lib/store';
 
 export default function AccountPage() {
   const c = useCloudStatus();
   const { resetDemo } = useStore();
   const p = c.profile;
-  const signOut = () => cloudSignOut(resetDemo).then(() => (window.location.href = '/login'));
+  const signOut = () => signOutChecked(resetDemo).then((ok) => { if (ok) window.location.href = '/login'; });
   if (c.auth === 'checking') return <AuthCard title="My account" subtitle="Loading…" />;
   if (c.auth === 'signed_out' || c.auth === 'expired')
     return <AuthCard title="Signed out" subtitle={c.auth === 'expired' ? 'Your offline access period ended. Connect to the internet and sign in again.' : 'Sign in to continue.'}><Link className="btn btn-primary" href="/login">Sign in</Link></AuthCard>;
@@ -17,7 +18,7 @@ export default function AccountPage() {
     <AuthCard title="My account" subtitle={p ? `${p.full_name || p.email} · ${p.email}` : undefined}>
       <div className="kv">
         <span className="note">Status</span><span>{p?.status}{p && !p.email_verified_at ? ' · e-mail not verified' : ''}</span>
-        <span className="note">Role</span><span>{p?.global_role === 'super_admin' ? 'Super Admin' : 'Staff'}</span>
+        <span className="note">Role</span><span>{p?.global_role === 'super_admin' ? 'Super Admin' : isClientAccount(p) ? 'Client' : 'Staff'}</span>
         <span className="note">Projects</span><span>{c.memberships.length}</span>
       </div>
       {!pending && p && !p.password_set_at && <p className="banner">You have not set a password yet. Set one now so you can sign in with your e-mail and password.</p>}

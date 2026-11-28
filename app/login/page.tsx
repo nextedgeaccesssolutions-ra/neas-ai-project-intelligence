@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthCard from '@/components/AuthCard';
 import { supabaseBrowser, supabaseLinkClient } from '@/lib/cloud/browser';
 import { CLOUD } from '@/lib/cloud/env';
+import { checkOfflineLogin, rememberOfflineLogin } from '@/lib/offlineLogin';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -12,8 +13,52 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
+  const [pinResetEmail, setPinResetEmail] = useState('');
+  const [pinResetSent, setPinResetSent] = useState(false);
+  // daily sign-in is username + 6-digit PIN; e-mail + password stays for administrators during the change-over
+  const [mode, setMode] = useState<'pin' | 'email'>('pin');
+  const [username, setUsername] = useState('');
+  const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [pinHelp, setPinHelp] = useState(false);
+  // read after the page is taken over, so the server and browser draw the same first screen
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const upd = () => setOnline(navigator.onLine);
+    upd();
+    window.addEventListener('online', upd); window.addEventListener('offline', upd);
+    return () => { window.removeEventListener('online', upd); window.removeEventListener('offline', upd); };
+  }, []);
 
   if (!CLOUD) return <AuthCard title="Sign-in not set up" subtitle="This copy runs in device mode. Connect Supabase to enable accounts."><Link className="btn" href="/">Open the app</Link></AuthCard>;
+
+  const submitPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!/^\d{6}$/.test(pin)) return setError('Your passcode is 6 digits.');
+    setBusy(true);
+    if (!navigator.onLine) {
+      // offline: check against this device's saved hash from an earlier online sign-in
+      const r = await checkOfflineLogin(username, pin);
+      setBusy(false);
+      setPin('');
+      if ('error' in r) return setError(r.error);
+      window.location.href = r.target;
+      return;
+    }
+    const r = await fetch('/api/auth/pin-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, pin }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    if (!r || !r.ok) {
+      setBusy(false);
+      setPin('');
+      return setError(!r ? 'Cannot reach the server. Check your connection.' : j.error ?? 'Username or PIN is not correct, or the account is not active.');
+    }
+    const target = typeof j.redirect === 'string' && j.redirect.startsWith('/client/') ? j.redirect : '/';
+    await rememberOfflineLogin(username, pin, target).catch(() => undefined);
+    // a client username goes straight to that project's client view
+    if (target !== '/') { window.location.href = target; return; }
+    await afterLogin('Your PIN was accepted');
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,20 +66,30 @@ export default function LoginPage() {
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const sb = supabaseBrowser()!;
-    const { error: err } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
-    if (err) {
+    try {
+      const sb = supabaseBrowser()!;
+      const { error: err } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+      if (err) {
+        setBusy(false);
+        // Keep one message for every credential failure so the form never reveals whether an address is registered.
+        return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet. No password yet? Use "E-mail me a sign-in link" below.');
+      }
+      await afterLogin('Your password was accepted');
+    } catch {
       setBusy(false);
-      // one message for every failure so the form never reveals whether an address is registered
-      return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet. No password yet? Use “E-mail me a sign-in link” below.');
+      setError('Sign-in is temporarily unavailable. Check your connection and try again.');
     }
+  };
+
+  const afterLogin = async (accepted: string) => {
+    const sb = supabaseBrowser()!;
     const res = await fetch('/api/auth/after-login', { method: 'POST' }).catch(() => null);
     const r = res ? await res.json().catch(() => null) : null;
     if (!res || !res.ok || !r?.profile) {
       // the password was accepted; the account check did not finish (network or server problem)
       await sb.auth.signOut().catch(() => undefined);
       setBusy(false);
-      return setError('Your password was accepted, but the account check did not finish. Check your connection and try again.');
+      return setError(`${accepted}, but the account check did not finish. Check your connection and try again.`);
     }
     const p = r.profile;
     if (p?.status === 'active' && p?.email_verified_at) {
@@ -48,7 +103,7 @@ export default function LoginPage() {
       p?.status === 'pending' ? 'Your account is waiting for approval by the NEAS administrator. You will receive an e-mail when it is approved.'
         : p?.status === 'suspended' ? 'This account is suspended. Contact the NEAS administrator.'
         : p?.status === 'rejected' ? 'This registration was not approved. Contact the NEAS administrator.'
-        : 'E-mail or password is incorrect, or the account is not active yet.',
+        : 'The account is not active yet. Contact the NEAS administrator.',
     );
   };
 
@@ -58,26 +113,100 @@ export default function LoginPage() {
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const { error: err } = await supabaseLinkClient()!.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
-    });
-    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
-    setLinkSent(true); // same reply whether or not the address has an account
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A sign-in link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setLinkSent(true);
+    } catch {
+      setError('Could not send a sign-in link. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
-
+  const sendPinReset = async () => {
+    const address = pinResetEmail.trim().toLowerCase();
+    if (!address) return setError('Enter your account e-mail first.');
+    setError(null);
+    setPinResetSent(false);
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(address, {
+        redirectTo: `${location.origin}/auth/callback?next=/auth/setup-pin`,
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A recovery link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setPinResetSent(true);
+    } catch {
+      setError('Could not request a PIN reset. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const forgot = async () => {
     if (!email.trim()) return setError('Enter your e-mail first.');
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password` });
-    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
-    setResetSent(true);
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password`,
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A password reset link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setResetSent(true);
+    } catch {
+      setError('Could not request a password reset. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <AuthCard title="Sign in" subtitle="Employees and project managers. Clients use the project link and passcode they were given.">
+    <AuthCard eyebrow="NEAS Enterprise Platform" title="Secure team sign-in" subtitle="Staff and clients: sign in with your username and 6-digit passcode. Your work stays available offline on this device after you sign in." note="Forgot your PIN? Use the secure e-mail reset link or an administrator one-time code.">
+      <p className={online ? 'ok' : 'bad'} role="status" style={{ margin: 0 }}>{online ? 'Online - ready to sign in' : 'Offline - you can sign in if you signed in on this device before'}</p>
+      {mode === 'pin' ? (
+        <>
+          <form onSubmit={submitPin} className="auth-form">
+            <label className="field">Username<input id="login-username" className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={username} onChange={(e) => setUsername(e.target.value)} /></label>
+            <label className="field">PIN / passcode
+              <span style={{ display: 'flex', gap: 8 }}>
+                <input id="login-pin" className="input" type={showPin ? 'text' : 'password'} inputMode="numeric" autoComplete="current-password" pattern="\d{6}" maxLength={6} required value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} style={{ letterSpacing: '0.3em' }} />
+                <button type="button" className="btn" onClick={() => setShowPin((s) => !s)} aria-pressed={showPin} aria-controls="login-pin">{showPin ? 'Hide' : 'Show'}</button>
+              </span>
+            </label>
+            {error && <p className="bad" role="alert">{error}</p>}
+            <button className="btn btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          </form>
+          <div className="auth-links">
+            <button type="button" className="linklike" onClick={() => setPinHelp((f) => !f)} aria-expanded={pinHelp}>Forgot your PIN?</button>
+            <Link className="linklike" href="/activate">Have a one-time code?</Link>
+            <button className="linklike" onClick={() => { setMode('email'); setError(null); }}>Administrator e-mail sign-in</button>
+          </div>
+          {pinHelp && (
+            <>
+<form onSubmit={(event) => { event.preventDefault(); void sendPinReset(); }} className="auth-form">
+              <label className="field">Account e-mail<input id="pin-reset-email" className="input" type="email" autoComplete="email" required value={pinResetEmail} onChange={(event) => setPinResetEmail(event.target.value)} /></label>
+              {error && <p className="bad" role="alert">{error}</p>}
+              <button type="submit" className="btn" disabled={busy}>{busy ? 'Requesting link...' : 'E-mail me a secure PIN reset link'}</button>
+              {pinResetSent && <p className="ok" role="status">If that address has an active NEAS account, a secure PIN reset link is on its way. Open the latest e-mail to choose a new PIN.</p>}
+            </form>
+            <p className="note" role="note">If you cannot access your registered e-mail, ask your NEAS administrator for a one-time recovery code. Then use <Link className="linklike" href="/activate">Have a one-time code?</Link>. Never share your PIN or recovery code with anyone.</p>
+            </>
+          )}
+        </>
+      ) : (<>
       <form onSubmit={submit} className="auth-form">
         <label className="field">E-mail<input id="login-email" className="input" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label className="field">Password<input id="login-password" className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
@@ -91,7 +220,9 @@ export default function LoginPage() {
         <button className="linklike" onClick={forgot}>Forgot password?</button>
         <Link className="linklike" href="/activate">Have a one-time code?</Link>
         <Link href="/register">Request an account</Link>
+        <button className="linklike" onClick={() => { setMode('pin'); setError(null); }}>Username + PIN sign-in</button>
       </div>
+      </>)}
     </AuthCard>
   );
 }

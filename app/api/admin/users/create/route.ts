@@ -1,5 +1,6 @@
 import { assertSameOrigin, handle, HttpError, readJson, requireSuperAdmin, supabaseService } from '@/lib/cloud/server';
-import { checkEmail, checkName, UUID_RE } from '@/lib/cloud/validate';
+import { checkEmail, checkName, checkPin, checkUsername, normaliseUsername, UUID_RE } from '@/lib/cloud/validate';
+import { pinPassword } from '@/lib/cloud/pin';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,37 +9,88 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req) => {
   assertSameOrigin(req);
   const { sb, user } = await requireSuperAdmin();
-  const body = await readJson<{ fullName?: string; email?: string; projectId?: string; role?: string; hours?: number }>(req, 4096);
+  // Re-authenticate before creating an identity or client login.
+  const { error: pinErr } = await sb.rpc('require_reauth');
+  if (pinErr) throw new HttpError(403, pinErr.message);
+
+  const body = await readJson<{
+    fullName?: string;
+    email?: string;
+    username?: string;
+    projectId?: string;
+    role?: string;
+    hours?: number;
+    pin?: string;
+  }>(req, 4096);
+  const username = normaliseUsername(body.username ?? '');
+  if (!checkUsername(username)) throw new HttpError(400, 'Usernames are 3 to 32 lowercase letters, numbers, dots or dashes.');
   const n = checkName(body.fullName ?? '');
   if (!n.ok) throw new HttpError(400, n.error);
-  const e = checkEmail(body.email ?? '');
-  if (!e.ok) throw new HttpError(400, e.error);
   if (body.projectId && !UUID_RE.test(body.projectId)) throw new HttpError(400, 'Invalid project');
+  const pin = body.pin ? String(body.pin) : '';
+  if (pin) {
+    const bad = checkPin(pin);
+    if (bad) throw new HttpError(400, bad.replace('Your PIN', 'The passcode'));
+  }
+
+  // Client logins are scoped to a single project and never create staff identities.
+  if (body.role === 'client') {
+    if (!body.projectId) throw new HttpError(400, 'Choose the project this client may see.');
+    if (!pin) throw new HttpError(400, 'Enter or generate a 6-digit passcode for the client.');
+    const { error } = await sb.rpc('admin_create_client_login', {
+      p_project: body.projectId,
+      p_label: n.name,
+      p_username: username,
+      p_passcode: pin,
+      p_days: null,
+    });
+    if (error) throw new HttpError(error.code === '23505' ? 409 : 400, error.code === '23505' ? await taken(username) : error.message);
+    return Response.json({ ok: true, client: true });
+  }
+
+  const svc = supabaseService();
+  const { data: clash } = await svc.rpc('username_taken', { p_username: username });
+  if (clash) throw new HttpError(409, await taken(username));
+
+  // E-mail is optional; the reserved .invalid domain cannot receive mail.
+  const e = body.email?.trim()
+    ? checkEmail(body.email)
+    : { ok: true as const, email: `${username}@users.neas.invalid` };
+  if (!e.ok) throw new HttpError(400, e.error);
   const role = body.role === 'project_manager' ? 'project_manager' : 'employee';
   const hours = Math.min(720, Math.max(1, Math.round(Number(body.hours) || 72)));
 
-  const svc = supabaseService();
-  const { data: created, error } = await svc.auth.admin.createUser({
+  const { data: created, error: createError } = await svc.auth.admin.createUser({
     email: e.email,
     email_confirm: true,
     user_metadata: { full_name: n.name },
   });
-  if (error || !created.user) {
-    throw new HttpError(409, 'Could not create the account. If this e-mail already has an account, issue a code from the User directory instead.');
+  if (createError || !created.user) {
+    const { data: existing } = await svc.from('profiles').select('full_name, status, username').ilike('email', e.email).maybeSingle();
+    if (existing) {
+      const who = existing.full_name || e.email;
+      throw new HttpError(409, existing.status === 'active'
+        ? `${who} already has an account with this e-mail. Open it in User directory and use “Reset PIN / password (one-time code)”.`
+        : `${who} already has an account with this e-mail, currently ${existing.status}. Open it in User directory, press Activate, then use “Reset PIN / password (one-time code)”.`);
+    }
+    throw new HttpError(400, `Supabase did not create the account: ${createError?.message ?? 'unknown reason'}.`);
   }
 
   const id = created.user.id;
-  // Account provisioning spans Auth and several database operations. If any later step fails,
-  // remove the newly-created Auth identity so a half-provisioned account cannot be left behind.
+  // Provisioning spans Auth and several database writes. Roll the Auth identity back if any
+  // required step fails, so callers never have to recover a half-created account manually.
   try {
-    const { error: apErr } = await sb.rpc('admin_review_registration', {
+    const { error: approvalError } = await sb.rpc('admin_review_registration', {
       p_user: id,
       p_approve: true,
       p_reason: null,
     });
-    if (apErr && !/No pending registration/.test(apErr.message)) {
-      throw new HttpError(400, apErr.message);
+    if (approvalError && !/No pending registration/.test(approvalError.message)) {
+      throw new HttpError(400, approvalError.message);
     }
+
+    const { error: usernameError } = await sb.rpc('admin_set_username', { p_user: id, p_username: username });
+    if (usernameError) throw new HttpError(409, `Account created, but the username was not saved: ${usernameError.message}. Set it in the User directory.`);
 
     if (body.projectId) {
       const { error: membershipError } = await sb.from('project_memberships').upsert({
@@ -50,17 +102,20 @@ export const POST = handle(async (req) => {
       if (membershipError) throw new HttpError(400, membershipError.message);
     }
 
-    const { data: codeRows, error: codeError } = await sb.rpc('admin_issue_setup_code', {
-      p_user: id,
-      p_hours: hours,
-    });
-    if (codeError) throw new HttpError(400, codeError.message);
+    if (pin) {
+      const { error: passwordError } = await svc.auth.admin.updateUserById(id, { password: pinPassword(id, pin) });
+      if (passwordError) throw new HttpError(500, `The account was created but its passcode was not saved (${passwordError.message}).`);
+    }
 
-    const row = (Array.isArray(codeRows) ? codeRows[0] : codeRows) as
-      | { code?: string; expires_at?: string }
-      | null;
-    if (!row?.code || !row.expires_at) {
-      throw new HttpError(500, 'The account was created but its activation code could not be issued.');
+    let code: string | undefined;
+    let expiresAt: string | undefined;
+    if (!pin) {
+      const { data, error: codeError } = await sb.rpc('admin_issue_setup_code', { p_user: id, p_hours: hours });
+      if (codeError) throw new HttpError(400, codeError.message);
+      const row = (Array.isArray(data) ? data[0] : data) as { code?: string; expires_at?: string } | null;
+      if (!row?.code || !row.expires_at) throw new HttpError(500, 'The account was created but its activation code could not be issued.');
+      code = row.code;
+      expiresAt = row.expires_at;
     }
 
     const { error: auditError } = await svc.from('audit_logs').insert({
@@ -68,14 +123,11 @@ export const POST = handle(async (req) => {
       action: 'account:admin_created',
       target_type: 'profiles',
       target_id: id,
-      details: { role, project_assigned: !!body.projectId },
+      details: { role, project_assigned: !!body.projectId, passcode_set: !!pin },
     });
-    if (auditError) {
-      // Do not discard a valid activation code because audit logging is temporarily unavailable.
-      console.error('[admin:create-user] audit log write failed:', auditError.message);
-    }
+    if (auditError) console.error('[admin:create-user] audit log write failed:', auditError.message);
 
-    return Response.json({ ok: true, userId: id, code: row.code, expiresAt: row.expires_at });
+    return Response.json({ ok: true, userId: id, ...(code ? { code, expiresAt } : {}) });
   } catch (error) {
     const { error: cleanupError } = await svc.auth.admin.deleteUser(id);
     if (cleanupError) {
@@ -85,3 +137,16 @@ export const POST = handle(async (req) => {
     throw error;
   }
 });
+
+// Only Super Admins reach this helper; identify the conflicting account without exposing it to other users.
+async function taken(username: string): Promise<string> {
+  const svc = supabaseService();
+  const { data: cred } = await svc.from('client_access_credentials').select('label, projects(code)').eq('username', username).is('revoked_at', null).maybeSingle();
+  if (cred) {
+    const code = (cred as { projects?: { code?: string } | null }).projects?.code;
+    return `"${username}" is already the client login of ${cred.label}${code ? ` (${code})` : ''}. Choose another username, or manage that login under Client viewer access.`;
+  }
+  const { data: profile } = await svc.from('profiles').select('full_name, email').eq('username', username).maybeSingle();
+  if (profile) return `"${username}" is already used by ${profile.full_name || profile.email} (User directory). Choose another username.`;
+  return 'That username is already used. Choose another.';
+}

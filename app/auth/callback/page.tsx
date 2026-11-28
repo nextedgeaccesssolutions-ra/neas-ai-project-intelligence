@@ -44,10 +44,23 @@ export default function AuthCallback() {
       // record the sign-in (and refuse accounts that are not approved)
       const res = await fetch('/api/auth/after-login', { method: 'POST' }).catch(() => null);
       const r = res ? await res.json().catch(() => null) : null;
+      if (!res?.ok || !r?.profile) {
+        await sb.auth.signOut().catch(() => undefined);
+        return fail('We could not verify your NEAS account. Return to sign in and try again.');
+      }
+      if (r.profile.status !== 'active' || !r.profile.email_verified_at) {
+        await sb.auth.signOut().catch(() => undefined);
+        const message = r.profile.status === 'pending'
+          ? 'Your account is waiting for approval by the NEAS administrator.'
+          : r.profile.status === 'suspended'
+            ? 'This account is suspended. Contact the NEAS administrator.'
+            : 'This account is not approved for NEAS access. Contact the NEAS administrator.';
+        return fail(message);
+      }
       // An approved account that has never chosen a password (owner bootstrap, e-mail-link sign-up)
       // is sent to password setup first, so the e-mail + password sign-in works next time.
       const { data: u } = await sb.auth.getUser();
-      if (u.user && !safeNext.startsWith('/auth/setup-password')) {
+      if (u.user && !safeNext.startsWith('/auth/setup-')) {
         const { data: prof } = await sb.from('profiles').select('status, password_set_at').eq('id', u.user.id).maybeSingle();
         if (prof?.status === 'active' && !prof.password_set_at) return window.location.replace('/auth/setup-password?first=1');
         if (prof?.status === 'active' && safeNext === '/' && r?.profile?.global_role === 'super_admin') return window.location.replace('/admin');

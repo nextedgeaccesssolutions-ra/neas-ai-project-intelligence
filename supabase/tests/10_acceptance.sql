@@ -44,6 +44,8 @@ insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) value
 
 -- bootstrap: the first Super Admin is promoted by the database owner (documented in the manual)
 update neas.profiles set global_role = 'super_admin', status = 'active', approved_at = now() where email = 'admin@neas.test';
+-- the earlier suites test business rules, not the PIN re-check: treat every test account as recently re-checked
+update neas.profiles set reauth_at = now() + interval '7 days';
 
 select test.check('registration: new sign-ups start as pending', (select count(*) = 4 from neas.profiles where status = 'pending'));
 select test.check('registration: each sign-up creates a registration request', (select count(*) = (select count(*) from auth.users) from neas.registration_requests where status = 'pending'));
@@ -279,6 +281,30 @@ select test.check('audit: passcode hashes never reach the audit log', (select co
 \ir 40_access_control.sql
 \ir 50_one_time_codes.sql
 \ir 60_browser_queries.sql
+\ir 60_recovery.sql
+\ir 70_user_edit_delete.sql
+\ir 80_site_evidence_gps.sql
+\ir 90_schedule_engine.sql
+\ir 91_activity_stops.sql
+\ir 92_evidence_locations.sql
+\ir 93_project_cover_reports.sql
+\ir 94_location_approval.sql
+\ir 95_report_sharing.sql
+\ir 96_view_organization.sql
+\ir 97_p0_hardening.sql
+\ir 98_pin_login.sql
+\ir 99_view_org_more_lists.sql
+\ir 99a_client_usernames.sql
+\ir 99b_client_report_review.sql
+\ir 99c_activity_reschedule.sql
+\ir 99d_report_cover_settings.sql
+\ir 99e_client_accounts.sql
+\ir 99f_client_draft_projects.sql
+\ir 99g_client_login_reset.sql
+\ir 99h_report_templates.sql
+\ir 99i_share_link_kept.sql
+\ir 99j_project_soft_delete.sql
+\ir 99k_client_accounts.sql
 
 -- ---------------------------------------------------------------------------
 \set QUIET off
