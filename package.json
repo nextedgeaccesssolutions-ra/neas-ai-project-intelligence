@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "test": "vitest run",
-    "test:db": "bash scripts/db-test.sh"
+    "test:db": "bash scripts/db-test.sh",
+    "predev": "node scripts/copy-pdf-worker.mjs",
+    "prebuild": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
