@@ -46,7 +46,7 @@ export default function DialogHost() {
   const [ask, setAsk] = useState<Ask | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const okRef = useRef<HTMLButtonElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     pushAsk = (a) => setAsk(a);

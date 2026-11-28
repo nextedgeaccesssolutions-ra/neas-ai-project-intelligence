@@ -36,7 +36,12 @@ export async function rememberOfflineLogin(username: string, pin: string, target
 }
 
 export function forgetOfflineLogin(username: string) {
-  writeAll(readAll().filter((e) => e.username !== username.trim().toLowerCase()));
+  const u = username.trim().toLowerCase();
+  writeAll(readAll().filter((e) => e.username !== u));
+  try {
+    const unlocked = JSON.parse(localStorage.getItem(UNLOCK_KEY) ?? 'null') as { username?: string } | null;
+    if (unlocked?.username === u) localStorage.removeItem(UNLOCK_KEY);
+  } catch { /* storage blocked */ }
 }
 
 /** Check a passcode offline. Returns where to go, or an error message. */

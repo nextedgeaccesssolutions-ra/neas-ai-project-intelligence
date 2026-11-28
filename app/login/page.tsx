@@ -13,6 +13,8 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
+  const [pinResetEmail, setPinResetEmail] = useState('');
+  const [pinResetSent, setPinResetSent] = useState(false);
   // daily sign-in is username + 6-digit PIN; e-mail + password stays for administrators during the change-over
   const [mode, setMode] = useState<'pin' | 'email'>('pin');
   const [username, setUsername] = useState('');
@@ -64,14 +66,19 @@ export default function LoginPage() {
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const sb = supabaseBrowser()!;
-    const { error: err } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
-    if (err) {
+    try {
+      const sb = supabaseBrowser()!;
+      const { error: err } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+      if (err) {
+        setBusy(false);
+        // Keep one message for every credential failure so the form never reveals whether an address is registered.
+        return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet. No password yet? Use "E-mail me a sign-in link" below.');
+      }
+      await afterLogin('Your password was accepted');
+    } catch {
       setBusy(false);
-      // one message for every failure so the form never reveals whether an address is registered
-      return setError(/rate|too many/i.test(err.message) ? 'Too many attempts. Wait a few minutes and try again.' : 'E-mail or password is incorrect, or the account is not active yet. No password yet? Use “E-mail me a sign-in link” below.');
+      setError('Sign-in is temporarily unavailable. Check your connection and try again.');
     }
-    await afterLogin('Your password was accepted');
   };
 
   const afterLogin = async (accepted: string) => {
@@ -106,27 +113,69 @@ export default function LoginPage() {
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const { error: err } = await supabaseLinkClient()!.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
-    });
-    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
-    setLinkSent(true); // same reply whether or not the address has an account
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/auth/callback?next=/` },
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A sign-in link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setLinkSent(true);
+    } catch {
+      setError('Could not send a sign-in link. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
-
+  const sendPinReset = async () => {
+    const address = pinResetEmail.trim().toLowerCase();
+    if (!address) return setError('Enter your account e-mail first.');
+    setError(null);
+    setPinResetSent(false);
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(address, {
+        redirectTo: `${location.origin}/auth/callback?next=/auth/setup-pin`,
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A recovery link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setPinResetSent(true);
+    } catch {
+      setError('Could not request a PIN reset. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const forgot = async () => {
     if (!email.trim()) return setError('Enter your e-mail first.');
     setError(null);
     setLinkSent(false);
     setResetSent(false);
-    const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password` });
-    if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) return setError('A link was sent less than a minute ago. Use that e-mail, or wait a minute and try again.');
-    setResetSent(true);
+    setBusy(true);
+    try {
+      const { error: err } = await supabaseLinkClient()!.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${location.origin}/auth/callback?next=/auth/setup-password`,
+      });
+      if (err && /rate|too many|security purposes|after \d+ seconds/i.test(err.message)) {
+        setError('A password reset link was requested recently. Use the latest e-mail, or wait a minute and try again.');
+        return;
+      }
+      setResetSent(true);
+    } catch {
+      setError('Could not request a password reset. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <AuthCard eyebrow="NEAS Enterprise Platform" title="Secure team sign-in" subtitle="Staff and clients: sign in with your username and 6-digit passcode. Your work stays available offline on this device after you sign in." note="Forgot your PIN or locked out? Ask your NEAS administrator for a one-time code.">
-      <p className={online ? 'ok' : 'bad'} role="status" style={{ margin: 0 }}>{online ? '● Online — ready to sign in' : '● Offline — you can sign in if you signed in on this device before'}</p>
+    <AuthCard eyebrow="NEAS Enterprise Platform" title="Secure team sign-in" subtitle="Staff and clients: sign in with your username and 6-digit passcode. Your work stays available offline on this device after you sign in." note="Forgot your PIN? Use the secure e-mail reset link or an administrator one-time code.">
+      <p className={online ? 'ok' : 'bad'} role="status" style={{ margin: 0 }}>{online ? 'Online - ready to sign in' : 'Offline - you can sign in if you signed in on this device before'}</p>
       {mode === 'pin' ? (
         <>
           <form onSubmit={submitPin} className="auth-form">
@@ -146,9 +195,15 @@ export default function LoginPage() {
             <button className="linklike" onClick={() => { setMode('email'); setError(null); }}>Administrator e-mail sign-in</button>
           </div>
           {pinHelp && (
-            <p className="note" role="status">
-              Ask your NEAS administrator to reset your PIN. They give you a one-time code (valid 24 hours). Then open <Link className="linklike" href="/activate">Have a one-time code?</Link>, enter your username and the code, and choose a new 6-digit PIN. NEAS never asks for your PIN by phone or message.
-            </p>
+            <>
+<form onSubmit={(event) => { event.preventDefault(); void sendPinReset(); }} className="auth-form">
+              <label className="field">Account e-mail<input id="pin-reset-email" className="input" type="email" autoComplete="email" required value={pinResetEmail} onChange={(event) => setPinResetEmail(event.target.value)} /></label>
+              {error && <p className="bad" role="alert">{error}</p>}
+              <button type="submit" className="btn" disabled={busy}>{busy ? 'Requesting link...' : 'E-mail me a secure PIN reset link'}</button>
+              {pinResetSent && <p className="ok" role="status">If that address has an active NEAS account, a secure PIN reset link is on its way. Open the latest e-mail to choose a new PIN.</p>}
+            </form>
+            <p className="note" role="note">If you cannot access your registered e-mail, ask your NEAS administrator for a one-time recovery code. Then use <Link className="linklike" href="/activate">Have a one-time code?</Link>. Never share your PIN or recovery code with anyone.</p>
+            </>
           )}
         </>
       ) : (<>
