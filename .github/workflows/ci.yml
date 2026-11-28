@@ -52,12 +52,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL server and extensions
+      - name: Install PostgreSQL 16 server and extensions
         run: |
           sudo apt-get update
-          sudo apt-get install --yes postgresql postgresql-contrib
+          sudo apt-get install --yes postgresql-16 postgresql-contrib-16
 
       - name: Run migration idempotency and database acceptance suite
-        run: |
-          PG_VERSION="$(ls -1 /usr/lib/postgresql | sort -V | tail -n 1)"
-          PGBIN="/usr/lib/postgresql/${PG_VERSION}/bin" npm run test:db
+        env:
+          PGBIN: /usr/lib/postgresql/16/bin
+        run: npm run test:db
