@@ -310,7 +310,7 @@ export async function templateFromPdf(file: Blob): Promise<TemplateDefinition> {
     const vp = page.getViewport({ scale: 1.6 });
     const c = document.createElement('canvas');
     c.width = vp.width; c.height = vp.height;
-    await page.render({ canvasContext: c.getContext('2d')!, viewport: vp }).promise;
+    await page.render({ canvas: c, canvasContext: c.getContext('2d')!, viewport: vp }).promise;
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
     const src = blob ? await toJpeg(blob) : null;
     if (src) pages.push({ evidenceId: `imported-page-${n}`, caption: `Page ${n} of the original PDF`, src });
