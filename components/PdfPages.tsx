@@ -29,7 +29,7 @@ export default function PdfPages({ blob, title }: { blob: Blob; title: string })
           const vp = page.getViewport({ scale: Math.min(2, 1100 / page.getViewport({ scale: 1 }).width) });
           const c = document.createElement('canvas');
           c.width = vp.width; c.height = vp.height;
-          await page.render({ canvas: c, canvasContext: c.getContext('2d')!, viewport: vp }).promise;
+          await page.render({ canvasContext: c.getContext('2d')!, viewport: vp }).promise;
           const b = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/jpeg', 0.85));
           if (!b || stop) break;
           const u = URL.createObjectURL(b);
