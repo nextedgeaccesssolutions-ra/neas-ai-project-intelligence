@@ -20,11 +20,25 @@ export default function RegisterPage() {
     if (!m.ok) return setError(m.error);
     setBusy(true);
     setError(null);
-    const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fullName: n.name, email: m.email, website }) });
-    const j = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) return setError(j.error ?? 'Could not submit the request.');
-    setDone(j.message);
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: n.name, email: m.email, website }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof j.error === 'string' ? j.error : 'Could not submit the request. Please try again.');
+        return;
+      }
+      setDone(typeof j.message === 'string' && j.message.trim()
+        ? j.message
+        : 'If this address can be registered, a verification link will arrive by e-mail.');
+    } catch {
+      setError('The registration service could not be reached. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (done)
