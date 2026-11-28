@@ -285,8 +285,8 @@ export async function templateFromXlsx(file: Blob): Promise<TemplateDefinition> 
 
 /** PDF → template: each page's text becomes a section, and every page is kept as an image so the report shows it exactly as printed. */
 export async function templateFromPdf(file: Blob): Promise<TemplateDefinition> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf');
-  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
   photoCount = 0;
   const sections: TemplateSection[] = [];
@@ -310,7 +310,7 @@ export async function templateFromPdf(file: Blob): Promise<TemplateDefinition> {
     const vp = page.getViewport({ scale: 1.6 });
     const c = document.createElement('canvas');
     c.width = vp.width; c.height = vp.height;
-    await page.render({ canvasContext: c.getContext('2d')!, viewport: vp }).promise;
+    await page.render({ canvas: c, canvasContext: c.getContext('2d')!, viewport: vp }).promise;
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
     const src = blob ? await toJpeg(blob) : null;
     if (src) pages.push({ evidenceId: `imported-page-${n}`, caption: `Page ${n} of the original PDF`, src });
